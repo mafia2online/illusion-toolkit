@@ -409,7 +409,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        Viewport.SaveEdits();
+        // Export reads the saved working copy and must never write on the user's behalf: saving here would
+        // persist an edit they had not committed, and it would still be gone from the scene after a restart.
+        if (Viewport.HasUnsavedEdits)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Export Patch",
+                Icon = DialogIcon.Info,
+                Heading = "Save first",
+                Text = "There are unsaved edits. Save them (Ctrl+S), then export — "
+                       + "exporting does not save on your behalf.",
+            });
+            return;
+        }
 
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
