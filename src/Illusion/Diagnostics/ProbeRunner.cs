@@ -24,6 +24,15 @@ internal static class ProbeRunner
             case "--build-patch":
                 PatchProbes.RunBuildPatch(args);
                 return true;
+            // Named frames of a district's scene: Illusion.exe --list-frames <base.sds> [filter]
+            case "--list-frames":
+                PatchProbes.RunListFrames(args);
+                return true;
+            // Remove world objects and emit the patch that does it:
+            //   Illusion.exe --remove-frames <base.sds> <out.sds.patch> --frame <name|0xhash>...
+            case "--remove-frames":
+                PatchProbes.RunRemoveFrames(args);
+                return true;
             // Report what a .sds.patch does, without applying it.
             case "--dump-patch":
                 PatchProbes.RunDumpPatch(args);

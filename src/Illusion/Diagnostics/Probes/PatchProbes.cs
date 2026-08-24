@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text;
 using Illusion.Formats.Archive;
@@ -123,6 +124,124 @@ internal static class PatchProbes
         foreach (var entry in patch.Entries.Take(16))
         {
             log.AppendLine($"          type {entry.TypeId}, version {entry.Version}, {entry.Data?.Length ?? 0} bytes");
+        }
+
+        Report(log.ToString().TrimEnd());
+    }
+
+
+    /// <summary><c>--list-frames &lt;base.sds&gt; [filter]</c> — named frames in a district's scene.</summary>
+    public static void RunListFrames(string[] args)
+    {
+        if (args.Length < 2 || !File.Exists(args[1]))
+        {
+            Report("usage: --list-frames <base.sds> [filter]");
+            return;
+        }
+
+        SdsArchive archive = SdsArchive.Open(args[1]);
+        var author = new ScenePatchAuthor(archive);
+        var names = author.FrameNames();
+        string? filter = args.Length >= 3 ? args[2] : null;
+
+        var shown = filter is null
+            ? names
+            : names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var log = new StringBuilder();
+        log.AppendLine($"archive : {args[1]}");
+        log.AppendLine($"frames  : {names.Count} named" + (filter is null ? "" : $", {shown.Count} matching '{filter}'"));
+        foreach (string name in shown)
+        {
+            log.AppendLine("  " + name);
+        }
+
+        Report(log.ToString().TrimEnd());
+    }
+
+    /// <summary>
+    /// <c>--remove-frames &lt;base.sds&gt; &lt;out.sds.patch&gt; --frame &lt;name|0xhash&gt;... [--collision-radius &lt;r&gt;]</c>
+    /// </summary>
+    public static void RunRemoveFrames(string[] args)
+    {
+        if (args.Length < 5)
+        {
+            Report("usage: --remove-frames <base.sds> <out.sds.patch> --frame <name|0xhash>... [--collision-radius <r>]");
+            return;
+        }
+
+        string basePath = args[1];
+        string outputPath = args[2];
+
+        if (!File.Exists(basePath))
+        {
+            Report($"base archive not found: {basePath}");
+            return;
+        }
+
+        var selectors = new List<string>();
+        float radius = 5.0f;
+
+        for (int i = 3; i < args.Length; i++)
+        {
+            if (args[i] == "--frame" && i + 1 < args.Length)
+            {
+                selectors.Add(args[++i]);
+            }
+            else if (args[i] == "--collision-radius" && i + 1 < args.Length
+                     && float.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+            {
+                radius = parsed;
+            }
+            else
+            {
+                Report($"unrecognised argument: {args[i]}");
+                return;
+            }
+        }
+
+        if (selectors.Count == 0)
+        {
+            Report("no --frame selectors given");
+            return;
+        }
+
+        var log = new StringBuilder();
+        try
+        {
+            SdsArchive archive = SdsArchive.Open(basePath);
+            var author = new ScenePatchAuthor(archive);
+            RemovalResult result = author.RemoveFrames(selectors, radius);
+
+            log.AppendLine($"base     : {basePath}");
+            log.AppendLine($"selectors: {selectors.Count}, matched {result.MatchedFrames}");
+            log.AppendLine($"frames   : {result.DeletedFrames} removed (children included)");
+            log.AppendLine($"collision: {result.DeletedCollisionInstances} placements removed (radius {radius})");
+            foreach (string missed in result.Unmatched)
+            {
+                log.AppendLine($"  no match: {missed}");
+            }
+
+            SdsPatchFile patch = author.Build();
+            using (var output = File.Create(outputPath))
+            {
+                patch.Save(output);
+            }
+
+            using var written = File.OpenRead(outputPath);
+            SdsPatchFile reloaded = SdsPatchFile.Load(written);
+
+            log.AppendLine($"output   : {outputPath} ({new FileInfo(outputPath).Length} bytes)");
+            log.AppendLine($"verified : {reloaded.SkippedEntryIndices.Count} skipped "
+                           + $"{Format(reloaded.SkippedEntryIndices)}, {reloaded.Entries.Count} carried");
+            foreach (var entry in reloaded.Entries)
+            {
+                log.AppendLine($"           type {entry.TypeId}, {entry.Data?.Length ?? 0} bytes");
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            log.AppendLine($"refused: {ex.Message}");
         }
 
         Report(log.ToString().TrimEnd());
