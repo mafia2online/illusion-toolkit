@@ -180,7 +180,7 @@ internal static class PatchProbes
         }
 
         var selectors = new List<string>();
-        float radius = 5.0f;
+        float radius = 0.0f; // see ScenePatchAuthor.RemoveFrames — proximity pairing is unsound by default
 
         for (int i = 3; i < args.Length; i++)
         {
@@ -295,6 +295,80 @@ internal static class PatchProbes
         foreach (string name in addedNames.Take(64))
         {
             log.AppendLine("  + " + name);
+        }
+
+        Report(log.ToString().TrimEnd());
+    }
+
+
+    /// <summary>
+    /// <c>--frame-collision &lt;base.sds&gt; &lt;frameName&gt;</c> — where a frame sits and which collision
+    /// placements are near it, to check whether proximity is a sound way to pair the two.
+    /// </summary>
+    public static void RunFrameCollision(string[] args)
+    {
+        if (args.Length < 3 || !File.Exists(args[1]))
+        {
+            Report("usage: --frame-collision <base.sds> <frameName>");
+            return;
+        }
+
+        SdsArchive archive = SdsArchive.Open(args[1]);
+        string wanted = args[2];
+
+        var frames = new Illusion.Formats.Frames.FrameResource();
+        using (var source = new MemoryStream(archive.Entries[OrdinalOfType(archive, "FrameResource")].Data ?? []))
+        {
+            frames.ReadFromFile(source);
+        }
+
+        var frame = frames.FrameObjects.Values
+            .OfType<Illusion.Formats.Frames.ObjectTypes.FrameObjectBase>()
+            .FirstOrDefault(f => string.Equals(f.Name.String, wanted, StringComparison.OrdinalIgnoreCase));
+
+        var log = new StringBuilder();
+        log.AppendLine($"archive : {args[1]}");
+
+        if (frame is null)
+        {
+            log.AppendLine($"frame '{wanted}' not found");
+            Report(log.ToString().TrimEnd());
+            return;
+        }
+
+        System.Numerics.Vector3 origin = frame.WorldTransform.Translation;
+        log.AppendLine($"frame   : {frame.Name.String}  hash 0x{frame.Name.Hash:X16}");
+        log.AppendLine($"position: {origin.X:F2}, {origin.Y:F2}, {origin.Z:F2}");
+        log.AppendLine($"children: {frame.Children.Count}");
+
+        int collisionOrdinal = OrdinalOfType(archive, "Collisions");
+        if (collisionOrdinal < 0)
+        {
+            log.AppendLine("archive has no Collisions resource");
+            Report(log.ToString().TrimEnd());
+            return;
+        }
+
+        Illusion.Formats.Collisions.CollisionFile collisions;
+        using (var source = new MemoryStream(archive.Entries[collisionOrdinal].Data ?? []))
+        {
+            collisions = Illusion.Formats.Collisions.CollisionFile.Read(source);
+        }
+
+        int hashMatches = collisions.Instances.Count(i => i.Hash == frame.Name.Hash);
+        log.AppendLine($"collision: {collisions.Instances.Count} placements, {collisions.Meshes.Count} meshes");
+        log.AppendLine($"          {hashMatches} placement(s) whose hash equals the frame name hash");
+
+        var nearest = collisions.Instances
+            .Select(i => new { Instance = i, Distance = System.Numerics.Vector3.Distance(origin, i.Position) })
+            .OrderBy(x => x.Distance)
+            .Take(8)
+            .ToList();
+
+        log.AppendLine("nearest placements:");
+        foreach (var entry in nearest)
+        {
+            log.AppendLine($"          {entry.Distance,8:F2}  hash 0x{entry.Instance.Hash:X16}  group {entry.Instance.Group}");
         }
 
         Report(log.ToString().TrimEnd());

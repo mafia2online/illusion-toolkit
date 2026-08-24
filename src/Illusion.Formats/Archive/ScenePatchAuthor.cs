@@ -106,11 +106,24 @@ public sealed class ScenePatchAuthor
     /// that carries no name.
     /// </summary>
     /// <param name="collisionRadius">
-    /// How far from a removed frame a collision placement is taken to belong to it. Placements are
-    /// matched by hash first; this catches the ones that carry a mesh hash instead of a name hash.
-    /// Zero disables positional matching.
+    /// Radius within which a collision placement is taken to belong to a removed frame. <b>Off by
+    /// default, and it should usually stay off.</b>
+    /// <para>
+    /// There is no reliable pairing between a frame and a collision placement. A placement's hash is
+    /// its mesh hash, not the frame's name hash — measured on sandisland, none of the 412 placements
+    /// matched the name hash of a frame sitting among them. Nor is the relationship one to one: those
+    /// 412 placements cover 3,399 named frames, so collision is authored at roughly block
+    /// granularity. The nearest placement to a removed fence was 10.86 units away, and a radius wide
+    /// enough to catch it would take out the collision of everything around it.
+    /// </para>
+    /// <para>
+    /// A frame that carries its own collision as a child frame loses it automatically when the frame
+    /// goes, because it is part of the subtree. For geometry covered by the district's shared hulls,
+    /// select the placement in the editor and delete it explicitly — collision placements are
+    /// editable objects in their own right, and the export picks the change up.
+    /// </para>
     /// </param>
-    public RemovalResult RemoveFrames(IEnumerable<string> selectors, float collisionRadius = 5.0f)
+    public RemovalResult RemoveFrames(IEnumerable<string> selectors, float collisionRadius = 0.0f)
     {
         ArgumentNullException.ThrowIfNull(selectors);
 

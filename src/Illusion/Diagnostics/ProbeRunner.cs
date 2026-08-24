@@ -33,6 +33,10 @@ internal static class ProbeRunner
             case "--remove-frames":
                 PatchProbes.RunRemoveFrames(args);
                 return true;
+            // Where a frame sits and what collision is near it.
+            case "--frame-collision":
+                PatchProbes.RunFrameCollision(args);
+                return true;
             // Which frames a patch adds or removes, against the archive it targets.
             case "--patch-diff":
                 PatchProbes.RunPatchDiff(args);
