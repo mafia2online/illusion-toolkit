@@ -23,6 +23,27 @@ public static class PatchExporter
     /// <summary>The extension every exported patch carries, matching the game's own convention.</summary>
     public const string PatchExtension = ".sds.patch";
 
+    /// <summary>
+    /// The other season's copy of a district, or null when there is none.
+    /// </summary>
+    /// <remarks>
+    /// Districts ship twice: <c>sandisland.sds</c> for summer and <c>sandisland_z.sds</c> for winter.
+    /// The two hold different geometry at different resource ordinals, so a patch built against one
+    /// is silently inert in a session running the other — the engine never even asks for it.
+    /// </remarks>
+    public static FileInfo? SeasonVariantOf(FileInfo sds)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+
+        string stem = Path.GetFileNameWithoutExtension(sds.Name);
+        string twin = stem.EndsWith("_z", StringComparison.OrdinalIgnoreCase)
+            ? stem[..^2]
+            : stem + "_z";
+
+        var candidate = new FileInfo(Path.Combine(sds.DirectoryName ?? string.Empty, twin + ".sds"));
+        return candidate.Exists ? candidate : null;
+    }
+
     /// <summary>The name a patch for <paramref name="sds"/> should be given.</summary>
     public static string SuggestFileName(FileInfo sds)
     {
@@ -68,6 +89,77 @@ public static class PatchExporter
         }
 
         return new PatchExportResult(sds.FullName, outputPath, result);
+    }
+
+    /// <summary>
+    /// Exports the patch for <paramref name="sds"/> and, when the district ships a season twin, a
+    /// second patch that applies the same removals to it.
+    /// </summary>
+    /// <remarks>
+    /// Only removals carry across: they are expressed by frame name, and names are all but identical
+    /// between the two copies of a district — 3,387 of 3,399 on sandisland, the rest being the
+    /// seasonal geometry itself, which lives in disjoint name ranges. Ordinals and resource bytes are
+    /// not portable, which is exactly why the twin is rebuilt rather than copied.
+    /// </remarks>
+    public static IReadOnlyList<PatchExportResult> ExportWithSeasonVariant(FileInfo sds, string outputPath)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+
+        var exported = new List<PatchExportResult> { Export(sds, outputPath) };
+
+        FileInfo? twin = SeasonVariantOf(sds);
+        if (twin is null)
+        {
+            return exported;
+        }
+
+        // What the edit removed, by name — the only part of a diff that means anything in the twin.
+        SdsArchive original = SdsArchive.Open(sds.FullName);
+        SdsArchive edited = SdsArchive.Pack(MafiaEnvironment.ExtractedDir(sds), GameProfile.MafiaII);
+        var removedNames = ScenePatchAuthor
+            .FrameNamesOf(FrameResourceOf(original))
+            .Except(ScenePatchAuthor.FrameNamesOf(FrameResourceOf(edited)), StringComparer.Ordinal)
+            .ToList();
+
+        if (removedNames.Count == 0)
+        {
+            return exported;
+        }
+
+        var author = new ScenePatchAuthor(SdsArchive.Open(twin.FullName));
+        author.RemoveFrames(removedNames);
+
+        string twinPath = Path.Combine(
+            Path.GetDirectoryName(outputPath) ?? string.Empty,
+            SuggestFileName(twin));
+
+        using (FileStream output = File.Create(twinPath))
+        {
+            author.Build().Save(output);
+        }
+
+        exported.Add(new PatchExportResult(
+            twin.FullName,
+            twinPath,
+            new PatchDiffResult(Changed: 1, Removed: 0, Added: 0)));
+
+        return exported;
+    }
+
+    private static byte[]? FrameResourceOf(SdsArchive archive)
+    {
+        for (int i = 0; i < archive.Entries.Count; i++)
+        {
+            int typeId = archive.Entries[i].TypeId;
+            if (typeId >= 0 && typeId < archive.ResourceTypes.Count &&
+                string.Equals(archive.ResourceTypes[typeId].Name, "FrameResource", StringComparison.Ordinal))
+            {
+                return archive.Entries[i].Data;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

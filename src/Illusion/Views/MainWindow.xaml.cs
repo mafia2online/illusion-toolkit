@@ -431,7 +431,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             if (archives.Count == 1)
             {
-                exported = [PatchExporter.Export(archives[0], dialog.FileName)];
+                exported = PatchExporter.ExportWithSeasonVariant(archives[0], dialog.FileName);
             }
             else
             {

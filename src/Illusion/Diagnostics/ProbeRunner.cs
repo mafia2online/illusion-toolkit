@@ -33,6 +33,10 @@ internal static class ProbeRunner
             case "--remove-frames":
                 PatchProbes.RunRemoveFrames(args);
                 return true;
+            // Which frames a patch adds or removes, against the archive it targets.
+            case "--patch-diff":
+                PatchProbes.RunPatchDiff(args);
+                return true;
             // Report what a .sds.patch does, without applying it.
             case "--dump-patch":
                 PatchProbes.RunDumpPatch(args);

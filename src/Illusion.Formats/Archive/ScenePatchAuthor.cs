@@ -60,6 +60,30 @@ public sealed class ScenePatchAuthor
         }
     }
 
+    /// <summary>Named frames of a serialized FrameResource, without opening an archive around it.</summary>
+    public static IReadOnlyCollection<string> FrameNamesOf(byte[]? frameResource)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (frameResource is null || frameResource.Length == 0)
+        {
+            return names;
+        }
+
+        var frames = new FrameResource();
+        using var source = new MemoryStream(frameResource);
+        frames.ReadFromFile(source);
+
+        foreach (var frame in frames.FrameObjects.Values.OfType<FrameObjectBase>())
+        {
+            if (!string.IsNullOrEmpty(frame.Name.String))
+            {
+                names.Add(frame.Name.String);
+            }
+        }
+
+        return names;
+    }
+
     /// <summary>Every named frame in the scene, for discovery before choosing what to remove.</summary>
     public IReadOnlyList<string> FrameNames()
     {

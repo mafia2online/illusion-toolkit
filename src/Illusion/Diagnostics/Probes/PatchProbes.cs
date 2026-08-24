@@ -247,6 +247,109 @@ internal static class PatchProbes
         Report(log.ToString().TrimEnd());
     }
 
+
+    /// <summary>
+    /// <c>--patch-diff &lt;base.sds&gt; &lt;file.sds.patch&gt;</c> — which frames a patch adds or removes,
+    /// by parsing the FrameResource it carries against the one in the base archive.
+    /// </summary>
+    public static void RunPatchDiff(string[] args)
+    {
+        if (args.Length < 3 || !File.Exists(args[1]) || !File.Exists(args[2]))
+        {
+            Report("usage: --patch-diff <base.sds> <file.sds.patch>");
+            return;
+        }
+
+        SdsArchive archive = SdsArchive.Open(args[1]);
+        using var input = File.OpenRead(args[2]);
+        SdsPatchFile patch = SdsPatchFile.Load(input);
+
+        var log = new StringBuilder();
+        log.AppendLine($"base    : {args[1]}");
+        log.AppendLine($"patch   : {args[2]}");
+        log.AppendLine($"skipped : {Format(patch.SkippedEntryIndices)}");
+
+        var baseNames = FrameNamesOf(archive.Entries[OrdinalOfType(archive, "FrameResource")].Data);
+        int frameTypeId = TypeIdOf(archive, "FrameResource");
+        byte[]? carried = patch.Entries.FirstOrDefault(e => e.TypeId == frameTypeId)?.Data;
+
+        if (carried is null)
+        {
+            log.AppendLine("carries no FrameResource — nothing to compare");
+            Report(log.ToString().TrimEnd());
+            return;
+        }
+
+        var patchedNames = FrameNamesOf(carried);
+        var removed = baseNames.Except(patchedNames, StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        var addedNames = patchedNames.Except(baseNames, StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+        log.AppendLine($"frames  : {baseNames.Count} base, {patchedNames.Count} patched");
+        log.AppendLine($"removed : {removed.Count}");
+        foreach (string name in removed.Take(64))
+        {
+            log.AppendLine("  - " + name);
+        }
+
+        log.AppendLine($"added   : {addedNames.Count}");
+        foreach (string name in addedNames.Take(64))
+        {
+            log.AppendLine("  + " + name);
+        }
+
+        Report(log.ToString().TrimEnd());
+    }
+
+    private static HashSet<string> FrameNamesOf(byte[]? resource)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (resource is null)
+        {
+            return names;
+        }
+
+        var frames = new Illusion.Formats.Frames.FrameResource();
+        using var source = new MemoryStream(resource);
+        frames.ReadFromFile(source);
+
+        foreach (var frame in frames.FrameObjects.Values.OfType<Illusion.Formats.Frames.ObjectTypes.FrameObjectBase>())
+        {
+            if (!string.IsNullOrEmpty(frame.Name.String))
+            {
+                names.Add(frame.Name.String);
+            }
+        }
+
+        return names;
+    }
+
+    private static int TypeIdOf(SdsArchive archive, string typeName)
+    {
+        for (int i = 0; i < archive.ResourceTypes.Count; i++)
+        {
+            if (string.Equals(archive.ResourceTypes[i].Name, typeName, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int OrdinalOfType(SdsArchive archive, string typeName)
+    {
+        int typeId = TypeIdOf(archive, typeName);
+        for (int i = 0; i < archive.Entries.Count; i++)
+        {
+            if (archive.Entries[i].TypeId == typeId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private static string Format(List<int> ordinals) =>
         ordinals.Count == 0 ? "" : "[" + string.Join(", ", ordinals.Take(24)) + (ordinals.Count > 24 ? ", ..." : "") + "]";
 
