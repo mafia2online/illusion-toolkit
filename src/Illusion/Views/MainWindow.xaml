@@ -29,6 +29,7 @@
                 <MenuItem x:Name="SaveMenuItem" Header="Save" Command="{x:Static v:EditorCommands.Save}" />
                 <MenuItem x:Name="ImportMenuItem" Header="Import…" Command="{x:Static v:EditorCommands.Import}" />
                 <MenuItem Header="Build SDS…" Click="Build_Click" />
+                <MenuItem Header="Export Patch…" Click="ExportPatch_Click" />
                 <MenuItem Header="Restore Backup…" Click="RestoreBackup_Click" />
                 <Separator />
                 <!-- The other half of the toolkit: everything in the game that is not a district. Its own
