@@ -19,6 +19,15 @@ internal static class ProbeRunner
 
         switch (args[0])
         {
+            // Author a .sds.patch headlessly:
+            //   Illusion.exe --build-patch <base.sds> <out.sds.patch> [--delete-type <Name>]... [--delete <ordinal>]...
+            case "--build-patch":
+                PatchProbes.RunBuildPatch(args);
+                return true;
+            // Report what a .sds.patch does, without applying it.
+            case "--dump-patch":
+                PatchProbes.RunDumpPatch(args);
+                return true;
             // SDS read chain: Illusion.exe --probe-sds [path.sds]
             case "--probe-sds":
                 ArchiveProbes.RunSdsProbe(args.Length >= 2 ? args[1] : null);
