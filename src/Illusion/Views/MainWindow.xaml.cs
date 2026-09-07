@@ -393,6 +393,23 @@ public partial class MainWindow : Window
     // Export writes .sds.patch files and never touches the game's archives: the edited archive is packed in
     // memory from the extracted folder and diffed against the original, which is opened read-only. The build
     // list is left alone, so a user can still Build afterwards if they want the archives replaced too.
+    private void ExportM2o_Click(object sender, RoutedEventArgs e)
+    {
+        CommitFocusedField();
+        if (Viewport.PendingBuildArchives().Count == 0)
+        {
+            AppDialog.Show(this, new DialogOptions { Title = "Export for M2O", Icon = DialogIcon.Info,
+                Heading = "No map edits to export", Text = "Move, add or delete an object, then export. Use Save to keep edits in your working copy; Build SDS writes them into the game archive and clears the export list." });
+            return;
+        }
+
+        new M2oExportWindow(Viewport.PendingBuildArchives(), Viewport.HasUnsavedEdits, () =>
+        {
+            Viewport.SaveEdits();
+            if (Viewport.HasUnsavedEdits) throw new InvalidOperationException("Some edits could not be saved. Resolve the save notice before exporting.");
+        }) { Owner = this }.ShowDialog();
+    }
+
     private void ExportPatch_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();

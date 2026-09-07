@@ -19,6 +19,9 @@ internal static class ProbeRunner
 
         switch (args[0])
         {
+            case "--probe-m2o-export":
+                M2oExportProbes.Run();
+                return true;
             // Author a .sds.patch headlessly:
             //   Illusion.exe --build-patch <base.sds> <out.sds.patch> [--delete-type <Name>]... [--delete <ordinal>]...
             case "--build-patch":

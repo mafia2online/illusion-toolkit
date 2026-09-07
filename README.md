@@ -183,6 +183,26 @@ Everything the MCP server can do to a scene, the menu can too:
   `StreamMap*.bin`, previewed, with a backup).
 - **Clone car...**, **Replace a car...**, **Export car for multiplayer...** in the resource editor.
 
+## Exporting maps for M2O
+
+Use **File → Export for M2O…** after editing the map. The window lists the archives included,
+offers **Save and export** when edits are pending, and reports progress while generating native patches.
+Choose a new output folder; existing exports are preserved. A failed export leaves no partial output folder.
+
+Copy the exported folder's contents into your server resource, for example `client/maps/`, and include
+`client/maps/**` in `package.json` → `mafiahub.files`. Keep `map_patches.json` beside the exported `sds/`
+folder: its paths reference those patch files. M2O sends them through the existing packed resource download.
+Reconnect clients after changing the map resource.
+
+Only the listed edited archives are exported. Edit summer and winter separately to include both;
+their resource ordinals differ. Check object removals and collision edits together in-game.
+Use **Save** for working copies before export. **Build SDS** modifies the local game archives and clears
+the pending export list; it is not required for M2O export. Patches must target the same base archives as clients.
+
+The isolated `Illusion.exe --probe-m2o-export` check exercises native patch output, manifest paths,
+season and filename collisions, overwrite protection and failure cleanup. It writes its report and a window
+render to `%TEMP%/illusion_m2o_export.txt` and `%TEMP%/illusion_m2o_export.png`.
+
 ## Blender bridge
 
 <img width="2592" height="1426" alt="Blender bridge" src="https://github.com/user-attachments/assets/6a9f2b01-964a-4fb9-9f8c-f6c715cb9ff0" />
