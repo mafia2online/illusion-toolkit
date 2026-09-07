@@ -60,6 +60,67 @@ internal static class M2oExportProbes
                 Check(patch.Entries.Count == 1 && patch.Entries[0].Data!.SequenceEqual(new byte[] { 4, 3, 2, 1 }), "manifest resolves a readable native patch with edited bytes");
             }
             Check(original.SequenceEqual(File.ReadAllBytes(summer.FullName)), "original game archive remains unchanged");
+            Refuses(() => PatchExporter.Export(summer, summer.FullName), "GUI exporter refuses to overwrite its base archive");
+            PatchProbes.RunBuildPatch(["--build-patch", summer.FullName, summer.FullName, "--delete", "0"]);
+            Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("overwrite", StringComparison.Ordinal), "build command reports archive overwrite refusal");
+            PatchProbes.RunRemoveFrames(["--remove-frames", summer.FullName, Path.Combine(summer.DirectoryName!, ".", summer.Name), "--frame", "*"]);
+            Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("overwrite", StringComparison.Ordinal), "removal command normalizes output before overwrite check");
+            Check(original.SequenceEqual(File.ReadAllBytes(summer.FullName)), "refused commands preserve archive bytes");
+            PatchProbes.RunPatchDiff(["--patch-diff", summer.FullName, results[0].PatchPath]);
+            Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("comparison is unavailable", StringComparison.Ordinal), "non-scene archive comparison reports missing frames");
+            PatchProbes.RunFrameCollision(["--frame-collision", summer.FullName, "example"]);
+            Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("no FrameResource", StringComparison.Ordinal), "non-scene collision command reports missing frames");
+
+            void RejectData(Action read, string name)
+            {
+                bool rejected = false;
+                try { read(); }
+                catch (InvalidDataException) { rejected = true; }
+                Check(rejected, name);
+            }
+            foreach (uint size in new uint[] { 1, 29, uint.MaxValue })
+            {
+                byte[] payload = new byte[30];
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), size);
+                using var invalidPatch = new MemoryStream();
+                using (var writer = new BinaryWriter(invalidPatch, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    writer.Write(SdsPatchFile.Signature);
+                    writer.Write(1u);
+                    writer.Write(SdsPatchFile.Marker);
+                    writer.Write(0u);
+                    writer.Write(0u);
+                    writer.Write(1u);
+                }
+                SdsBlockStream.Write(invalidPatch, payload);
+                invalidPatch.Position = 0;
+                RejectData(() => SdsPatchFile.Load(invalidPatch), $"invalid resource length {size} rejected before allocation");
+            }
+            foreach (uint size in new uint[] { 1, 31, uint.MaxValue })
+            {
+                using var invalidBlock = new MemoryStream();
+                using (var writer = new BinaryWriter(invalidBlock, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    writer.Write(SdsBlockStream.Signature);
+                    writer.Write((uint)SdsBlockStream.ChunkSize);
+                    writer.Write((byte)4);
+                    writer.Write(size);
+                    writer.Write((byte)1);
+                    writer.Write(new byte[32]);
+                }
+                invalidBlock.Position = 0;
+                RejectData(() => SdsBlockStream.Read(invalidBlock), $"invalid compressed block length {size} rejected before allocation");
+            }
+            var frames = new Illusion.Formats.Frames.FrameResource();
+            var unnamed = new Illusion.Formats.Frames.ObjectTypes.FrameObjectBase(frames);
+            unnamed.Name.String = null!;
+            var named = new Illusion.Formats.Frames.ObjectTypes.FrameObjectBase(frames);
+            named.Name.String = "ExampleFrame";
+            frames.FrameObjects.Add(1, unnamed);
+            frames.FrameObjects.Add(2, named);
+            var match = typeof(ScenePatchAuthor).GetMethod("Match", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            var matches = (IEnumerable<Illusion.Formats.Frames.ObjectTypes.FrameObjectBase>)match.Invoke(null, [frames, "example*"])!;
+            Check(matches.Single() == named, "wildcard matching skips null names and preserves case-insensitive matching");
             Refuses(() => M2oMapExporter.Export([summer], destination), "existing export protected");
             Refuses(() => M2oMapExporter.Export([summer, summer], Path.Combine(root, "duplicate")), "duplicate target refused");
             Refuses(() => M2oMapExporter.Export([new FileInfo(Path.Combine(root, "outside.sds"))], Path.Combine(root, "outside")), "archive outside pc/sds refused");

@@ -224,6 +224,8 @@ public sealed class SdsPatchFile
             };
 
             var size = source.ReadUInt32(bigEndian: false);
+            if (size < ResourceHeaderSize || size - 8 > source.Length - source.Position)
+                throw new InvalidDataException($"Invalid SDS patch resource size: {size}.");
             entry.Version = source.ReadUInt16(bigEndian: false);
             entry.SlotRamRequired = source.ReadUInt32(bigEndian: false);
             entry.SlotVramRequired = source.ReadUInt32(bigEndian: false);

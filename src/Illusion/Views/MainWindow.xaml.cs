@@ -446,7 +446,8 @@ public partial class MainWindow : Window
             Title = archives.Count == 1 ? "Export patch" : $"Export {archives.Count} patches — choose a folder and name",
             Filter = "Mafia II SDS patch (*.sds.patch)|*.sds.patch|All files (*.*)|*.*",
             FileName = PatchExporter.SuggestFileName(archives[0]),
-            AddExtension = false,
+            AddExtension = true,
+            DefaultExt = ".sds.patch",
             OverwritePrompt = true,
         };
 

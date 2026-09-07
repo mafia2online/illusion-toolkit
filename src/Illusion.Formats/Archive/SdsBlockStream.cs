@@ -99,13 +99,19 @@ public static class SdsBlockStream
         {
             var blockLength = input.ReadUInt32(bigEndian: false);
             var compressed = input.ReadByte();
+            if (compressed is not (0 or 1)) throw new InvalidDataException("Invalid UEzl compression flag.");
             if (blockLength == 0)
             {
                 break;
             }
 
+            if (blockLength > int.MaxValue || (input.CanSeek && blockLength > input.Length - input.Position))
+                throw new InvalidDataException($"Invalid UEzl block length: {blockLength}.");
+
             if (compressed == 1)
             {
+                if (blockLength < CompressedChunkHeaderSize)
+                    throw new InvalidDataException($"UEzl compressed block is smaller than its header: {blockLength}.");
                 var header = new byte[CompressedChunkHeaderSize];
                 input.ReadExactly(header);
 

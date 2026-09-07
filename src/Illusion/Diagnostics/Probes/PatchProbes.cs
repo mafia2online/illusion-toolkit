@@ -24,6 +24,7 @@ internal static class PatchProbes
 
         string basePath = args[1];
         string outputPath = args[2];
+        if (!CheckOutputPath(basePath, outputPath)) return;
 
         if (!File.Exists(basePath))
         {
@@ -173,6 +174,7 @@ internal static class PatchProbes
         string basePath = args[1];
         string outputPath = args[2];
 
+        if (!CheckOutputPath(basePath, outputPath)) return;
         if (!File.Exists(basePath))
         {
             Report($"base archive not found: {basePath}");
@@ -269,7 +271,13 @@ internal static class PatchProbes
         log.AppendLine($"patch   : {args[2]}");
         log.AppendLine($"skipped : {Format(patch.SkippedEntryIndices)}");
 
-        var baseNames = FrameNamesOf(archive.Entries[OrdinalOfType(archive, "FrameResource")].Data);
+        int frameOrdinal = OrdinalOfType(archive, "FrameResource");
+        if (frameOrdinal < 0)
+        {
+            Report("The base archive has no FrameResource; frame comparison is unavailable.");
+            return;
+        }
+        var baseNames = FrameNamesOf(archive.Entries[frameOrdinal].Data);
         int frameTypeId = TypeIdOf(archive, "FrameResource");
         byte[]? carried = patch.Entries.FirstOrDefault(e => e.TypeId == frameTypeId)?.Data;
 
@@ -315,9 +323,15 @@ internal static class PatchProbes
 
         SdsArchive archive = SdsArchive.Open(args[1]);
         string wanted = args[2];
+        int frameOrdinal = OrdinalOfType(archive, "FrameResource");
+        if (frameOrdinal < 0)
+        {
+            Report("The archive has no FrameResource.");
+            return;
+        }
 
         var frames = new Illusion.Formats.Frames.FrameResource();
-        using (var source = new MemoryStream(archive.Entries[OrdinalOfType(archive, "FrameResource")].Data ?? []))
+        using (var source = new MemoryStream(archive.Entries[frameOrdinal].Data ?? []))
         {
             frames.ReadFromFile(source);
         }
@@ -426,6 +440,13 @@ internal static class PatchProbes
 
     private static string Format(List<int> ordinals) =>
         ordinals.Count == 0 ? "" : "[" + string.Join(", ", ordinals.Take(24)) + (ordinals.Count > 24 ? ", ..." : "") + "]";
+
+    private static bool CheckOutputPath(string basePath, string outputPath)
+    {
+        if (!string.Equals(Path.GetFullPath(basePath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase)) return true;
+        Report("Refused: the output patch would overwrite the base archive.");
+        return false;
+    }
 
     private static void Report(string text)
     {

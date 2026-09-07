@@ -56,6 +56,8 @@ public static class PatchExporter
         ArgumentNullException.ThrowIfNull(sds);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
+        if (string.Equals(sds.FullName, Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The output patch cannot overwrite its base archive.");
         string extracted = MafiaEnvironment.ExtractedDir(sds);
         if (!File.Exists(Path.Combine(extracted, "SDSContent.xml")))
         {

@@ -235,7 +235,7 @@ public sealed class ScenePatchAuthor
         if (selector.EndsWith('*'))
         {
             var prefix = selector[..^1];
-            return all.Where(frame => frame.Name.String.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            return all.Where(frame => frame.Name.String?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true);
         }
 
         return all.Where(frame => string.Equals(frame.Name.String, selector, StringComparison.OrdinalIgnoreCase));
