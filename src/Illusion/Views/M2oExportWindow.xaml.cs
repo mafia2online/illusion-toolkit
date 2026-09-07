@@ -47,10 +47,17 @@ public partial class M2oExportWindow : Window
             string destination = Path.GetFullPath(FolderBox.Text.Trim());
             if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Choose a new folder name; existing exports are kept intact.");
             _save();
+            SaveText.Text = "Working copies saved.";
+            ExportButton.Content = "Export map";
             var progress = new Progress<string>(message => StatusText.Text = message);
             IReadOnlyList<PatchExportResult> results = await Task.Run(() => M2oMapExporter.Export(_archives, destination, progress));
+            if (results.Count == 0)
+            {
+                StatusText.Text = "The working copies match the original archives. No patches or export folder were created.";
+                return;
+            }
             _exportedFolder = destination;
-            StatusText.Text = $"Exported {results.Count} patch(es) and map_patches.json.\n\nCopy this folder into your server resource (for example client/maps). Include client/maps/** in package.json → mafiahub.files. Reconnect clients after changing a map.\n\nCounts below are archive resources, not scene objects:\n" +
+            StatusText.Text = $"Exported {results.Count} patch(es) and map_patches.json; skipped {_archives.Count - results.Count} unchanged archive(s).\n\nCopy the folder contents into client/maps in your resource. Include client/maps/** in package.json → mafiahub.files. Reconnect clients after changing a map.\n\nArchive resource counts:\n" +
                 string.Join("\n", results.Select(r => $"{Path.GetFileName(r.Archive)}: {r.Result.Changed} changed, {r.Result.Removed} removed, {r.Result.Added} added"));
             OpenButton.Visibility = Visibility.Visible;
             CloseButton.Content = "Done";
@@ -63,7 +70,8 @@ public partial class M2oExportWindow : Window
         finally
         {
             _busy = false;
-            ExportButton.IsEnabled = BrowseButton.IsEnabled = FolderBox.IsEnabled = CloseButton.IsEnabled = true;
+            ExportButton.IsEnabled = BrowseButton.IsEnabled = FolderBox.IsEnabled = _exportedFolder is null;
+            CloseButton.IsEnabled = true;
             ProgressBar.Visibility = Visibility.Collapsed;
         }
     }

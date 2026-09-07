@@ -9,15 +9,7 @@ namespace Illusion.Assets.Sds;
 /// <param name="Result">What the diff found.</param>
 public readonly record struct PatchExportResult(string Archive, string PatchPath, PatchDiffResult Result);
 
-/// <summary>
-/// Exports this session's edits as <c>.sds.patch</c> files instead of repacking the game's archives.
-/// </summary>
-/// <remarks>
-/// The game's <c>.sds</c> files are opened read-only and never written, moved or backed up — the
-/// edited archive is packed in memory from the extracted folder and diffed against the original.
-/// This is the difference between exporting and <see cref="SdsWriter.PackSds(System.IO.FileInfo, bool)"/>,
-/// which replaces the archive in place.
-/// </remarks>
+/// <summary>Diffs saved working copies against read-only game archives and exports native patches.</summary>
 public static class PatchExporter
 {
     /// <summary>The extension every exported patch carries, matching the game's own convention.</summary>
@@ -26,11 +18,6 @@ public static class PatchExporter
     /// <summary>
     /// The other season's copy of a district, or null when there is none.
     /// </summary>
-    /// <remarks>
-    /// Districts ship twice: <c>sandisland.sds</c> for summer and <c>sandisland_z.sds</c> for winter.
-    /// The two hold different geometry at different resource ordinals, so a patch built against one
-    /// is silently inert in a session running the other — the engine never even asks for it.
-    /// </remarks>
     public static FileInfo? SeasonVariantOf(FileInfo sds)
     {
         ArgumentNullException.ThrowIfNull(sds);
@@ -58,6 +45,13 @@ public static class PatchExporter
     /// <exception cref="FileNotFoundException">The archive was never extracted, so there is nothing to diff.</exception>
     /// <exception cref="InvalidOperationException">Nothing changed, so there is no patch to write.</exception>
     public static PatchExportResult Export(FileInfo sds, string outputPath)
+        => TryExport(sds, outputPath) ?? throw new InvalidOperationException($"{sds.Name} is unchanged; no patch is needed.");
+
+    /// <summary>Exports a changed archive, or returns null without writing a file when unchanged.</summary>
+    public static PatchExportResult? TryExport(FileInfo sds, string outputPath)
+        => TryExport(sds, outputPath, out _, out _);
+
+    private static PatchExportResult? TryExport(FileInfo sds, string outputPath, out SdsArchive original, out SdsArchive edited)
     {
         ArgumentNullException.ThrowIfNull(sds);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -70,12 +64,11 @@ public static class PatchExporter
                 Path.Combine(extracted, "SDSContent.xml"));
         }
 
-        // The edited archive is built in memory. Nothing is written next to the game file, and the
-        // original is only ever read.
-        SdsArchive edited = SdsArchive.Pack(extracted, GameProfile.MafiaII);
-        SdsArchive original = SdsArchive.Open(sds.FullName);
+        edited = SdsArchive.Pack(extracted, GameProfile.MafiaII);
+        original = SdsArchive.Open(sds.FullName);
 
-        (SdsPatchFile patch, PatchDiffResult result) = SdsPatchDiff.Between(original, edited);
+        if (SdsPatchDiff.TryBetween(original, edited) is not { } diff) return null;
+        (SdsPatchFile patch, PatchDiffResult result) = diff;
 
         string? directory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(directory))
@@ -96,27 +89,25 @@ public static class PatchExporter
     /// second patch that applies the same removals to it.
     /// </summary>
     /// <remarks>
-    /// Only removals carry across: they are expressed by frame name, and names are all but identical
-    /// between the two copies of a district — 3,387 of 3,399 on sandisland, the rest being the
-    /// seasonal geometry itself, which lives in disjoint name ranges. Ordinals and resource bytes are
-    /// not portable, which is exactly why the twin is rebuilt rather than copied.
+    /// Only matching frame removals carry across; resource ordinals and other edits are season-specific.
     /// </remarks>
     public static IReadOnlyList<PatchExportResult> ExportWithSeasonVariant(FileInfo sds, string outputPath)
     {
         ArgumentNullException.ThrowIfNull(sds);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        var exported = new List<PatchExportResult> { Export(sds, outputPath) };
-
         FileInfo? twin = SeasonVariantOf(sds);
+        string? twinPath = twin is null ? null : Path.Combine(Path.GetDirectoryName(outputPath) ?? string.Empty, SuggestFileName(twin));
+        if (twinPath is not null && string.Equals(Path.GetFullPath(outputPath), Path.GetFullPath(twinPath), StringComparison.OrdinalIgnoreCase))
+            throw new IOException("The chosen filename conflicts with the seasonal patch filename.");
+        PatchExportResult result = TryExport(sds, outputPath, out SdsArchive original, out SdsArchive edited)
+            ?? throw new InvalidOperationException($"{sds.Name} is unchanged; no patch is needed.");
+        var exported = new List<PatchExportResult> { result };
         if (twin is null)
         {
             return exported;
         }
 
-        // What the edit removed, by name — the only part of a diff that means anything in the twin.
-        SdsArchive original = SdsArchive.Open(sds.FullName);
-        SdsArchive edited = SdsArchive.Pack(MafiaEnvironment.ExtractedDir(sds), GameProfile.MafiaII);
         var removedNames = ScenePatchAuthor
             .FrameNamesOf(FrameResourceOf(original))
             .Except(ScenePatchAuthor.FrameNamesOf(FrameResourceOf(edited)), StringComparer.Ordinal)
@@ -128,21 +119,19 @@ public static class PatchExporter
         }
 
         var author = new ScenePatchAuthor(SdsArchive.Open(twin.FullName));
-        author.RemoveFrames(removedNames);
+        RemovalResult removal = author.RemoveFrames(removedNames);
+        if (removal.DeletedFrames == 0 && removal.DeletedCollisionInstances == 0) return exported;
 
-        string twinPath = Path.Combine(
-            Path.GetDirectoryName(outputPath) ?? string.Empty,
-            SuggestFileName(twin));
-
-        using (FileStream output = File.Create(twinPath))
+        SdsPatchFile twinPatch = author.Build();
+        using (FileStream output = File.Create(twinPath!))
         {
-            author.Build().Save(output);
+            twinPatch.Save(output);
         }
 
         exported.Add(new PatchExportResult(
             twin.FullName,
-            twinPath,
-            new PatchDiffResult(Changed: 1, Removed: 0, Added: 0)));
+            twinPath!,
+            new PatchDiffResult(Changed: twinPatch.Entries.Count, Removed: 0, Added: 0)));
 
         return exported;
     }
@@ -171,16 +160,15 @@ public static class PatchExporter
         ArgumentNullException.ThrowIfNull(archives);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetFolder);
 
+        FileInfo[] sources = archives.ToArray();
+        if (sources.Select(SuggestFileName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != sources.Length)
+            throw new IOException("Several archives would export to the same filename. Export them separately.");
         var exported = new List<PatchExportResult>();
-        foreach (FileInfo sds in archives)
+        foreach (FileInfo sds in sources)
         {
-            try
+            if (TryExport(sds, Path.Combine(targetFolder, SuggestFileName(sds))) is { } result)
             {
-                exported.Add(Export(sds, Path.Combine(targetFolder, SuggestFileName(sds))));
-            }
-            catch (InvalidOperationException)
-            {
-                // Identical to the original — nothing to ship for this one.
+                exported.Add(result);
             }
         }
 

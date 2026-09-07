@@ -34,12 +34,14 @@ public static class M2oMapExporter
             {
                 progress?.Report($"Exporting {i + 1} of {archives.Count}: {archives[i].Name}");
                 string patch = targets[i].TrimStart('/') + ".patch";
-                PatchExportResult result;
-                try { result = PatchExporter.Export(archives[i], Path.Combine(stage, patch)); }
+                PatchExportResult? exported;
+                try { exported = PatchExporter.TryExport(archives[i], Path.Combine(stage, patch)); }
                 catch (Exception ex) { throw new InvalidOperationException($"Could not export {archives[i].Name}: {ex.Message}", ex); }
+                if (exported is not { } result) continue;
                 results.Add(result with { PatchPath = Path.Combine(fullDestination, patch) });
                 entries.Add(new { sds = targets[i], patch });
             }
+            if (results.Count == 0) return results;
             File.WriteAllText(Path.Combine(stage, "map_patches.json"), JsonSerializer.Serialize(new { patches = entries }, new JsonSerializerOptions { WriteIndented = true }));
             Directory.Move(stage, fullDestination);
             return results;

@@ -66,6 +66,19 @@ internal static class M2oExportProbes
             string failed = Path.Combine(root, "failed");
             Refuses(() => M2oMapExporter.Export([summer, new FileInfo(Path.Combine(pc, "sds", "missing.sds"))], failed), "second archive failure reported");
             Check(!Directory.Exists(failed) && Directory.GetDirectories(root, "*.tmp-*").Length == 0, "failed export publishes nothing and removes staging");
+            FileInfo unchanged = CreateArchive("city/unchanged.sds");
+            SdsArchive.Open(unchanged.FullName).Extract(MafiaEnvironment.ExtractedDir(unchanged));
+            string mixed = Path.Combine(root, "mixed");
+            Check(M2oMapExporter.Export([unchanged, summer], mixed).Count == 1, "undone edits do not block changed archives");
+            using (var mixedManifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(mixed, "map_patches.json"))))
+                Check(mixedManifest.RootElement.GetProperty("patches").GetArrayLength() == 1, "unchanged archives omitted from manifest");
+            string empty = Path.Combine(root, "empty");
+            Check(M2oMapExporter.Export([unchanged], empty).Count == 0 && !Directory.Exists(empty), "unchanged export creates no empty map");
+            Refuses(() => PatchExporter.ExportAll([summer, sameName], Path.Combine(root, "raw")), "raw batch refuses filename collisions");
+            Refuses(() => PatchExporter.ExportWithSeasonVariant(summer, Path.Combine(root, "district_z.sds.patch")), "season filename collision refused before writing");
+            Check(!File.Exists(Path.Combine(root, "district_z.sds.patch")), "season collision leaves destination untouched");
+            Check(PatchExporter.ExportAll([unchanged, summer], Path.Combine(root, "raw-mixed")).Count == 1, "raw batch skips unchanged archives");
+            Refuses(() => PatchExporter.ExportAll([new FileInfo(Path.Combine(pc, "sds", "missing.sds"))], Path.Combine(root, "raw-failed")), "raw batch propagates missing input errors");
 
 #pragma warning disable WPF0001
             Application.Current.ThemeMode = ThemeMode.Dark;

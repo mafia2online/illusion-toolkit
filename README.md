@@ -188,6 +188,7 @@ Everything the MCP server can do to a scene, the menu can too:
 Use **File → Export for M2O…** after editing the map. The window lists the archives included,
 offers **Save and export** when edits are pending, and reports progress while generating native patches.
 Choose a new output folder; existing exports are preserved. A failed export leaves no partial output folder.
+Archives whose edits were undone are skipped. If every archive is unchanged, no export folder is created.
 
 Copy the exported folder's contents into your server resource, for example `client/maps/`, and include
 `client/maps/**` in `package.json` → `mafiahub.files`. Keep `map_patches.json` beside the exported `sds/`

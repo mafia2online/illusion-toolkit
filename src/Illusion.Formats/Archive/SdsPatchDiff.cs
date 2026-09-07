@@ -31,6 +31,10 @@ public static class SdsPatchDiff
     /// <returns>The patch, and what went into it.</returns>
     /// <exception cref="InvalidOperationException">The archives are identical — there is no patch to write.</exception>
     public static (SdsPatchFile Patch, PatchDiffResult Result) Between(SdsArchive baseArchive, SdsArchive edited)
+        => TryBetween(baseArchive, edited) ?? throw new InvalidOperationException("The archives are identical; no patch is needed.");
+
+    /// <summary>Returns null when the archives are identical; invalid archive data still throws.</summary>
+    public static (SdsPatchFile Patch, PatchDiffResult Result)? TryBetween(SdsArchive baseArchive, SdsArchive edited)
     {
         ArgumentNullException.ThrowIfNull(baseArchive);
         ArgumentNullException.ThrowIfNull(edited);
@@ -118,8 +122,7 @@ public static class SdsPatchDiff
         var result = new PatchDiffResult(changed, removed, added);
         if (!result.HasChanges)
         {
-            throw new InvalidOperationException(
-                "The archives are identical — write no patch rather than an empty one, which crashes the engine.");
+            return null;
         }
 
         patch.Validate();
