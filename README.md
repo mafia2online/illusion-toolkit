@@ -1,11 +1,11 @@
 <div align="center">
-    <a href="https://github.com/hurfy/illusion-toolkit"><img src="https://github.com/user-attachments/assets/d3a4d421-6ea3-4154-9c3a-58ca904747b8"></a>
+    <a href="https://github.com/mafia2online/illusion-toolkit"><img src="https://github.com/user-attachments/assets/e29eacdd-79c3-48ac-b5ba-816813279b50"></a>
 </div>
 
 <div align="center">
-    <img src="https://img.shields.io/github/issues/hurfy/illusion-toolkit?style=for-the-badge" alt="open issues" />
+    <img src="https://img.shields.io/github/issues/mafia2online/illusion-toolkit?style=for-the-badge" alt="open issues" />
     <img src="https://img.shields.io/badge/version-0.4.0-blue?style=for-the-badge" alt="version" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/hurfy/illusion-toolkit?style=for-the-badge" alt="license" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/mafia2online/illusion-toolkit?style=for-the-badge" alt="license" /></a>
 </div>
 
 <br />
@@ -17,8 +17,8 @@
 <div align="center">
   <sub>
     Built with love 
-    &bull; Brought to you by <a href="https://github.com/hurfy">@hurfy</a>
-    and other <a href="https://github.com/hurfy/illusion-toolkit/graphs/contributors">contributors</a>
+    &bull; Brought to you by <a href="https://github.com/mafia2online">@mafia2online</a>
+    and other <a href="https://github.com/mafia2online/illusion-toolkit/graphs/contributors">contributors</a>
   </sub>
 </div>
 
@@ -41,7 +41,7 @@ The map editor currently supports visualizing district streaming zones, collisio
 
 ## Download
 
-Grab the latest archive from [Releases](https://github.com/hurfy/illusion-toolkit/releases), unpack
+Grab the latest archive from [Releases](https://github.com/mafia2online/illusion-toolkit/releases), unpack
 it anywhere and run `Illusion.exe`. It carries no runtime of its own, so the machine needs the
 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) - Windows offers
 to fetch it on first launch if it is missing - and the VC++ redistributable listed above.
@@ -54,7 +54,7 @@ build. Settings -> Updates has a check button and the switch that turns the star
 ## Building it yourself
 
 ```powershell
-git clone https://github.com/hurfy/illusion-toolkit
+git clone https://github.com/mafia2online/illusion-toolkit
 cd illusion-toolkit
 dotnet build Illusion.slnx
 dotnet run --project src/Illusion
