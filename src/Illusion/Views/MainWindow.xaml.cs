@@ -380,6 +380,131 @@ public partial class MainWindow : Window
         ShowBuildResult(report);
     }
 
+    // Export writes .sds.patch files and never touches the game's archives: the edited archive is packed in
+    // memory from the extracted folder and diffed against the original, which is opened read-only. The build
+    // list is left alone, so a user can still Build afterwards if they want the archives replaced too.
+    private void ExportM2o_Click(object sender, RoutedEventArgs e)
+    {
+        CommitFocusedField();
+        if (Viewport.PendingBuildArchives().Count == 0)
+        {
+            AppDialog.Show(this, new DialogOptions { Title = "Export for M2O", Icon = DialogIcon.Info,
+                Heading = "No map edits to export", Text = "Move, add or delete an object, then export. Use Save to keep edits in your working copy; Build SDS writes them into the game archive and clears the export list." });
+            return;
+        }
+
+        new M2oExportWindow(Viewport.PendingBuildArchives(), Viewport.HasUnsavedEdits, () =>
+        {
+            Viewport.SaveEdits();
+            if (Viewport.HasUnsavedEdits) throw new InvalidOperationException("Some edits could not be saved. Resolve the save notice before exporting.");
+        }) { Owner = this }.ShowDialog();
+    }
+
+    private void ExportPatch_Click(object sender, RoutedEventArgs e)
+    {
+        CommitFocusedField();
+
+        IReadOnlyList<FileInfo> archives = Viewport.PendingBuildArchives();
+        if (archives.Count == 0)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Export Patch",
+                Icon = DialogIcon.Info,
+                Text = "No edits to export — move or delete an object first.",
+            });
+            return;
+        }
+
+        // Export reads the saved working copy and must never write on the user's behalf: saving here would
+        // persist an edit they had not committed, and it would still be gone from the scene after a restart.
+        if (Viewport.HasUnsavedEdits)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Export Patch",
+                Icon = DialogIcon.Info,
+                Heading = "Save first",
+                Text = "There are unsaved edits. Save them (Ctrl+S), then export — "
+                       + "exporting does not save on your behalf.",
+            });
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = archives.Count == 1 ? "Export patch" : $"Export {archives.Count} patches — choose a folder and name",
+            Filter = "Mafia II SDS patch (*.sds.patch)|*.sds.patch|All files (*.*)|*.*",
+            FileName = PatchExporter.SuggestFileName(archives[0]),
+            AddExtension = true,
+            DefaultExt = ".sds.patch",
+            OverwritePrompt = true,
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        IReadOnlyList<PatchExportResult> exported;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            if (archives.Count == 1)
+            {
+                exported = PatchExporter.ExportWithSeasonVariant(archives[0], dialog.FileName);
+            }
+            else
+            {
+                string folder = Path.GetDirectoryName(dialog.FileName) ?? string.Empty;
+                exported = PatchExporter.ExportAll(archives, folder);
+            }
+        }
+        catch (Exception ex)
+        {
+            Mouse.OverrideCursor = null;
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Export Patch",
+                Icon = DialogIcon.Error,
+                Heading = "Export failed",
+                Text = ex.Message,
+            });
+            return;
+        }
+        finally { Mouse.OverrideCursor = null; }
+
+        if (exported.Count == 0)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Export Patch",
+                Icon = DialogIcon.Info,
+                Text = "Nothing differed from the original archives, so no patch was written.",
+            });
+            return;
+        }
+
+        var summary = new StringBuilder();
+        foreach (PatchExportResult result in exported)
+        {
+            summary.AppendLine(CultureInfo.CurrentCulture,
+                $"{Path.GetFileName(result.PatchPath)} — {result.Result.Changed} changed, "
+                + $"{result.Result.Removed} removed, {result.Result.Added} added");
+        }
+
+        summary.AppendLine();
+        summary.Append("The game's archives were not modified.");
+
+        AppDialog.Show(this, new DialogOptions
+        {
+            Title = "Export Patch",
+            Icon = DialogIcon.Info,
+            Heading = exported.Count == 1 ? "Patch exported" : $"{exported.Count} patches exported",
+            Text = summary.ToString(),
+        });
+    }
+
     // Reports a finished build. A fully-successful build is a "Built N archives" notice the user can silence for
     // good with "Don't show this again" (persisted to settings) — once silenced, successful builds are quiet.
     // A whole/partial failure is always shown; those need attention regardless of the preference.
