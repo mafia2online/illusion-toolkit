@@ -480,6 +480,8 @@ public partial class MaterialEditorWindow : Window
 
     private void PreviewMode_Changed(object sender, RoutedEventArgs e)
     {
+        // Raised while the XAML is still loading: Sphere is checked in markup, before Mesh exists.
+        if (Preview == null || MeshModeBtn == null) return;
         Preview.UseMesh = MeshModeBtn.IsChecked == true;
     }
 

@@ -438,7 +438,7 @@ internal static class MaterialEditorProbes
         var window = new MaterialEditorWindow(viewport);
         window.ShowMaterial(original, node, 0);
         check("[asgn] assign button visible and enabled with a mesh context",
-            window.AssignBtn.Visibility == Visibility.Visible && window.AssignBtn.IsEnabled, "");
+            window.AssignPanel.Visibility == Visibility.Visible && window.AssignBtn.IsEnabled, "");
 
         // Pick a DIFFERENT material in the list, the way a user does.
         MaterialSummary? other = window.MaterialList.Items.OfType<MaterialSummary>()
@@ -499,7 +499,7 @@ internal static class MaterialEditorProbes
             $"accepted={staleAccepted} slot=0x{editor.GetSlotMaterial(0):X}");
         viewport.RaiseSceneChanged();
         check("[asgn] a scene change hides the assign button (stale context dropped)",
-            window.AssignBtn.Visibility == Visibility.Collapsed, "");
+            window.AssignPanel.Visibility == Visibility.Collapsed, "");
         window.Close();
     }
 
@@ -561,7 +561,7 @@ internal static class MaterialEditorProbes
             offered.Count > 0 && offered.All(d => !taken.Contains(d.Id)),
             offered.Count + " offered");
         check("assign button stays hidden without a mesh context",
-            window.AssignBtn.Visibility == Visibility.Collapsed, "");
+            window.AssignPanel.Visibility == Visibility.Collapsed, "");
 
         var content = (FrameworkElement)window.Content;
         // The probe renders the content visual alone — without the window's theme background the white
