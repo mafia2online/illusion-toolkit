@@ -6,6 +6,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using Illusion.Assets.Textures;
 using Illusion.Domain.Materials;
+using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 using Illusion.Settings;
 using Illusion.Viewport;
@@ -426,16 +427,60 @@ public partial class MaterialEditorWindow : Window
     {
         if (_contextNode == null)
         {
-            AssignBtn.Visibility = Visibility.Collapsed;
+            AssignPanel.Visibility = Visibility.Collapsed;
+            // No context — mesh preview unavailable; reset to sphere.
+            MeshModeBtn.IsEnabled = false;
+            SphereModeBtn.IsChecked = true;
+            Preview.SetMeshGeometry(null, null);
             return;
         }
-        AssignBtn.Visibility = Visibility.Visible;
+        AssignPanel.Visibility = Visibility.Visible;
         AssignBtn.IsEnabled = _currentHash != 0;
         string current = "—";
         if (_contextNode.Source is IMaterialSlotEditor editor && editor.GetSlotMaterial(_contextSlot) is { } bound)
             current = _viewport.MaterialCatalog.GetMaterial(bound)?.Name ?? ("0x" + bound.ToString("X"));
+        AssignContextLabel.Text = $"SLOT {_contextSlot + 1} · {_contextNode.Name}";
         AssignBtn.ToolTip =
             $"Assign the selected material to slot {_contextSlot + 1} of \"{_contextNode.Name}\" (currently {current}).";
+
+        UpdateMeshPreviewGeometry();
+    }
+
+    // Extract the pick geometry for the context slot from the node's GpuMesh and feed it to the preview.
+    // The Part at index _contextSlot maps to PickIndices[StartIndex .. StartIndex + IndexCount - 1].
+    private void UpdateMeshPreviewGeometry()
+    {
+        GpuMesh? gm = _contextNode?.Mesh;
+        if (gm?.PickPositions == null || gm.PickIndices == null || _contextSlot >= gm.Parts.Count)
+        {
+            MeshModeBtn.IsEnabled = false;
+            SphereModeBtn.IsChecked = true;
+            Preview.SetMeshGeometry(null, null);
+            return;
+        }
+
+        GpuPart part = gm.Parts[_contextSlot];
+        int start = (int)part.StartIndex;
+        int count = (int)part.IndexCount;
+        if (count < 3 || start + count > gm.PickIndices.Length)
+        {
+            MeshModeBtn.IsEnabled = false;
+            SphereModeBtn.IsChecked = true;
+            Preview.SetMeshGeometry(null, null);
+            return;
+        }
+
+        // Slice the indices for this slot only.
+        var slotIndices = new uint[count];
+        Array.Copy(gm.PickIndices, start, slotIndices, 0, count);
+
+        MeshModeBtn.IsEnabled = true;
+        Preview.SetMeshGeometry(gm.PickPositions, slotIndices);
+    }
+
+    private void PreviewMode_Changed(object sender, RoutedEventArgs e)
+    {
+        Preview.UseMesh = MeshModeBtn.IsChecked == true;
     }
 
     // ── Save ──
