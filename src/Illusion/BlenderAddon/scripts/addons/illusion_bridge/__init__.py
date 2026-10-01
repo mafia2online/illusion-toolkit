@@ -66,7 +66,15 @@ def _stamp_materials(resolved):
     for entry in resolved:
         name = entry.get("name")
         material = bpy.data.materials.get(name) if name else None
-        if material is None or not entry.get("hash"):
+        if material is None:
+            continue
+        if not entry.get("hash"):
+            # The toolkit no longer has the material this datablock remembers: forget it, so the next
+            # push sends the whole thing again.
+            for key in ("illusion_hash", materials.AUTHORED_PROP, materials.SIGNATURE_PROP):
+                if key in material.keys():
+                    del material[key]
+            server.log(f"material '{name}' is gone from the toolkit; it will be sent anew")
             continue
         material["illusion_hash"] = entry["hash"]
         if entry.get("authored"):

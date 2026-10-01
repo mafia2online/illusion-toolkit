@@ -72,10 +72,26 @@ public sealed class AuthoredMaterialResolver
             bool hasHash = BridgeMeshApplier.TryParseMaterialHash(info.Hash, out ulong hash) && hash != 0;
             string name = info.Name?.Trim() ?? "";
 
+            // Blender remembers a material this bridge created, but the library may not: the creation was
+            // undone, or the toolkit closed without a Save. With the pixels at hand it is simply made again;
+            // without them (the addon only sends an image that changed) the datablock is told to forget, so
+            // the next push arrives complete.
+            if (hasHash && info.Authored && !MafiaMaterials.KnowsMaterial(hash))
+            {
+                if (info.DiffuseImage == null && MafiaMaterials.FindHashByName(name) == null)
+                {
+                    if (_acknowledged.Add(name)) Resolved.Add(new PushMaterial { Name = name, Hash = "" });
+                    skipReason = $"material '{name}' is no longer in the game's library (undone, or never saved) — "
+                        + "push again and it will be created anew";
+                    return false;
+                }
+                hasHash = false;
+            }
+
             if (hasHash)
             {
                 // A material an earlier push created, sent again with new pixels.
-                if (!info.Authored || info.DiffuseImage == null || !MafiaMaterials.KnowsMaterial(hash)) continue;
+                if (!info.Authored || info.DiffuseImage == null) continue;
                 lock (CreatedHere) CreatedHere.Add(hash); // stamped by an earlier session's ack
                 string? current = MafiaMaterials.GetMaterialTextures(hash).Diffuse;
                 string? texture = WriteTexture(document, info.DiffuseImage, current, out skipReason);

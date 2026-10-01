@@ -88,7 +88,8 @@ public sealed class PushSkip
 }
 
 /// <summary>A Blender-made material the push turned into a game material (or matched to one by name) —
-/// the addon stamps the hash on its datablock, so later pushes send the identity instead of the pixels.</summary>
+/// the addon stamps the hash on its datablock, so later pushes send the identity instead of the pixels.
+/// An EMPTY hash says the opposite: the material the datablock remembers is gone, and it should forget.</summary>
 public sealed class PushMaterial
 {
     [JsonPropertyName("name")] public string Name { get; set; } = "";

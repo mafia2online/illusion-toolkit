@@ -467,6 +467,11 @@ internal static class ProbeRunner
                 return true;
             // Blender bridge: a material made in Blender — DXT1 encoder, the texture landing in the archive
             // folder and manifest, the hash-less slot resolved to a new game material, re-push, bind-by-name.
+            // Blender bridge: the same road through the live viewport and a live bridge session — needs
+            // someone on the Blender side to make and push the object (see the probe's summary).
+            case "--probe-bridge-material-live":
+                BridgeMaterialLiveProbe.Run(args.Length >= 2 ? args[1] : "eastside");
+                return true;
             case "--probe-bridge-material":
                 BridgeMaterialProbes.RunAuthoredMaterialProbe(
                     args.Length >= 2 ? args[1] : "eastside", args.Length >= 3 ? args[2] : null);

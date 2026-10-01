@@ -1013,8 +1013,10 @@ public static class BridgeMeshApplier
         for (int slot = 0; slot < newMats.Length; slot++)
         {
             MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(newMats[slot].MaterialHash);
+            // The hash rides with the part, as it does on a mesh loaded from disk: it is what a later
+            // material edit (or a texture rewritten by a push) finds this part by to re-resolve it.
             parts[slot] = new MeshPart(newMats[slot].StartIndex, newMats[slot].NumFaces * 3,
-                tex.Diffuse, tex.Normal, tex.Specular);
+                tex.Diffuse, tex.Normal, tex.Specular, newMats[slot].MaterialHash, tex.Tint);
         }
         result.NewMesh = new MeshData
         {

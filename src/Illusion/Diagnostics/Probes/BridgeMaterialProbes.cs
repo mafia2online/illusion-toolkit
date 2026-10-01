@@ -154,6 +154,30 @@ internal static class BridgeMaterialProbes
             Check("a new material without an image is refused with a reason",
                 refused && reason != null && MafiaMaterials.FindHashByName("illusion_probe_bare") == null, reason ?? "");
 
+            // Blender remembers a material the library has lost (undone, or never saved). With pixels it is
+            // made again; without them the push is refused and the ack tells the datablock to forget.
+            var fifth = new ExchangeContainer();
+            var lost = new MeshMaterialInfo { Hash = "0x00000000DEADBEEF", Name = "illusion_probe_lost", Authored = true };
+            var forget = new AuthoredMaterialResolver(fifth, Create, (_, _) => false);
+            bool forgotten = !forget.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { lost } }, document, out reason);
+            Check("a remembered material the library lost, sent without pixels, is refused and forgotten",
+                forgotten && forget.Resolved.Count == 1 && forget.Resolved[0].Hash == ""
+                && forget.Resolved[0].Name == "illusion_probe_lost", reason ?? "");
+            ulong recreated = 0;
+            MeshMaterialInfo stale = NewSlot(fifth, gradient, w, h);
+            stale.Name = "illusion_probe_lost";
+            stale.Hash = "0x00000000DEADBEEF";
+            var remake = new AuthoredMaterialResolver(fifth, Create, (_, _) => false);
+            bool remade = remake.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { stale } }, document, out reason)
+                && ulong.TryParse(stale.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out recreated)
+                && recreated != 0xDEADBEEF && MafiaMaterials.KnowsMaterial(recreated);
+            Check("the same material sent WITH pixels is created anew", remade, reason ?? stale.Hash);
+            if (recreated != 0 && recreated != 0xDEADBEEF) pushedHashes.Add(recreated);
+            foreach (string file in Directory.GetFiles(extracted, "illusion_probe_image*.dds"))
+                if (!writtenFiles.Contains(file)) writtenFiles.Add(file);
+
             // ── A container written by the addon itself ──
             if (pushedContainer != null)
             {
