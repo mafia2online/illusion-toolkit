@@ -465,6 +465,12 @@ internal static class ProbeRunner
             case "--probe-bridge-newobj":
                 BridgeProbes.RunNewObjectProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Blender bridge: a material made in Blender — DXT1 encoder, the texture landing in the archive
+            // folder and manifest, the hash-less slot resolved to a new game material, re-push, bind-by-name.
+            case "--probe-bridge-material":
+                BridgeMaterialProbes.RunAuthoredMaterialProbe(
+                    args.Length >= 2 ? args[1] : "eastside", args.Length >= 3 ? args[2] : null);
+                return true;
             // Collision: cooked-mesh scaler over the whole corpus — quantized tree bytes bit-identical,
             // vertices and coefficients moved by exactly s, root box lands on the scaled original.
             // Collision: modelCode census — how many shipped cooked meshes carry no serialized tree.

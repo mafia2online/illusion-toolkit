@@ -13,7 +13,7 @@ import uuid
 import bpy
 import numpy as np
 
-from . import importer, payload, protocol, server
+from . import importer, materials, payload, protocol, server
 
 
 def _guess_kind(obj) -> str:
@@ -114,11 +114,15 @@ def export_scene(reason):
     objects = []
     blocks = []
     pushed_ids = []
+    # One block per image however many slots and objects use it, and the signatures to stamp once the
+    # toolkit confirms it took the pixels.
+    image_refs = {}
+    signatures = {}
     try:
         for obj in survivors:
             try:
                 server.log(f"export_scene: exporting {obj.name}")
-                entry = _export_object(obj, depsgraph, blocks)
+                entry = _export_object(obj, depsgraph, blocks, image_refs, signatures)
             except Exception as exc:
                 server.log(f"push: failed to export '{obj.get(importer.ID_PROP, obj.name)}': {exc}")
                 continue
@@ -151,6 +155,7 @@ def export_scene(reason):
     server.log("export_scene: writing container")
     payload.write_container(path, session, objects, blocks)
     server.log("export_scene: container written, sending push")
+    server.state["pending_signatures"] = signatures
 
     server.send(protocol.make(
         protocol.PUSH,
@@ -285,7 +290,42 @@ def _export_skin(obj, me, n_verts, blocks, arrays):
     arrays["boneWeights"] = _add_block(blocks, "f32", 4, n_verts, weights)
 
 
-def _export_object(obj, depsgraph, blocks):
+def _describe_authored(material, entry, blocks, image_refs, signatures):
+    """Add what the toolkit needs to turn a material made in Blender into a game material.
+
+    A material the toolkit handed out is identified by its hash and nothing else. One made here has no
+    hash until a push creates it, and afterwards keeps the right to replace its own texture — so its
+    Base Color image rides along the first time, and again whenever it changed.
+    """
+    game_hash = material.get("illusion_hash")
+    if game_hash and not material.get(materials.AUTHORED_PROP):
+        return
+    entry["authored"] = True
+    image = materials.base_color_image(material)
+    if image is None:
+        return
+    signature = materials.image_signature(image)
+    if game_hash and signature is not None and signature == material.get(materials.SIGNATURE_PROP):
+        return
+
+    ref = image_refs.get(image.name)
+    if ref is None:
+        packed = materials.image_rgba8(image)
+        if packed is None:
+            return
+        pixels, width, height = packed
+        ref = {
+            "name": image.name,
+            "width": width,
+            "height": height,
+            "block": _add_block(blocks, "u8", 4, width * height, pixels),
+        }
+        image_refs[image.name] = ref
+    entry["diffuseImage"] = ref
+    signatures[material.name] = signature
+
+
+def _export_object(obj, depsgraph, blocks, image_refs, signatures):
     """Read one evaluated mesh into payload arrays; appends blocks, returns the header entry."""
     if obj.mode == 'EDIT':
         obj.update_from_editmode()  # commit the live BMesh before evaluating
@@ -375,6 +415,8 @@ def _export_object(obj, depsgraph, blocks):
         raw_id = material.get("illusion_collision_raw_id") if material else None
         if raw_id is not None:
             entry["rawId"] = int(raw_id)
+        elif material is not None:
+            _describe_authored(material, entry, blocks, image_refs, signatures)
         slot_materials.append(entry)
     if slot_materials:
         meta["materials"] = slot_materials

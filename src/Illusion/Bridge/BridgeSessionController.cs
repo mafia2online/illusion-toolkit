@@ -622,6 +622,7 @@ internal sealed class BridgeSessionController : IDisposable
         // describing the scene for the rest of the session.
         bool announced = false;
         var movedBones = new List<string>();
+        AuthoredMaterialResolver? authored = null;
         try
         {
             ExchangeContainer container = ExchangeReader.Read(push.File);
@@ -642,6 +643,16 @@ internal sealed class BridgeSessionController : IDisposable
             var newHulls = new List<NewHull>();
             var newPayloads = new List<MeshObjectPayload>();
             var rigEdits = new List<(SceneNode Node, BonePosePush.Result Pose)>();
+
+            // Materials made in Blender become game materials BEFORE their meshes are applied — the mesh
+            // path only knows slots by hash. The catalog edits run on the UI thread, where the history lives.
+            authored = new AuthoredMaterialResolver(
+                container,
+                (name, texture) => _host.Dispatcher.Invoke(() => CreateAuthoredMaterial(name, texture)),
+                (hash, texture) => _host.Dispatcher.Invoke(() => _host.MaterialEditing.SetTexture(hash, "S000", texture)));
+            ISceneDocument? bridgeDocument = _host.Dispatcher.Invoke(() => _exported.Values
+                .Select(DocumentNodeOf).FirstOrDefault(n => n != null && _host.Tree.IsInScene(n))?.Source as ISceneDocument);
+
             foreach (ExchangeObject obj in container.Objects)
             {
                 if (staleSession)
@@ -692,6 +703,12 @@ internal sealed class BridgeSessionController : IDisposable
                         // fresh frame object of the bridge scene's document.
                         if (payload.Id.StartsWith("new:", StringComparison.Ordinal))
                         {
+                            if (bridgeDocument != null
+                                && !authored.TryResolve(payload, bridgeDocument, out string? materialReason))
+                            {
+                                ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = materialReason ?? "material not usable" });
+                                continue;
+                            }
                             newPayloads.Add(payload);
                             continue;
                         }
@@ -715,6 +732,13 @@ internal sealed class BridgeSessionController : IDisposable
                     {
                         payload.LoopOrigIndex = new int[payload.LoopOrigIndex.Length];
                         Array.Fill(payload.LoopOrigIndex, -1);
+                    }
+
+                    if (FindDocument(node) is { } owningDocument
+                        && !authored.TryResolve(payload, owningDocument, out string? authoredReason))
+                    {
+                        ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = authoredReason ?? "material not usable" });
+                        continue;
                     }
 
                     // Back into the level the row stands for — the same one it was exported from.
@@ -887,6 +911,12 @@ internal sealed class BridgeSessionController : IDisposable
             var crashCopyNotes = new List<(string Name, int Copies)>();
             _host.Dispatcher.Invoke(() =>
             {
+                // A texture written into an archive's folder is ahead of its .sds whether or not any mesh
+                // changed; and one rewritten under its old name changed no material, so the renderer has
+                // to be told to read the file again.
+                foreach (FileInfo archive in authored.TouchedArchives.Values) _host.Persistence.MarkArchiveModified(archive);
+                foreach ((ulong hash, string texture) in authored.Rewritten) _host.MaterialEditing.ReloadTexture(hash, texture);
+
                 geometry.RemoveAll(g => !_host.Tree.IsInScene(g.Node));
                 transforms.RemoveAll(t => !_host.Tree.IsInScene(t.Node));
                 List<SceneNode> liveDeletes = deleteNodes.Where(_host.Tree.IsInScene).ToList();
@@ -1020,6 +1050,13 @@ internal sealed class BridgeSessionController : IDisposable
                 notes.Add($"{name}: {copies} copies of this prop across the city took the new shape "
                     + "(the other season's archive is a separate table and keeps its own)");
             }
+            int authoredCount = authored.Resolved.Count(m => m.Authored);
+            if (authoredCount > 0)
+            {
+                notes.Add($"{authoredCount} Blender material(s) are now game materials: "
+                    + string.Join(", ", authored.Resolved.Where(m => m.Authored).Take(4).Select(m => m.Name))
+                    + " — Save writes the material library, Build packs the textures");
+            }
             if (createdApplied > 0) notes.Add($"{createdApplied} new object(s) created (anchored to the "
                 + "district's main scene, on the frame name table)");
             if (deletedApplied > 0) notes.Add($"{deletedApplied} object(s) deleted (undo restores them)");
@@ -1061,9 +1098,20 @@ internal sealed class BridgeSessionController : IDisposable
                 }
             }
             _pushGate.Release();
+            if (authored != null) ack.Materials.AddRange(authored.Resolved);
             try { _client?.Send(ack); }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
         }
+    }
+
+    // New materials go to default.mtl — the library every edition of the game loads, and where the file
+    // import puts the ones it creates.
+    private ulong? CreateAuthoredMaterial(string name, string diffuseTexture)
+    {
+        IReadOnlyList<string> libraries = _host.MaterialCatalog.Libraries;
+        string? library = libraries.FirstOrDefault(l => l.Equals("default.mtl", StringComparison.OrdinalIgnoreCase))
+            ?? libraries.FirstOrDefault();
+        return library == null ? null : _host.MaterialEditing.CreateTexturedMaterial(library, name, diffuseTexture);
     }
 
     private static string ShortId(string id)

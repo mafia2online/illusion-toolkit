@@ -124,6 +124,32 @@ internal sealed class MaterialEditController
         return hash;
     }
 
+    /// <summary>
+    /// Creates a default-preset material whose diffuse slot already names <paramref name="diffuseTexture"/>
+    /// — how a material made in Blender arrives. ONE history entry: undoing it removes the material, texture
+    /// binding and all, and redo restores that same instance.
+    /// </summary>
+    public ulong? CreateTexturedMaterial(string library, string name, string diffuseTexture)
+    {
+        ulong? hash = Catalog.CreateMaterial(library, name);
+        if (hash == null) return null;
+        Catalog.SetTexture(hash.Value, "S000", diffuseTexture);
+        _host.Editing.History.Push(new CreateEdit(this, hash.Value));
+        AfterMaterialChanged(hash.Value);
+        return hash;
+    }
+
+    /// <summary>
+    /// A texture FILE was rewritten under the name the material already uses: nothing in the catalog
+    /// changed, so the renderer is told to forget its copy and every part drawing the material re-reads it.
+    /// </summary>
+    public void ReloadTexture(ulong hash, string textureName)
+    {
+        _host.Rnd?.Textures.Invalidate(textureName);
+        RefreshMeshesUsing(hash);
+        _host.RaiseMaterialsChanged();
+    }
+
     /// <summary>Renames a material — the FNV64 hash re-derives from the name (undoable). Null when the
     /// name is empty/taken or the hash is unknown. Loaded meshes keep the OLD hash and fall back to
     /// placeholder textures, exactly like after a delete.</summary>

@@ -18,6 +18,18 @@ public sealed class MeshMaterialInfo
     [JsonPropertyName("specular")] public string? Specular { get; set; }
     [JsonPropertyName("startIndex")] public int StartIndex { get; set; }
     [JsonPropertyName("numFaces")] public int NumFaces { get; set; }
+
+    /// <summary>Blender → toolkit only: the material was made in Blender, not handed out by the toolkit.
+    /// With no <see cref="Hash"/> it is new and becomes a game material; with one it is a material an
+    /// earlier push created, and <see cref="DiffuseImage"/> (when present) replaces its texture.</summary>
+    [JsonPropertyName("authored")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Authored { get; set; }
+
+    /// <summary>Blender → toolkit only: the image wired into Base Color, when it has to be (re)encoded.</summary>
+    [JsonPropertyName("diffuseImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? DiffuseImage { get; set; }
 }
 
 /// <summary>

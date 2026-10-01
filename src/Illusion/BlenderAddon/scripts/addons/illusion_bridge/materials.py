@@ -3,8 +3,18 @@
 import os
 
 import bpy
+import numpy as np
 
 from . import dds
+
+# A material the modder made here, which a push turned into a game material: unlike one the toolkit
+# handed out, its texture is Blender's to replace.
+AUTHORED_PROP = "illusion_authored"
+# What the toolkit was last sent for that material's Base Color image, so pixels travel only when
+# they changed.
+SIGNATURE_PROP = "illusion_image_signature"
+
+MAX_TEXTURE_SIZE = 2048
 
 
 def build(mat_info):
@@ -127,3 +137,88 @@ def _load_image(path, non_color=False):
 def _link(links, output, input_socket):
     if output is not None and input_socket is not None:
         links.new(output, input_socket)
+
+
+def base_color_image(material):
+    """The image feeding the Principled BSDF's Base Color, or None.
+
+    Looks through the colour-adjusting nodes people put in between (Hue/Saturation, a Mix, curves):
+    those are not baked — the image itself is what travels — but they must not hide it.
+    """
+    tree = getattr(material, "node_tree", None)
+    if tree is None:
+        return None
+    principled = next((n for n in tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if principled is None:
+        return None
+    socket = principled.inputs.get("Base Color")
+    for _ in range(8):
+        if socket is None or not socket.is_linked:
+            return None
+        node = socket.links[0].from_node
+        if node.type == 'TEX_IMAGE':
+            return node.image
+        socket = next((i for i in node.inputs if i.is_linked and i.type == 'RGBA'), None)
+    return None
+
+
+def image_signature(image):
+    """A cheap identity for an image's pixels; None for one with unsaved paint (always resend)."""
+    if image.is_dirty:
+        return None
+    path = bpy.path.abspath(image.filepath, library=image.library) if image.filepath else ""
+    try:
+        stamp = os.path.getmtime(path) if path else 0
+    except OSError:
+        stamp = 0
+    return f"{image.name}|{path}|{stamp}|{image.size[0]}x{image.size[1]}"
+
+
+def image_rgba8(image):
+    """Read an image as (pixels, width, height): uint8 RGBA, rows top-down, power-of-two sides.
+
+    The game's textures are block-compressed with a full MIP chain, which wants powers of two, so
+    anything else is resampled to the nearest one. That happens here on the pixel array rather than
+    through Image.scale() on a copy: copying an image with unsaved paint (or a generated one) gives
+    back its blank original, and the modder's own datablock must not be resized under them.
+    Returns None for an image with no pixels.
+    """
+    width, height = image.size
+    if width == 0 or height == 0:
+        return None
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    image.pixels.foreach_get(pixels)
+    # Blender stores rows bottom-up; a .dds runs top-down.
+    pixels = pixels.reshape(height, width, 4)[::-1]
+
+    target_width, target_height = _power_of_two(width), _power_of_two(height)
+    pixels = _resample(_resample(pixels, target_width, axis=1), target_height, axis=0)
+
+    if image.is_float and image.colorspace_settings.name != 'Non-Color':
+        # Float buffers are scene-linear; the game samples its albedo as sRGB.
+        rgb = np.clip(pixels[..., :3], 0.0, 1.0)
+        pixels = pixels.copy()
+        pixels[..., :3] = np.where(rgb <= 0.0031308, rgb * 12.92, 1.055 * np.power(rgb, 1.0 / 2.4) - 0.055)
+    rgba = np.clip(pixels * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+    return rgba.reshape(-1, 4), target_width, target_height
+
+
+def _resample(pixels, size, axis):
+    """Linear resample of one axis to `size` texels (texel centres aligned)."""
+    current = pixels.shape[axis]
+    if current == size:
+        return pixels
+    position = (np.arange(size) + 0.5) * current / size - 0.5
+    low = np.floor(position)
+    weight = (position - low).astype(np.float32)
+    first = np.clip(low.astype(np.int64), 0, current - 1)
+    second = np.clip(first + 1, 0, current - 1)
+    shape = [1, 1, 1]
+    shape[axis] = size
+    weight = weight.reshape(shape)
+    return np.take(pixels, first, axis=axis) * (1.0 - weight) + np.take(pixels, second, axis=axis) * weight
+
+
+def _power_of_two(size):
+    nearest = 1 << max(2, int(round(np.log2(size))))
+    return min(MAX_TEXTURE_SIZE, nearest)

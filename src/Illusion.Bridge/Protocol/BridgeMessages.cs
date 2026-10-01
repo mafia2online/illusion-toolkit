@@ -87,11 +87,25 @@ public sealed class PushSkip
     [JsonPropertyName("reason")] public string Reason { get; set; } = "";
 }
 
+/// <summary>A Blender-made material the push turned into a game material (or matched to one by name) —
+/// the addon stamps the hash on its datablock, so later pushes send the identity instead of the pixels.</summary>
+public sealed class PushMaterial
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("hash")] public string Hash { get; set; } = "";
+
+    /// <summary>True when the bridge created the material (now or earlier in this toolkit session), false
+    /// when it merely matched a material the game already had — only the former may have its texture
+    /// replaced by a later push.</summary>
+    [JsonPropertyName("authored")] public bool Authored { get; set; }
+}
+
 public sealed class PushAckMessage : BridgeMessage
 {
     [JsonPropertyName("applied")] public List<string> Applied { get; set; } = new();
     [JsonPropertyName("skipped")] public List<PushSkip> Skipped { get; set; } = new();
     [JsonPropertyName("errors")] public List<string> Errors { get; set; } = new();
+    [JsonPropertyName("materials")] public List<PushMaterial> Materials { get; set; } = new();
 }
 
 public sealed class SetOptionsMessage : BridgeMessage

@@ -1150,7 +1150,7 @@ public static class BridgeMeshApplier
         return true;
     }
 
-    private static bool TryParseMaterialHash(string? text, out ulong hash)
+    internal static bool TryParseMaterialHash(string? text, out ulong hash)
     {
         hash = 0;
         if (string.IsNullOrEmpty(text)) return false;

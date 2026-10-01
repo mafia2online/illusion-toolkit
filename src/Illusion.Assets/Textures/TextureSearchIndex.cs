@@ -45,6 +45,20 @@ public static class TextureSearchIndex
         }
     }
 
+    /// <summary>Announces a texture the toolkit just wrote into the mirror, so it resolves without a
+    /// rescan. An existing name keeps its first path (the first-wins rule of the scan). No-op while the
+    /// index is unbuilt — the eventual scan finds the file on disk by itself.</summary>
+    public static void Register(string path)
+    {
+        lock (Sync)
+        {
+            Dictionary<string, string>? current = _byName;
+            string name = Path.GetFileName(path);
+            if (current == null || current.ContainsKey(name)) return;
+            _byName = new Dictionary<string, string>(current, StringComparer.OrdinalIgnoreCase) { [name] = path };
+        }
+    }
+
     /// <summary>Full path of a texture name anywhere in the mirror, or null. Blocks on the first call
     /// if the background build has not finished yet (WarmUp makes that rare).</summary>
     public static string? FindPath(string? name)
