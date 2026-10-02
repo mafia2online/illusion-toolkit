@@ -45,6 +45,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly CarPartController CarPartEditing;
     internal readonly TranslokatorEditController CrashEditing;
     internal readonly ActorEditController ActorEditing;
+    internal readonly ObjectImportController ObjectImporting;
     internal readonly PropertyEditController PropertyEditing;
     internal readonly ScenePersistence Persistence;
     internal readonly GeometryEditController GeometryEditing;
@@ -65,6 +66,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         CarPartEditing = new CarPartController(this);
         CrashEditing = new TranslokatorEditController(this);
         ActorEditing = new ActorEditController(this);
+        ObjectImporting = new ObjectImportController(this);
         PropertyEditing = new PropertyEditController(this);
         Persistence = new ScenePersistence(this);
         GeometryEditing = new GeometryEditController(this);

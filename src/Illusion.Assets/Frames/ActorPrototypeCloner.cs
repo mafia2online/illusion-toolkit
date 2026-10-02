@@ -262,9 +262,9 @@ public static class ActorPrototypeCloner
         // not be unique: distillery repeats 'Dummy01' 233 times and 'lahev' 87, and uppertown's eight wanted
         // posters are eight differently-named roots over eight children all called 'wanted01_poster'. Which is
         // exactly the shape a copy should have.
-        copy.Name = new Formats.Hashing.HashName(isRoot
-            ? UniqueName(adapter.Frame, source.Name.String)
-            : source.Name.String);
+        copy.Name = isRoot
+            ? new Formats.Hashing.HashName(UniqueName(adapter.Frame, source.Name.String))
+            : new Formats.Hashing.HashName(source.Name); // hash and string: some are named by hash alone
         into.Clones[source] = copy;
 
         foreach (FrameObjectBase child in source.Children.ToList())

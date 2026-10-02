@@ -478,7 +478,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "actor_import")]
-    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). Only actors that place no object of their own scene can travel: lights, sounds. Undoable. Find candidates with decode_actors on the source .act file.")]
+    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). Only actors that place no object of their own scene travel this way: lights, sounds — for one that places an object (a door, a prop) use object_import. Undoable. Find candidates with decode_actors on the source .act file.")]
     public static async Task<string> ImportActor(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -493,6 +493,32 @@ public sealed class EditorTools
             if (await ui.RunAsync(() => editor.ImportActor(sourceActFile, actorName, newName, position)) is { } refused)
                 return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, name = newName, status = await ui.RunAsync(editor.Status) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "object_import")]
+    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, without collision. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable; the files carried into the working copy stay there, unused, if it is undone. Skinned models cannot travel yet.")]
+    public static async Task<string> ImportObject(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The source archive: a full path to the .sds, or one relative to the game's sds folder, e.g. 'shops/harry.sds'.")] string sourceArchive,
+        [Description("Entity name of an actor in the source archive, or the name of a frame object in its scene.")] string name,
+        [Description("Name for the copy; must be new in the loaded area (it names both the object and, for an actor, the actor).")] string newName,
+        [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
+        [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null)
+    {
+        try
+        {
+            if (position.Length != 3) return ToolResult.Invalid("position takes three numbers");
+            ObjectImportOutcome? outcome = null;
+            string? refused = await ui.RunAsync(
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, out outcome));
+            if (refused != null) return ToolResult.Invalid(refused);
+            return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
         }
         catch (Exception ex)
         {

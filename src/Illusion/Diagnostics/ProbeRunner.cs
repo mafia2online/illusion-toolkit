@@ -164,6 +164,15 @@ internal static class ProbeRunner
             case "--probe-season-mirror":
                 SeasonMirrorProbes.RunSeasonMirrorProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Carrying objects between archives on a scratch copy: a door, a prop an actor places and a
+            // piece of scenery go from an interior into a district — frames, buffers, actor, prefab entry,
+            // item descriptions — and survive a save and a reload; an undo leaves the scene byte for byte.
+            // Output: %TEMP%\illusion_object_transplant.txt
+            case "--probe-object-transplant":
+                ObjectTransplantProbes.RunObjectTransplantProbe(
+                    args.Length >= 2 ? args[1] : "hill",
+                    args.Length >= 3 ? args[2] : @"shops\harry.sds");
+                return true;
             // Renders the viewport transform overlay (compact, actions-off Vector3Box at large coords) to a PNG so
             // the fields-fit / no-clip can be eyeballed. Output: %TEMP%\illusion_panel.png
             case "--probe-panel":

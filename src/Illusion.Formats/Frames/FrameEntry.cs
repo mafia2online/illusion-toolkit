@@ -52,6 +52,17 @@ public class FrameEntry
         OwningResource = entry.OwningResource;
     }
 
+    /// <summary>
+    /// Hands the entry to another resource — the one step a copy constructor cannot take, since a copy is
+    /// born in the resource of its original. Nothing else changes: the caller registers the entry there and
+    /// rewires every reference it holds, which still name blocks and parents of the resource it came from.
+    /// </summary>
+    public void MoveTo(FrameResource resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        OwningResource = resource;
+    }
+
     public void AddRef(FrameEntryRefTypes type, int objRef)
     {
         refs.Add(type, objRef);

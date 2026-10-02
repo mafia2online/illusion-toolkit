@@ -208,6 +208,20 @@ internal sealed class ActorLayer
         map[frame] = leaf;
     }
 
+    /// <summary>
+    /// Records the tree row of a frame the editor just brought into the scene (an object carried from another
+    /// archive), so <see cref="RowOf"/> and <see cref="PrototypeRow"/> find it like any row the load built.
+    /// </summary>
+    public void AddFrameRow(ActorPlacements placements, FrameObjectBase frame, SceneNode row)
+    {
+        if (DistrictOf(placements) is not { } sdsNode) return;
+        if (!_frameRows.TryGetValue(sdsNode, out Dictionary<FrameObjectBase, SceneNode>? map))
+        {
+            _frameRows[sdsNode] = map = new Dictionary<FrameObjectBase, SceneNode>();
+        }
+        map[frame] = row;
+    }
+
     /// <summary>The actor node governing a frame object, or null when no actor places it.</summary>
     public SceneNode? ActorRowFor(FrameObjectBase frame)
     {

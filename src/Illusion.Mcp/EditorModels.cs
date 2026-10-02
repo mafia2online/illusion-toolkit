@@ -55,5 +55,14 @@ public sealed record SeasonMirrorOutcome(
     string WinterArchive, int Matched, int Added, int Dropped, int Reshaped,
     IReadOnlyList<string> Files, IReadOnlyList<string> Textures);
 
+/// <summary>What bringing an object in from another archive did: what it came as ("actor" — an actor and the
+/// object it places, "scenery" — a plain object anchored to the scene), how many frames and meshes were
+/// copied, and what was carried into the working copy beside the scene — textures, item descriptions, a
+/// prefab entry. <paramref name="TexturesElsewhere"/> are textures neither archive carries: they live in an
+/// archive the game loads beside the source, and may not be loaded where the object now stands.</summary>
+public sealed record ObjectImportOutcome(
+    string Kind, string Name, int Frames, int Meshes, IReadOnlyList<string> Textures, int ItemDescriptions,
+    bool Prefab, IReadOnlyList<string> TexturesElsewhere, int UnresolvedCollisions);
+
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);

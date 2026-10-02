@@ -228,7 +228,7 @@ public static class SeasonMirror
                     continue;
                 }
                 string name = Path.GetFileName(ours[i]);
-                if (!CopyEntry(from.Manifest, manifest, summerDir, winterDir, name)) continue;
+                if (!ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name)) continue;
                 files.Add(name);
             }
         }
@@ -257,12 +257,12 @@ public static class SeasonMirror
         foreach (string texture in wanted.Order(StringComparer.OrdinalIgnoreCase))
         {
             if (manifest.HasFile(texture) || !from.Manifest.HasFile(texture)) continue;
-            if (!CopyEntry(from.Manifest, manifest, summerDir, winterDir, texture)) continue;
+            if (!ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, texture)) continue;
             textures.Add(texture);
             string companion = "MIP_" + texture;
             if (from.Manifest.HasFile(companion) && !manifest.HasFile(companion))
             {
-                CopyEntry(from.Manifest, manifest, summerDir, winterDir, companion);
+                ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, companion);
             }
         }
 
@@ -283,21 +283,5 @@ public static class SeasonMirror
             if (a.Materials[lod].Length != b.Materials[lod].Length) return false;
         }
         return true;
-    }
-
-    // Copies one file and the manifest entry that announces it, field for field — a packing handler reads an
-    // entry positionally, so the only safe way to move one is verbatim.
-    private static bool CopyEntry(SdsManifest from, SdsManifest to, string fromDir, string toDir, string name)
-    {
-        if (to.HasFile(name)) return false;
-        IReadOnlyList<(string Name, string Value)>? fields = from.EntryFields(name);
-        string source = Path.Combine(fromDir, name.TrimStart('/', '\\'));
-        if (fields is not { Count: >= 3 } || !File.Exists(source)) return false;
-        if (!int.TryParse(fields[^1].Value, out int version) || fields[^1].Name != "Version") return false;
-
-        string target = Path.Combine(toDir, name.TrimStart('/', '\\'));
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        AtomicFile.WriteAllBytes(target, File.ReadAllBytes(source));
-        return to.AddEntry(fields[0].Value, name, version, [.. fields.Skip(2).Take(fields.Count - 3)]);
     }
 }
