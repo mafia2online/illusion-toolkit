@@ -163,6 +163,11 @@ internal sealed class DistrictStreamer
     private CancellationTokenSource? _loadCts; // cancels the in-flight background load
 
     private bool _building;
+
+    /// <summary>Whether an archive is still on its way into the scene — queued, loading in the background, or
+    /// having its meshes attached. What a caller that asked for an area waits on.</summary>
+    public bool IsBusy => _building || _loadTask != null || _loadQueue.Count > 0;
+
     private Queue<(SceneNode Leaf, GpuMesh Mesh)> _buildQueue = null!; // prepared meshes awaiting attach
     private (string label, string? district, string folder, int gen, FileInfo file) _buildCtx;
     private List<GpuMesh> _buildMeshes = null!;

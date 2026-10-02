@@ -119,14 +119,22 @@ public partial class MainWindow : Window
         // These used to be modal dialogs — the only notice channel the app had — which meant a dialog to
         // dismiss for every push outcome, and would have meant one per refused gizmo drag once collision
         // editing started refusing things. They are reports, not decisions, so they belong in the viewport.
-        Viewport.BridgeNotice += (message, isError) => Notices.Post(message, isError);
-        Viewport.TransientNotice += (message, isError) => Notices.Post(message, isError);
+        // Each is also kept in the notice log: the banner is gone in seconds, and an MCP client driving the
+        // editor has no other way to learn what a push did.
+        Viewport.BridgeNotice += PostNotice;
+        Viewport.TransientNotice += PostNotice;
 
         // Last: the keymap reaches the gizmo and the camera, both of which exist by now. The map outlives this
         // window (the launcher and the editor replace one another), so the handler has to come back off.
         ApplyHotkeys();
         HotkeyMap.Current.Changed += ApplyHotkeys;
         Closed += (_, _) => HotkeyMap.Current.Changed -= ApplyHotkeys;
+    }
+
+    private void PostNotice(string message, bool isError)
+    {
+        Mcp.EditorNoticeLog.Add(message, isError);
+        Notices.Post(message, isError);
     }
 
     /// <summary>

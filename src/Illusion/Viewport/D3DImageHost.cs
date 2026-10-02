@@ -187,6 +187,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="DistrictStreamer.LoadArea"/>
     public void LoadArea(MapArea? area, bool winter, bool wholeMap) => Streamer.LoadArea(area, winter, wholeMap);
 
+    /// <inheritdoc cref="DistrictStreamer.IsBusy"/>
+    public bool IsLoading => Streamer.IsBusy;
+
     /// <inheritdoc cref="DistrictStreamer.LoadStage"/>
     public void LoadStage(FileInfo sds, string label) => Streamer.LoadStage(sds, label);
 
