@@ -131,7 +131,9 @@ internal sealed class AppEditorSession : IEditorSession
                 node.IsSelected,
                 triangles,
                 triangles > 0 ? [insideMin.X, insideMin.Y, insideMin.Z] : null,
-                triangles > 0 ? [insideMax.X, insideMax.Y, insideMax.Z] : null));
+                triangles > 0 ? [insideMax.X, insideMax.Y, insideMax.Z] : null,
+                node.Mesh?.PickPositions?.Length,
+                node.Mesh?.PickIndices?.Length / 3));
         }
         return found;
     }

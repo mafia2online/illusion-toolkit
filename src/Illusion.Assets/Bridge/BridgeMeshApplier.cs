@@ -220,7 +220,12 @@ public static class BridgeMeshApplier
         FrameObjectModel? skinned = node is FrameNodeAdapter { Frame: FrameObjectModel m } ? m : null;
         bool resolvedBefore = skinned != null && SdsMeshLoader.GlobalBoneIds(skinned) != null;
 
-        ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason, lod);
+        // A level left with a 32-bit index buffer — something an earlier version of this code wrote for a mesh
+        // over 65535 vertices, and the game does not draw — is rebuilt whatever the push changed: the rebuild
+        // is what writes the buffer and the level's index width back as 16-bit.
+        ApplyResult? result = HasWideIndices(node, lod)
+            ? TryApplyRebuild(node, payload, out skipReason, lod)
+            : TryApplyCountPreserving(node, payload, out skipReason, lod);
         if (result == null && skipReason != null && NeedsRebuild(skipReason))
         {
             result = TryApplyRebuild(node, payload, out skipReason, lod);
@@ -716,6 +721,16 @@ public static class BridgeMeshApplier
         }
 
         int newCount = positions.Count;
+        // The game does not draw a mesh whose index buffer is 32-bit. This toolkit can write one and its own
+        // viewport draws it, so nothing here looks wrong — in the game every triangle is stitched from the
+        // wrong corners and the object smears across the district (seen on a 65 981-vertex interior). Refused
+        // with the count, which is what the modeller needs to split the object.
+        if (newCount > ushort.MaxValue)
+        {
+            skipReason = $"the mesh needs {newCount} vertices once split along sharp edges and UV seams — "
+                + "the game takes at most 65535 per mesh; split it into several objects";
+            return null;
+        }
         Vector3[] newPositions = positions.ToArray();
         Vector3[] newNormals = normals.ToArray();
         Vector2[] newUvs = uvs.ToArray();
@@ -958,7 +973,9 @@ public static class BridgeMeshApplier
             skipReason = "no material slot survived the push";
             return null;
         }
-        int newFormat = newCount > 65535 ? 2 : indexBuffer.IndexFormat;
+        // Always 16-bit: a mesh that would need more was refused above, and one that carried a wide buffer
+        // from before is here precisely to lose it.
+        const int newFormat = 1;
         var slots = new Formats.Frames.Resources.FrameLOD.RebuiltMaterialSlot[newMats.Length];
         for (int slot = 0; slot < newMats.Length; slot++)
         {
@@ -968,7 +985,7 @@ public static class BridgeMeshApplier
         }
         Formats.Frames.Resources.FrameLOD newLod = Formats.Frames.Resources.FrameLOD.CreateRebuilt(
             oldLod.Distance, oldLod.IndexBufferRef, oldLod.VertexBufferRef,
-            oldLod.VertexDeclaration, newCount, newFormat == 2 ? 4 : 2, faces, slots);
+            oldLod.VertexDeclaration, newCount, 2, faces, slots);
 
         (Vector3 meshMin, Vector3 meshMax) = Aabb(newPositions);
         var result = new ApplyResult
@@ -1065,6 +1082,11 @@ public static class BridgeMeshApplier
         }
         return (min, max);
     }
+
+    private static bool HasWideIndices(IFrameNode node, int lod) =>
+        node is FrameNodeAdapter { Frame: FrameObjectSingleMesh frame }
+        && SdsMeshLoader.DecodeLod(frame, lod) is { } decoded
+        && frame.GetIndexBuffer(decoded.Lod) is { IndexFormat: 2 };
 
     private static bool FaceSetMatches(DecodedMesh decoded, MeshObjectPayload payload, out string? reason)
     {

@@ -17,7 +17,8 @@ public sealed record EditorStatus(
 /// objects of the same name apart. Bounds are there only for a node that draws a mesh. The three
 /// "in box" members are filled when the search was given a box: how many of the mesh's triangles reach
 /// into it, and the extent of those triangles clipped to the box — a building's bounds contain every room
-/// inside it, so only the triangles say whether a volume is really occupied.</summary>
+/// inside it, so only the triangles say whether a volume is really occupied. Vertices and Triangles are
+/// the mesh's own size — a mesh over 65535 vertices is one the game cannot draw.</summary>
 public sealed record SceneObjectInfo(
     string Name,
     string Kind,
@@ -28,7 +29,9 @@ public sealed record SceneObjectInfo(
     bool Selected,
     int? TrianglesInBox = null,
     float[]? InBoxMin = null,
-    float[]? InBoxMax = null);
+    float[]? InBoxMax = null,
+    int? Vertices = null,
+    int? Triangles = null);
 
 /// <summary>Something the editor said to the user — a Blender push result above all, which is the only
 /// place the applied and the refused objects of a push are spelled out.</summary>
