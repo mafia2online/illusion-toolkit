@@ -255,8 +255,8 @@ inside is not decoded, and the responses say so rather than looking complete.
 - Material-library edits are outside the backup/restore flow.
 - The MCP server does not decode the `.eff` effects property tree - only the container header.
 - Navigation overlays (`.nav`, `.nov`) are view-only.
-- The viewport draws every material opaque, the stock cut-out and translucent ones included; a
-  material pushed with alpha looks right in Blender and in the game, not here.
+- Translucent materials are drawn blended but unsorted, so glass seen through glass can composite
+  in the wrong order; instanced props (city_crash) are alpha-tested only.
 - Light actors are placed and edited as data; the viewport does not draw their light.
 
 ## Contributing

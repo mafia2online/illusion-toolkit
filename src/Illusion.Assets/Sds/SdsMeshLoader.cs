@@ -968,7 +968,7 @@ public static class SdsMeshLoader
             {
                 var tex = MafiaMaterials.GetMaterialTextures(mats[i].MaterialHash);
                 parts[i] = new MeshPart(mats[i].StartIndex, mats[i].NumFaces * 3, tex.Diffuse, tex.Normal, tex.Specular,
-                    mats[i].MaterialHash, tex.Tint);
+                    mats[i].MaterialHash, tex.Tint, tex.Blended);
             }
             return parts;
         }

@@ -67,8 +67,10 @@ public static class MafiaMaterials
     /// <summary>The texture .dds names of one material: diffuse (S000), normal (S001), specular-level (S002).
     /// Any slot the material doesn't define is null. <paramref name="Tint"/> multiplies the sampled albedo and
     /// is white unless the material paints itself with a colour instead of a texture — see
-    /// <see cref="GetMaterialTextures"/>.</summary>
-    public readonly record struct MaterialTextures(string? Diffuse, string? Normal, string? Specular, Vector4 Tint)
+    /// <see cref="GetMaterialTextures"/>. <paramref name="Blended"/> is set for a material the game alpha-BLENDS
+    /// (it does not write depth) — glass, as opposed to a cut-out, whose alpha is a mask.</summary>
+    public readonly record struct MaterialTextures(
+        string? Diffuse, string? Normal, string? Specular, Vector4 Tint, bool Blended = false)
     {
         public MaterialTextures(string? diffuse, string? normal, string? specular)
             : this(diffuse, normal, specular, Vector4.One) { }
@@ -97,7 +99,8 @@ public static class MafiaMaterials
             diffuse,
             Clean(mat.GetTextureByID("S001")),                 // S001 = tangent-space normal map
             Clean(mat.GetTextureByID("S002")),                 // S002 = specular-level map
-            diffuse == null ? PaintColour(mat) : Vector4.One);
+            diffuse == null ? PaintColour(mat) : Vector4.One,
+            (mat.Flags & MaterialFlags.Disable_ZWriting) != 0);
     }
 
     // C002 MaterialColor, the paint. Four floats (rgba); anything shorter or absent means "no colour of its

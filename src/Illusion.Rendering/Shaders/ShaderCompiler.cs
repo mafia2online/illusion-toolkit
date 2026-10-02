@@ -53,6 +53,9 @@ struct PSIn { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOOR
     /// (Material Preview — geometric normal, lambert + hemisphere ambient, no normal map, no specular, no rim);
     /// 2 = sample DiffuseTex + full lighting (Render — the complete Mafia-look). Switching between them is a
     /// per-frame BaseColor change only, so it costs nothing and never rebuilds geometry.
+    /// Tint.a is the alpha mode of the part being drawn, set by the renderer and by nothing else: 2 marks an
+    /// alpha-BLENDED material (glass) — its texels are not cut out and the texture's alpha is the output's;
+    /// anything else is alpha-TESTED at one half, which is also what an opaque texture passes untouched.
     /// </summary>
     public const string MafiaLitPs = @"
 float4 PSMain(PSIn i) : SV_TARGET
@@ -65,11 +68,14 @@ float4 PSMain(PSIn i) : SV_TARGET
     bool textured = sel >= 0.5;                                   // Material Preview (1) + Render (2) sample DiffuseTex
     bool simple   = sel > 0.5 && sel < 1.5;                       // Material Preview: no normal/spec maps, no specular, no rim
 
+    bool  blended  = Tint.a > 1.5;                                // glass and the like: drawn in the blended pass
+    float coverage = 1.0;
     float3 albedo;
     if (textured)
     {
         float4 tex = DiffuseTex.Sample(Samp, i.uv);
-        clip(tex.a - 0.5);                                         // alpha-test: transparent texels (fences/grates/foliage)
+        if (blended) coverage = tex.a;                             // how much of the surface shows
+        else clip(tex.a - 0.5);                                    // alpha-test: transparent texels (fences/grates/foliage)
         // Tint is white for every material that HAS an albedo, so this is a no-op almost everywhere. It earns
         // its keep on the ones that do not: a car body's paint is a material colour, not a texture, and
         // sampling its missing albedo returns the cache's white placeholder — 1 × paint is the paint.
@@ -150,7 +156,7 @@ float4 PSMain(PSIn i) : SV_TARGET
         color = lerp(color, grey.xxx, 0.55);
         return float4(color, 0.30);
     }
-    return float4(color, 1.0);
+    return float4(color, coverage);
 }";
 
     /// <summary>Compiles an entry point from source; throws an exception with the FXC error text.</summary>
