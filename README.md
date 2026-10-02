@@ -148,8 +148,8 @@ The camera has two modes, switched by the top button of the viewport tool shelf 
 - **Reparent** an object anywhere in the hierarchy, with its own subtree excluded so cycles are
   impossible.
 - **Property panel** - position/rotation/scale, the object name (rewritten into the FrameNameTable
-  on save), frame-table flags, and type-specific fields for meshes, models, lights, cameras,
-  joints, dummies, sectors and more.
+  on save), frame-table flags, and type-specific fields for meshes (each LOD's draw distance among them),
+  models, lights, cameras, joints, dummies, sectors and more.
 - **Import** (`Ctrl+I`) reads glTF (`.glb`/`.gltf`) into a chosen loaded archive; meshes named
   `COL_*` become collision hulls, the rest become render meshes, and missing game materials can be
   created automatically.
@@ -178,10 +178,17 @@ full topology rebuilds, transforms, deletions, new objects and reshaped or brand
 hulls in a single undoable batch. While a session is open the rest of the scene renders ghosted and
 unselectable - **Tab** again or **Esc** leaves.
 
+A material made in Blender comes across too: an image on Base Color becomes a game material with
+its texture, and a Normal Map node adds the combined normal/specular map (the specular level is
+read from the Principled BSDF's specular input, a value or an image). The material is written to
+the library on Save and its textures are packed into the archive on Build.
+
 Limits worth knowing: untouched geometry round-trips bit-exactly (that is how a real reshape is
 told apart from an untouched one); a topology rebuild leaves lower LODs and collision with the old
 shape; collision placements refuse scale and mirror pushes (resize the hull with the toolkit's own
-gizmo instead); up to 128 collision placements per press.
+gizmo instead); up to 128 collision placements per press; a mesh that needs more than 65535
+vertices once split along sharp edges and UV seams is refused - the game cannot draw one - so
+split it into several objects.
 
 ### Saving, building, backups
 
@@ -199,8 +206,9 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 39 tools, all of them reading through the same format layer the editor uses, so what a
-model is told about a file is what the toolkit itself sees.
+It serves 64 tools. The file tools all read through the same format layer the editor uses, so what
+a model is told about a file is what the toolkit itself sees; the editor tools drive the running
+map editor itself.
 
 | Group | Tools |
 |-------|-------|
@@ -213,9 +221,19 @@ model is told about a file is what the toolkit itself sees.
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
+| **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_undo`, `editor_redo`, `editor_notices` |
+| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import` |
+| **Blender session** | `blender_open`, `blender_push`, `blender_end` |
+| **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
-Two of these are worth knowing about before you rely on them. `edit_stream_map` is the only tool
-that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a
+The editor, scene, Blender and viewport tools act on the open map editor exactly as its own
+commands do: every edit lands in the same undo history, nothing reaches disk before `editor_save`,
+and nothing reaches the game before `editor_build` (which keeps the usual timestamped backup).
+`scene_find` answers in world space and tests a box against the mesh's triangles, not its bounds;
+`viewport_screenshot` is how a client checks what a push actually looks like.
+
+Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
+only one that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a
 `<name>_old.bin` backup, and patches strings in place - so a replacement can never be longer than
 what it replaces. And `parse_effects_*` report the `.eff` container header only; the property tree
 inside is not decoded, and the responses say so rather than looking complete.
@@ -233,6 +251,9 @@ inside is not decoded, and the responses say so rather than looking complete.
 - Material-library edits are outside the backup/restore flow.
 - The MCP server does not decode the `.eff` effects property tree - only the container header.
 - Navigation overlays (`.nav`, `.nov`) are view-only.
+- Materials pushed from Blender are opaque: diffuse, or diffuse with a normal/specular map. Alpha
+  is not carried.
+- Light actors are placed and edited as data; the viewport does not draw their light.
 
 ## Contributing
 

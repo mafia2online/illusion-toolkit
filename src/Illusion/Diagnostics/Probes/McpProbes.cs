@@ -51,6 +51,12 @@ internal static class McpProbes
         "detect_file_format", "detect_format_from_bytes",
         // LuaTools
         "decompile_lua", "decompile_script_resource",
+        // EditorTools
+        "editor_status", "editor_list_areas", "editor_open_area", "scene_find", "scene_select",
+        "blender_open", "blender_push", "blender_end", "editor_notices", "editor_save", "editor_build",
+        "camera_get", "camera_look_at", "camera_set", "camera_frame_selection", "view_set",
+        "viewport_screenshot", "object_move", "scene_delete_selected", "scene_duplicate_selected",
+        "actor_import", "object_properties", "object_set_property", "editor_undo", "editor_redo",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
