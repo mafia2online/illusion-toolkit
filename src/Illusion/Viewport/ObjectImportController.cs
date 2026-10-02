@@ -287,6 +287,9 @@ internal sealed class ObjectImportController
             string name = hulls.Count == 1 ? $"{carried.Root.Name} collision" : $"{carried.Root.Name} collision {i + 1}";
             edits.AddRange(_host.CollisionEditing.BuildCreateHull(document, layer, hulls[i].Added, hulls[i].Placement, name) ?? []);
         }
+        // Written down, so the hulls move and are deleted with the object (see D3DImageHost.LinkedCollisionNodes).
+        Assets.Sds.ImportLinks.Set(Assets.MafiaEnvironment.ExtractedDir(destination), carried.Root.Name.String,
+            hulls.Select(h => h.Placement.Hash));
         summary = hulls.Count == 0
             ? "none — " + (refusal ?? "nothing to make one of")
             : hulls[0].FromSource

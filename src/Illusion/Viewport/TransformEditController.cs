@@ -73,6 +73,19 @@ internal sealed class TransformEditController
             if (n.Source is not IFrameNode fn || HasSelectedAncestor(fn, frames)) continue;
             _dragGroup.Add((n, fn.WorldTransform, fn.LocalTransform));
         }
+
+        // An object carried in from another archive drags the collision it was given along with it: nothing in
+        // the file ties the two, so without this the hull would stay where the object used to stand.
+        foreach ((SceneNode node, _, _) in _dragGroup.ToList())
+        {
+            foreach (SceneNode hull in _host.LinkedCollisionNodes(node))
+            {
+                if (hull.Source is IFrameNode h && _dragGroup.All(g => !ReferenceEquals(g.Node, hull)))
+                {
+                    _dragGroup.Add((hull, h.WorldTransform, h.LocalTransform));
+                }
+            }
+        }
     }
 
     // True if any frame-graph ancestor of fn is itself selected (its cascade will move fn).

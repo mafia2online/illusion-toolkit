@@ -277,10 +277,48 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// FrameResource — both undoable and both persisted by Save/Build.</summary>
     public void DeleteSelected()
     {
+        // An object carried in from another archive takes the collision it was given along — those hulls
+        // stand where it stood and are nothing without it.
+        List<SceneNode> selected = [.. Selection.Selected];
+        List<SceneNode> linked = [.. selected.SelectMany(LinkedCollisionNodes).Where(n => !selected.Contains(n)).Distinct()];
+        if (linked.Count > 0) Selection.SetSelection([.. selected, .. linked], SelectedNode);
+
+        int before = Editing.History.UndoCount;
         ActorEditing.DeleteSelected();     // actors (drops their record from the .act pack)
         CollisionEditing.DeleteSelected(); // collision instances (drops them from the selection)
         CrashEditing.DeleteSelected();     // city_crash placements, in both seasons when linked
         Editing.DeleteSelected();          // frame objects (its DeletableRoots excludes collision)
+        // One Delete is one Ctrl+Z, however many kinds of thing it took out.
+        Editing.History.SquashSince(before, edits => new CompositeEdit(edits));
+    }
+
+    /// <summary>
+    /// The collision placements a piece of scenery this toolkit carried in was given (<see cref="ImportLinks"/>):
+    /// for each recorded hull, the placement of it nearest the object, within a few metres. Empty for everything
+    /// else — a stock object's collision is not tied to it by anything, and guessing by position would take a
+    /// building's hull along with a bench.
+    /// </summary>
+    internal IReadOnlyList<SceneNode> LinkedCollisionNodes(SceneNode node)
+    {
+        if (node.Source is not FrameNodeAdapter frame || node.OwningDocumentNode() is not { Source: SceneDocumentAdapter scene } documentNode)
+        {
+            return [];
+        }
+        IReadOnlyList<ulong> hulls = Assets.Sds.ImportLinks.HullsOf(Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive),
+            frame.Frame.Name.String);
+        if (hulls.Count == 0 || FindCollisionLayer(documentNode) is not { } layer) return [];
+
+        Vector3 at = frame.WorldTransform.Translation;
+        var found = new List<SceneNode>();
+        foreach (ulong hash in hulls)
+        {
+            SceneNode? nearest = layer.Children
+                .Where(c => c.Source is CollisionInstanceAdapter ci && ci.Instance.Hash == hash
+                            && Vector3.Distance(ci.Instance.Position, at) < 5f)
+                .MinBy(c => Vector3.Distance(((CollisionInstanceAdapter)c.Source!).Instance.Position, at));
+            if (nearest != null) found.Add(nearest);
+        }
+        return found;
     }
 
     /// <summary>Whether the selection has anything duplicable — a static mesh or a collision placement.</summary>
