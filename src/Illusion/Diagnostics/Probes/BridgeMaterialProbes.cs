@@ -120,16 +120,16 @@ internal static class BridgeMaterialProbes
             // A created material has to look like the stock ones on its shader in EVERY field, not only
             // the ones the editor shows: one left at zero in Unk0 and the sampler's TexType drew black in
             // game. The reference is whatever most stock materials on that shader carry.
-            if (MafiaMaterials.Collection?.FindByHash(createdHash) is Formats.Materials.Versions.Material_v57 made)
+            if (MafiaMaterials.Collection?.FindByHash(createdHash) is Formats.Materials.Versions.Material_v57 fresh)
             {
                 var peers = MafiaMaterials.Collection.Libraries.Values
                     .SelectMany(l => l.Materials.Values).OfType<Formats.Materials.Versions.Material_v57>()
-                    .Where(m => m.ShaderID == made.ShaderID && !ReferenceEquals(m, made) && m.Samplers.Count > 0).ToList();
+                    .Where(m => m.ShaderID == fresh.ShaderID && !ReferenceEquals(m, fresh) && m.Samplers.Count > 0).ToList();
                 byte commonUnk0 = peers.GroupBy(m => m.Unk0).OrderByDescending(g => g.Count()).First().Key;
                 byte commonType = peers.GroupBy(m => m.Samplers[0].TexType).OrderByDescending(g => g.Count()).First().Key;
                 Check("the created material matches the stock record on its shader (Unk0, sampler TexType)",
-                    made.Unk0 == commonUnk0 && made.Samplers[0].TexType == commonType,
-                    $"Unk0 {made.Unk0} vs {commonUnk0}, TexType {made.Samplers[0].TexType} vs {commonType}, over {peers.Count} stock materials");
+                    fresh.Unk0 == commonUnk0 && fresh.Samplers[0].TexType == commonType,
+                    $"Unk0 {fresh.Unk0} vs {commonUnk0}, TexType {fresh.Samplers[0].TexType} vs {commonType}, over {peers.Count} stock materials");
             }
             string texturePath = Path.Combine(extracted, texture ?? "?");
             if (texture != null) writtenFiles.Add(texturePath);
