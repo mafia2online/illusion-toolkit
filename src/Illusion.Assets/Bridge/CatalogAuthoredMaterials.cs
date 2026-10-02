@@ -41,11 +41,17 @@ public sealed class CatalogAuthoredMaterials : IAuthoredMaterialHost
     public ulong? Replace(ulong hash, AuthoredMaterial material) =>
         _catalog.RemoveMaterial(hash) == null ? null : Create(material);
 
-    /// <summary>Writes the texture names and the specular values into a material that already has the
-    /// slots for them. Shared with the application's host, which wraps it in history entries.</summary>
+    /// <summary>Writes the texture names, the alpha flags and the specular values into a material that
+    /// already has the slots for them. Shared with the application's host, which wraps it in history
+    /// entries.</summary>
     public static bool Apply(MafiaMaterialCatalog catalog, ulong hash, AuthoredMaterial material)
     {
         if (!catalog.SetTexture(hash, "S000", material.Diffuse)) return false;
+        if (catalog.GetFlags(hash) is not { } flags
+            || !catalog.SetFlags(hash, AuthoredAlphaFlags.Apply(flags, material.Alpha)))
+        {
+            return false;
+        }
         if (material.NormalSpecular == null) return true;
         if (!catalog.SetTexture(hash, "S001", material.NormalSpecular)) return false;
         return catalog.SetParameter(hash, SpecularParameter, [material.SpecularPower, material.SpecularLevel]);

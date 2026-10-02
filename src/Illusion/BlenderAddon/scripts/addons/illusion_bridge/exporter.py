@@ -310,18 +310,31 @@ def _describe_authored(material, entry, blocks, image_refs, signatures):
     specular = materials.specular_image(material)
     level = materials.specular_level(material)
     roughness = materials.roughness(material)
+    alpha = materials.alpha_use(material)
 
     # Unsaved paint on any image has no cheap identity, so it resends every time (signature None).
     parts = [materials.image_signature(i) for i in (diffuse, normal, specular) if i is not None]
-    signature = None if any(p is None for p in parts) else "|".join(
-        parts + [f"n={normal is not None}", f"s={specular is not None}", f"level={level}", f"rough={roughness}"])
+    values = [f"n={normal is not None}", f"s={specular is not None}", f"level={level}", f"rough={roughness}"]
+    alpha_key = ""
+    if alpha is not None:
+        # Only a material that uses alpha gains a term, so an opaque one keeps the signature it was
+        # stamped with before alpha existed and is not resent for nothing.
+        mode, mask, channel, value = alpha
+        if mask is not None and mask != diffuse:
+            parts.append(materials.image_signature(mask))
+        alpha_key = f"alpha={mode}:{channel}:{value}:{mask.name if mask is not None else ''}"
+        values.append(alpha_key)
+    signature = None if any(p is None for p in parts) else "|".join(parts + values)
     if game_hash and signature is not None and signature == material.get(materials.SIGNATURE_PROP):
         return
 
     for key, image in (("diffuseImage", diffuse), ("normalImage", normal), ("specularImage", specular)):
         if image is None:
             continue
-        ref = image_refs.get(image.name)
+        # The same image is a different texture once a material writes its own alpha into it.
+        with_alpha = key == "diffuseImage" and alpha is not None
+        ref_key = f"{image.name}|{alpha_key}" if with_alpha else image.name
+        ref = image_refs.get(ref_key)
         if ref is None:
             packed = materials.image_rgba8(image)
             if packed is None:
@@ -329,14 +342,18 @@ def _describe_authored(material, entry, blocks, image_refs, signatures):
                     return
                 continue
             pixels, width, height = packed
+            if with_alpha:
+                pixels = materials.with_alpha(pixels, width, height, image, alpha)
             ref = {
                 "name": image.name,
                 "width": width,
                 "height": height,
                 "block": _add_block(blocks, "u8", 4, width * height, pixels),
             }
-            image_refs[image.name] = ref
+            image_refs[ref_key] = ref
         entry[key] = ref
+    if alpha is not None:
+        entry["alphaMode"] = alpha[0]
     if level is not None:
         entry["specularLevel"] = level
     if roughness is not None:

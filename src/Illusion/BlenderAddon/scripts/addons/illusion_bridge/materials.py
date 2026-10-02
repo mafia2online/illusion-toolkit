@@ -184,6 +184,69 @@ def roughness(material):
     return None if socket is None or socket.is_linked else float(socket.default_value)
 
 
+def alpha_use(material):
+    """How the material uses alpha: None when it is opaque, else (mode, image, channel, value).
+
+    mode is "blend" for a translucent surface and "clip" for a cut-out — the two things the game can do
+    with a diffuse texture's alpha. Which one is read off the material's own render setting, the one
+    that already decides how Blender draws it: Blended is a blend, anything else (Dithered, the
+    default) is a cut-out.
+
+    The alpha itself comes from whatever feeds the Principled BSDF's Alpha: an image's Alpha output
+    (channel "A"), an image's Color used as a mask (channel "L"), or — with nothing plugged in — the
+    plain value, which only makes sense as a blend. A value of 1 with nothing plugged in is opaque.
+    """
+    principled = _principled(material)
+    socket = None if principled is None else principled.inputs.get("Alpha")
+    if socket is None:
+        return None
+    blended = (getattr(material, "surface_render_method", None) == 'BLENDED'
+               or getattr(material, "blend_method", None) == 'BLEND')
+    if socket.is_linked:
+        link = socket.links[0]
+        node = link.from_node
+        if node.type == 'TEX_IMAGE' and node.image is not None:
+            image, channel = node.image, ("A" if link.from_socket.name == "Alpha" else "L")
+        else:
+            image, channel = _image_behind(socket), "L"
+            if image is None:
+                return None
+        return ("blend" if blended else "clip", image, channel, None)
+    value = float(socket.default_value)
+    if value >= 0.999:
+        return None
+    return ("blend", None, None, value)
+
+
+def with_alpha(pixels, width, height, diffuse, alpha):
+    """The diffuse image's RGBA8 pixels with the alpha the material means written into the fourth byte.
+
+    `pixels` is what image_rgba8 returned for `diffuse`; `alpha` is what alpha_use returned. An image
+    that is its own alpha source is left as it is; a separate mask is brought to the diffuse image's
+    size first.
+    """
+    _, image, channel, value = alpha
+    if image is None:
+        out = pixels.copy()
+        out[:, 3] = int(round(max(0.0, min(1.0, value)) * 255.0))
+        return out
+    if image == diffuse and channel == "A":
+        return pixels
+    packed = image_rgba8(image)
+    if packed is None:
+        return pixels
+    mask, mask_width, mask_height = packed
+    mask = mask.reshape(mask_height, mask_width, 4).astype(np.float32)
+    mask = _resample(_resample(mask, width, axis=1), height, axis=0)
+    if channel == "A":
+        coverage = mask[..., 3]
+    else:
+        coverage = mask[..., 0] * 0.2126 + mask[..., 1] * 0.7152 + mask[..., 2] * 0.0722
+    out = pixels.copy()
+    out[:, 3] = np.clip(coverage + 0.5, 0.0, 255.0).astype(np.uint8).reshape(-1)
+    return out
+
+
 def _principled(material):
     tree = getattr(material, "node_tree", None)
     if tree is None:

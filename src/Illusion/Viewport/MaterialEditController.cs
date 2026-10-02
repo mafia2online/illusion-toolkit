@@ -102,6 +102,25 @@ internal sealed class MaterialEditController
         if (Catalog.SetParameter(hash, paramId, values)) AfterMaterialChanged(hash);
     }
 
+    // ── Flags ──
+
+    /// <summary>Replaces a material's flag word (undoable). False when the material is unknown.</summary>
+    public bool SetFlags(ulong hash, Illusion.Formats.Materials.MaterialFlags flags)
+    {
+        MafiaMaterialCatalog catalog = MafiaMaterialCatalog.Instance;
+        if (catalog.GetFlags(hash) is not { } before) return false;
+        if (before == flags) return true; // no-op — nothing to record
+        if (!catalog.SetFlags(hash, flags)) return false;
+        _host.Editing.History.Push(new FlagsEdit(this, hash, before, flags));
+        AfterMaterialChanged(hash);
+        return true;
+    }
+
+    private void ApplyFlags(ulong hash, Illusion.Formats.Materials.MaterialFlags flags)
+    {
+        if (MafiaMaterialCatalog.Instance.SetFlags(hash, flags)) AfterMaterialChanged(hash);
+    }
+
     /// <summary>Adds a shader parameter the material does not carry yet (undoable). False when the code
     /// is already present or the float count contradicts the loaded libraries' canonical length.</summary>
     public bool AddParameter(ulong hash, string paramId, IReadOnlyList<float> values)
@@ -149,6 +168,11 @@ internal sealed class MaterialEditController
     public bool UpdateAuthored(ulong hash, AuthoredMaterial material)
     {
         if (!SetTexture(hash, "S000", material.Diffuse)) return false;
+        if (MafiaMaterialCatalog.Instance.GetFlags(hash) is not { } flags
+            || !SetFlags(hash, AuthoredAlphaFlags.Apply(flags, material.Alpha)))
+        {
+            return false;
+        }
         if (material.NormalSpecular == null) return true;
         if (!SetTexture(hash, "S001", material.NormalSpecular)) return false;
         return SetParameter(hash, "D013", [material.SpecularPower, material.SpecularLevel]);
@@ -291,6 +315,26 @@ internal sealed class MaterialEditController
 
         public void Undo() => _owner.ApplyTexture(_hash, _slotId, _before);
         public void Redo() => _owner.ApplyTexture(_hash, _slotId, _after);
+    }
+
+    private sealed class FlagsEdit : IEditAction
+    {
+        private readonly MaterialEditController _owner;
+        private readonly ulong _hash;
+        private readonly Illusion.Formats.Materials.MaterialFlags _before;
+        private readonly Illusion.Formats.Materials.MaterialFlags _after;
+
+        public FlagsEdit(MaterialEditController owner, ulong hash,
+            Illusion.Formats.Materials.MaterialFlags before, Illusion.Formats.Materials.MaterialFlags after)
+        {
+            _owner = owner;
+            _hash = hash;
+            _before = before;
+            _after = after;
+        }
+
+        public void Undo() => _owner.ApplyFlags(_hash, _before);
+        public void Redo() => _owner.ApplyFlags(_hash, _after);
     }
 
     private sealed class AddSlotEdit : IEditAction

@@ -4,8 +4,8 @@ using System.Numerics;
 namespace Illusion.Assets.Textures;
 
 /// <summary>
-/// Encodes RGBA8 pixels into the DDS shapes the game ships its textures in: DXT1 with the exact headers
-/// stock files carry.
+/// Encodes RGBA8 pixels into the DDS shapes the game ships its textures in: DXT1 for an opaque texture and
+/// DXT5 for one whose alpha matters, with the exact headers stock files carry.
 /// <para>
 /// The game stores a texture in one of two ways, and which one is decided by size (measured over the city,
 /// car, shop and crash archives — 6747 split textures, none of them an exception):
@@ -31,17 +31,20 @@ public static class DdsEncoder
     /// the .dds for the <c>Texture</c> entry; <c>TopLevel</c> is the .dds for its <c>Mipmap</c> companion,
     /// or null when the texture is small enough to be one file.
     /// </summary>
-    public static (byte[] Texture, byte[]? TopLevel) Encode(ReadOnlySpan<byte> rgba, int width, int height)
+    /// <param name="alpha">Keep the alpha channel (DXT5). Without it the texture is DXT1 and opaque, at
+    /// half the size.</param>
+    public static (byte[] Texture, byte[]? TopLevel) Encode(
+        ReadOnlySpan<byte> rgba, int width, int height, bool alpha = false)
     {
         Validate(rgba, width, height);
-        if (!IsSplit(width, height)) return (EncodeDxt1(rgba, width, height), null);
+        if (!IsSplit(width, height)) return (EncodeChain(rgba, width, height, alpha), null);
 
-        var top = new byte[HeaderSize + BlockBytes(width, height)];
-        WriteHeader(top, width, height, 1);
+        var top = new byte[HeaderSize + BlockBytes(width, height, alpha)];
+        WriteHeader(top, width, height, 1, alpha);
         byte[] full = rgba.ToArray();
-        EncodeLevel(full, width, height, top.AsSpan(HeaderSize));
+        EncodeLevel(full, width, height, top.AsSpan(HeaderSize), alpha);
         byte[] half = Downsample(full, width, height, out int halfWidth, out int halfHeight);
-        return (EncodeDxt1(half, halfWidth, halfHeight), top);
+        return (EncodeChain(half, halfWidth, halfHeight, alpha), top);
     }
 
     private static void Validate(ReadOnlySpan<byte> rgba, int width, int height)
@@ -57,32 +60,41 @@ public static class DdsEncoder
     /// opaque) into ONE .dds file with a full MIP chain. Both dimensions must be powers of two. This is the
     /// whole texture only below 256×256 — use <see cref="Encode"/> for anything headed into the game.
     /// </summary>
-    public static byte[] EncodeDxt1(ReadOnlySpan<byte> rgba, int width, int height)
+    public static byte[] EncodeDxt1(ReadOnlySpan<byte> rgba, int width, int height) =>
+        EncodeChain(rgba, width, height, alpha: false);
+
+    /// <summary>The same single file with its full MIP chain, as DXT5: the colour blocks of DXT1 with an
+    /// interpolated alpha block in front of each.</summary>
+    public static byte[] EncodeDxt5(ReadOnlySpan<byte> rgba, int width, int height) =>
+        EncodeChain(rgba, width, height, alpha: true);
+
+    private static byte[] EncodeChain(ReadOnlySpan<byte> rgba, int width, int height, bool alpha)
     {
         Validate(rgba, width, height);
 
         int mips = 1 + BitOperations.Log2((uint)Math.Max(width, height));
         int total = HeaderSize;
         for (int level = 0; level < mips; level++)
-            total += BlockBytes(Math.Max(1, width >> level), Math.Max(1, height >> level));
+            total += BlockBytes(Math.Max(1, width >> level), Math.Max(1, height >> level), alpha);
 
         var dds = new byte[total];
-        WriteHeader(dds, width, height, mips);
+        WriteHeader(dds, width, height, mips, alpha);
 
         byte[] current = rgba.ToArray();
         int w = width, h = height, offset = HeaderSize;
         for (int level = 0; level < mips; level++)
         {
-            offset += EncodeLevel(current, w, h, dds.AsSpan(offset));
+            offset += EncodeLevel(current, w, h, dds.AsSpan(offset), alpha);
             if (level == mips - 1) break;
             current = Downsample(current, w, h, out w, out h);
         }
         return dds;
     }
 
-    private static int BlockBytes(int w, int h) => Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * 8;
+    private static int BlockBytes(int w, int h, bool alpha) =>
+        Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * (alpha ? 16 : 8);
 
-    private static void WriteHeader(Span<byte> dds, int width, int height, int mips)
+    private static void WriteHeader(Span<byte> dds, int width, int height, int mips, bool alpha)
     {
         dds[0] = (byte)'D';
         dds[1] = (byte)'D';
@@ -100,7 +112,7 @@ public static class DdsEncoder
         dds[84] = (byte)'D';
         dds[85] = (byte)'X';
         dds[86] = (byte)'T';
-        dds[87] = (byte)'1';
+        dds[87] = alpha ? (byte)'5' : (byte)'1';
         BinaryPrimitives.WriteUInt32LittleEndian(dds[108..], mips > 1 ? 0x401000u : 0x1000u); // TEXTURE (| MIPMAP)
     }
 
@@ -128,10 +140,12 @@ public static class DdsEncoder
         return dst;
     }
 
-    private static int EncodeLevel(byte[] rgba, int w, int h, Span<byte> output)
+    private static int EncodeLevel(byte[] rgba, int w, int h, Span<byte> output, bool alpha)
     {
         int bw = Math.Max(1, (w + 3) / 4), bh = Math.Max(1, (h + 3) / 4);
+        int size = alpha ? 16 : 8;
         Span<Vector3> block = stackalloc Vector3[16];
+        Span<byte> coverage = stackalloc byte[16];
         for (int by = 0; by < bh; by++)
         {
             for (int bx = 0; bx < bw; bx++)
@@ -143,11 +157,56 @@ public static class DdsEncoder
                     int y = Math.Min(h - 1, by * 4 + (i >> 2));
                     int p = (y * w + x) * 4;
                     block[i] = new Vector3(rgba[p], rgba[p + 1], rgba[p + 2]);
+                    coverage[i] = rgba[p + 3];
                 }
-                EncodeBlock(block, output.Slice((by * bw + bx) * 8, 8));
+                Span<byte> target = output.Slice((by * bw + bx) * size, size);
+                if (alpha)
+                {
+                    EncodeAlphaBlock(coverage, target);
+                    target = target[8..];
+                }
+                EncodeBlock(block, target);
             }
         }
-        return bw * bh * 8;
+        return bw * bh * size;
+    }
+
+    // The DXT5 alpha block: two 8-bit endpoints and sixteen 3-bit indices into the eight values spread
+    // between them. Endpoints are the block's extremes, ordered high first — the order that selects the
+    // eight-value palette rather than the six-value one with hard 0 and 255.
+    private static void EncodeAlphaBlock(ReadOnlySpan<byte> alpha, Span<byte> output)
+    {
+        byte lo = 255, hi = 0;
+        foreach (byte a in alpha)
+        {
+            lo = Math.Min(lo, a);
+            hi = Math.Max(hi, a);
+        }
+        output[0] = hi;
+        output[1] = lo;
+        ulong indices = 0;
+        if (hi != lo)
+        {
+            Span<int> palette = stackalloc int[8];
+            palette[0] = hi;
+            palette[1] = lo;
+            for (int k = 1; k <= 6; k++) palette[k + 1] = ((7 - k) * hi + k * lo + 3) / 7;
+            for (int i = 0; i < 16; i++)
+            {
+                int best = 0, bestDistance = int.MaxValue;
+                for (int k = 0; k < 8; k++)
+                {
+                    int distance = Math.Abs(alpha[i] - palette[k]);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = k;
+                    }
+                }
+                indices |= (ulong)best << (i * 3);
+            }
+        }
+        for (int b = 0; b < 6; b++) output[2 + b] = (byte)(indices >> (b * 8));
     }
 
     private static void EncodeBlock(ReadOnlySpan<Vector3> block, Span<byte> output)

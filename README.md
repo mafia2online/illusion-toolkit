@@ -180,8 +180,12 @@ unselectable - **Tab** again or **Esc** leaves.
 
 A material made in Blender comes across too: an image on Base Color becomes a game material with
 its texture, and a Normal Map node adds the combined normal/specular map (the specular level is
-read from the Principled BSDF's specular input, a value or an image). The material is written to
-the library on Save and its textures are packed into the archive on Build.
+read from the Principled BSDF's specular input, a value or an image). Alpha comes across as well:
+whatever feeds the Principled BSDF's Alpha - the image's own alpha, a mask, or a plain value below
+1 - is stored in the diffuse texture, and the material's render method decides what the game does
+with it: *Blended* becomes a translucent surface (glass), anything else a cut-out (a fence, a
+grille). The material is written to the library on Save and its textures are packed into the
+archive on Build.
 
 Limits worth knowing: untouched geometry round-trips bit-exactly (that is how a real reshape is
 told apart from an untouched one); a topology rebuild leaves lower LODs and collision with the old
@@ -251,8 +255,8 @@ inside is not decoded, and the responses say so rather than looking complete.
 - Material-library edits are outside the backup/restore flow.
 - The MCP server does not decode the `.eff` effects property tree - only the container header.
 - Navigation overlays (`.nav`, `.nov`) are view-only.
-- Materials pushed from Blender are opaque: diffuse, or diffuse with a normal/specular map. Alpha
-  is not carried.
+- The viewport draws every material opaque, the stock cut-out and translucent ones included; a
+  material pushed with alpha looks right in Blender and in the game, not here.
 - Light actors are placed and edited as data; the viewport does not draw their light.
 
 ## Contributing
