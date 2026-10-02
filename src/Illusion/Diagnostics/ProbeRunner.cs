@@ -168,6 +168,11 @@ internal static class ProbeRunner
             // piece of scenery go from an interior into a district — frames, buffers, actor, prefab entry,
             // item descriptions — and survive a save and a reload; an undo leaves the scene byte for byte.
             // Output: %TEMP%\illusion_object_transplant.txt
+            // The prop library: what a scan of the extracted archives finds, shelf by shelf, and a few pictures.
+            // Output: %TEMP%\illusion_prop_catalog.txt
+            case "--probe-prop-catalog":
+                PropCatalogProbes.RunPropCatalogProbe();
+                return true;
             case "--probe-object-transplant":
                 ObjectTransplantProbes.RunObjectTransplantProbe(
                     args.Length >= 2 ? args[1] : "hill",

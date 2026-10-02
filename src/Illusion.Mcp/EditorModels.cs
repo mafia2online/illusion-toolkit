@@ -62,7 +62,7 @@ public sealed record SeasonMirrorOutcome(
 /// archive the game loads beside the source, and may not be loaded where the object now stands.</summary>
 public sealed record ObjectImportOutcome(
     string Kind, string Name, int Frames, int Meshes, IReadOnlyList<string> Textures, int ItemDescriptions,
-    bool Prefab, IReadOnlyList<string> TexturesElsewhere, int UnresolvedCollisions);
+    bool Prefab, IReadOnlyList<string> TexturesElsewhere, int UnresolvedCollisions, string Collision);
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);

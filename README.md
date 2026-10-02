@@ -160,6 +160,12 @@ The camera has two modes, switched by the top button of the viewport tool shelf 
   district's scene. Geometry is copied into the district's own pools and the textures its materials name
   into its working copy, so nothing depends on the source archive being loaded. `--probe-object-transplant`
   carries a door, a prop and a piece of scenery onto a scratch copy and reads them back.
+- **Props tab** (map editor): the stock game's doors, seating, tables, beds, storage, plants, lamps and decor
+  from every extracted interior and district, one card per object with a picture. Drag a card onto the
+  viewport to put the object where it lands, or double-click it to put it in front of the camera. Scenery
+  arrives with its own collision hulls, or one cooked from its triangles when it had none; a door is made
+  openable by the player even where its own building's script used to do that. The scan is remembered
+  between runs (`--probe-prop-catalog`).
 
 ### Materials
 
@@ -264,8 +270,8 @@ inside is not decoded, and the responses say so rather than looking complete.
 
 - The Resource Editor tile is a stub.
 - Duplicating frame objects covers static single-mesh objects only.
-- Objects carried from another archive: skinned models cannot travel yet, scenery arrives without
-  collision (its hull lives in the source's collision resource, keyed by position), and each import copies
+- Objects carried from another archive: skinned models cannot travel yet, a cooked hull follows the
+  render triangles rather than a simplified shape, and each import copies
   its geometry — import once and duplicate inside the district rather than importing the same thing twice.
 - A topology rebuild does not regenerate lower LODs or collision for that object.
 - `.sds.patch`, `.tra` and `cityareas.bin` are read-only. `StreamMap*.bin` is read-only in the

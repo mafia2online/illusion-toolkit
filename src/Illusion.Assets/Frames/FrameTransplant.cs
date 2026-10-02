@@ -318,27 +318,44 @@ public static class FrameTransplant
     /// shipped ones stand on it. Null when nothing in the subtree decodes.
     /// </para>
     /// </summary>
-    public static Vector3? BaseOf(FrameObjectBase root)
+    public static Vector3? BaseOf(FrameObjectBase root) =>
+        BoundsOf(root) is { } bounds
+            ? new Vector3((bounds.Min.X + bounds.Max.X) / 2f, (bounds.Min.Y + bounds.Max.Y) / 2f, bounds.Min.Z)
+            : null;
+
+    /// <summary>The box everything the subtree draws fits in, in its root's own space. Null when nothing decodes.</summary>
+    public static (Vector3 Min, Vector3 Max)? BoundsOf(FrameObjectBase root)
     {
         ArgumentNullException.ThrowIfNull(root);
         if (!Matrix4x4.Invert(root.WorldTransform, out Matrix4x4 toRoot)) return null;
-        var subtree = new List<FrameObjectBase>();
-        Collect(root, subtree, new HashSet<FrameObjectBase>());
-
         Vector3 min = new(float.MaxValue), max = new(float.MinValue);
-        foreach (FrameObjectSingleMesh mesh in subtree.OfType<FrameObjectSingleMesh>())
+        foreach ((Vector3[] positions, _) in TrianglesOf(root))
         {
-            if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Geometry)) continue;
-            if (SdsMeshLoader.DecodeLod0(mesh) is not { } decoded) continue;
-            Matrix4x4 toRootSpace = mesh.WorldTransform * toRoot;
-            foreach (Vector3 position in decoded.Positions)
+            foreach (Vector3 position in positions)
             {
-                Vector3 p = Vector3.Transform(position, toRootSpace);
+                Vector3 p = Vector3.Transform(position, toRoot);
                 min = Vector3.Min(min, p);
                 max = Vector3.Max(max, p);
             }
         }
-        return min.X > max.X ? null : new Vector3((min.X + max.X) / 2f, (min.Y + max.Y) / 2f, min.Z);
+        return min.X > max.X ? null : (min, max);
+    }
+
+    /// <summary>Every triangle the subtree draws at its finest level, in WORLD space — what a hull is cooked from.</summary>
+    public static IReadOnlyList<(Vector3[] Positions, uint[] Indices)> TrianglesOf(FrameObjectBase root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        var subtree = new List<FrameObjectBase>();
+        Collect(root, subtree, new HashSet<FrameObjectBase>());
+        var meshes = new List<(Vector3[], uint[])>();
+        foreach (FrameObjectSingleMesh mesh in subtree.OfType<FrameObjectSingleMesh>())
+        {
+            if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Geometry)) continue;
+            if (SdsMeshLoader.DecodeLod0(mesh) is not { } decoded) continue;
+            Matrix4x4 world = mesh.WorldTransform;
+            meshes.Add((decoded.Positions.Select(p => Vector3.Transform(p, world)).ToArray(), decoded.Indices));
+        }
+        return meshes;
     }
 
     private static void Collect(FrameObjectBase frame, List<FrameObjectBase> into, HashSet<FrameObjectBase> seen)

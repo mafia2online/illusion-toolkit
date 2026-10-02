@@ -33,6 +33,16 @@ public partial class ScenePropertyTabs : UserControl
         Effects.AddCopyRequested += selection.AddEffectCopy;
     }
 
+    /// <summary>
+    /// Turns the Props tab on — for the map editor, which has a district to put props in. A tile dropped on the
+    /// viewport or double-clicked is handed to <paramref name="place"/>.
+    /// </summary>
+    public void EnableProps(Action<Assets.Library.PropEntry, Point?> place)
+    {
+        PropsTab.Visibility = Visibility.Visible;
+        Props.PlaceRequested += place;
+    }
+
     /// <summary>The Tuning tab, which is what an EntityDataStorage tile opens onto.</summary>
     public void ShowTuning()
     {
@@ -56,8 +66,11 @@ public partial class ScenePropertyTabs : UserControl
             selection.IsScene ? SceneTab :
             selection.HasTypeProperties ? TypeTab : // type-only selections (e.g. a collision placement) surface their type tab
             RenderTab;
+        // The Props tab is kept too: placing several props in a row selects each one as it lands, and being
+        // thrown off the shelf after every drop would make that a chore.
         bool keepCurrent = PropertyTabs.SelectedItem is TabItem cur && cur.Visibility == Visibility.Visible
-            && (ReferenceEquals(cur, ObjectTab) || ReferenceEquals(cur, TypeTab) || ReferenceEquals(cur, MaterialsTab));
+            && (ReferenceEquals(cur, ObjectTab) || ReferenceEquals(cur, TypeTab) || ReferenceEquals(cur, MaterialsTab)
+                || ReferenceEquals(cur, PropsTab));
         if (!keepCurrent) target.IsSelected = true; // its Visibility binding has already made it visible
     }
 }

@@ -1,8 +1,10 @@
+using System.IO;
 using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
 using Illusion.Formats.Actors;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Mcp;
 using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 using TransplantedObject = Illusion.Assets.Frames.FrameTransplant.TransplantedObject;
@@ -27,11 +29,14 @@ internal sealed class ObjectImportController
 
     /// <summary>Shows a carried piece of scenery and returns its root row.</summary>
     /// <param name="frameRow">The "FrameResource" row of the archive that received it.</param>
-    public SceneNode ImportScenery(SceneNode frameRow, TransplantedObject carried)
+    /// <param name="also">Edits that belong to the same import — the collision placed for it — applied after
+    /// it and undone with it, as one step.</param>
+    public SceneNode ImportScenery(SceneNode frameRow, TransplantedObject carried, IReadOnlyList<Domain.IEditAction> also)
     {
         var edit = new ImportObjectEdit(this, frameRow, carried, BuildRows(frameRow, carried), actor: null);
         edit.Redo();
-        _host.History.Push(edit);
+        foreach (Domain.IEditAction extra in also) extra.Redo();
+        _host.History.Push(also.Count == 0 ? edit : new CompositeEdit([edit, .. also]));
         return edit.RootRow;
     }
 
@@ -74,6 +79,239 @@ internal sealed class ObjectImportController
         edit.Redo();
         _host.History.Push(edit);
         return node;
+    }
+
+    /// <summary>
+    /// Copies an object out of another archive into <paramref name="destination"/>, which must be in the
+    /// loaded scene — the whole import as one undoable edit: an actor with the object it places, or a piece of
+    /// scenery with its collision. Null on success; otherwise why not.
+    /// </summary>
+    /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
+    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's; null keeps it.</param>
+    public string? Import(FileInfo destination, string sourceArchive, string name, string newName, Vector3 at,
+        float? yawDegrees, out Mcp.ObjectImportOutcome? outcome)
+    {
+        outcome = null;
+        if (_host.BridgeEditedCount > 0) return "a Blender edit session is open — end it first";
+        // The receiving archive's two rows: its scene, and — when it has a pack — its actors.
+        SceneNode? frameRow = AllNodes().FirstOrDefault(n => n.Source is Assets.Adapters.SceneDocumentAdapter d
+            && string.Equals(d.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase));
+        if (frameRow?.Source is not Assets.Adapters.SceneDocumentAdapter scene)
+        {
+            return $"{destination.Name} is not in the loaded scene yet — wait for the area to finish loading";
+        }
+        SceneNode? actorsRow = AllNodes().FirstOrDefault(
+            n => n.Source is Assets.Adapters.ActorDocumentAdapter a && ReferenceEquals(a.Scene, scene));
+
+        var sds = new FileInfo(Path.IsPathRooted(sourceArchive)
+            ? sourceArchive
+            : Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", sourceArchive));
+        if (!sds.Exists) return $"no such archive: {sds.FullName}";
+        if (string.Equals(sds.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            return "that is the loaded archive itself — duplicate the object instead (scene_duplicate_selected)";
+        }
+
+        try
+        {
+            string sourceDir = Assets.Sds.SdsMeshLoader.EnsureExtracted(sds);
+            Formats.Frames.ExtractedSds source = Formats.Frames.ExtractedSds.Load(sourceDir);
+            if (source.FrameResource is not { } theirs) return $"{sds.Name} carries no scene";
+            Assets.Actors.ActorPlacements theirPlacements = Assets.Actors.ActorPlacements.Load(source.Manifest, theirs);
+
+            Quaternion? facing = yawDegrees is { } yaw
+                ? Quaternion.CreateFromAxisAngle(Vector3.UnitZ, yaw * MathF.PI / 180f)
+                : null;
+
+            Formats.Actors.ActorEntry? actor = theirPlacements.All.FirstOrDefault(
+                a => string.Equals(a.EntityName, name, StringComparison.OrdinalIgnoreCase));
+            Assets.Frames.FrameTransplant.TransplantedObject? carried;
+            Assets.Sds.ArchiveCarry.Report carry;
+            string kind;
+            string? reason;
+            string collision = "its own hulls, carried with it";
+
+            // What the scene does not hold — textures, item descriptions, the prefab entry — goes into the working
+            // copy as soon as the frames are copied and BEFORE the viewport builds the meshes, which look their
+            // textures up as they are made. Inert until something names them, so a refusal after this point
+            // leaves a few unused files rather than a scene that names missing ones.
+            Assets.Sds.ArchiveCarry.Report Carry(Assets.Frames.FrameTransplant.TransplantedObject copied) =>
+                Assets.Sds.ArchiveCarry.Carry(sourceDir, Assets.MafiaEnvironment.ExtractedDir(destination),
+                    copied.MaterialHashes, copied.CollisionHashes, actor?.LinkedDefinition);
+            if (actor != null)
+            {
+                if (theirPlacements.TargetOf(actor) is not { } prototype)
+                {
+                    return $"'{name}' places no object of its archive's scene — it travels with actor_import";
+                }
+                if (actorsRow == null) return $"{destination.Name} has no actor pack to add an actor to";
+                if (theirPlacements.PackOf(actor) is not { } theirPack) return $"'{name}' belongs to no pack";
+
+                carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, prototype, newName,
+                    Assets.Frames.FrameTransplant.Standing.Prototype, Matrix4x4.Identity, out reason);
+                if (carried == null) return reason ?? "the object could not be copied";
+                carry = Carry(carried);
+                if (ImportPlaced(actorsRow, frameRow, theirPack, actor, newName, at, facing,
+                        carried, out reason) is not { Source: ActorNodeAdapter placed })
+                {
+                    return reason ?? "the pack refused the actor";
+                }
+                // A door is often opened by its own building's script rather than by the player — a shop's front
+                // door has its actions switched off and the shop turns them on in opening hours. Carried out of
+                // that building nothing turns them on, so the copy's own row lets the player open it.
+                if (actor.Type == EntityType.Door
+                    && ((ActorDocumentAdapter)actorsRow.Source!).Placements.PackOf(placed.Actor)?.PropertiesOf(placed.Actor)
+                        ?.Fields.FirstOrDefault(f => f.Name == "ActorActionsEnabled") is { Number: 0 } actions)
+                {
+                    actions.Number = 1;
+                }
+                kind = "actor";
+            }
+            else
+            {
+                Formats.Frames.ObjectTypes.FrameObjectBase? frame = theirs.FrameObjects.Values
+                    .OfType<Formats.Frames.ObjectTypes.FrameObjectBase>()
+                    .FirstOrDefault(o => string.Equals(o.Name.String, name, StringComparison.OrdinalIgnoreCase));
+                if (frame == null) return $"{sds.Name} has neither an actor nor a frame object named '{name}'";
+
+                // Turned and scaled as it was — the matrix an actor gives it folded in, since a prototype's own
+                // is the origin — and STANDING where it is asked to: the middle of the bottom of its geometry
+                // lands on the point, since a district mesh's origin can be anywhere in or around it.
+                Matrix4x4 world = frame.WorldTransform * theirPlacements.For(frame);
+                Matrix4x4 sourceWorld = world;
+                if (facing is { } heading)
+                {
+                    Formats.Mathematics.MatrixExtensions.TryDecomposeRS(world, out Vector3 scale, out _, out _);
+                    world = Formats.Mathematics.MatrixExtensions.SetMatrix(heading, scale, Vector3.Zero);
+                }
+                Vector3 standsOn = Assets.Frames.FrameTransplant.BaseOf(frame) ?? Vector3.Zero;
+                world.Translation = at - Vector3.TransformNormal(standsOn, world);
+
+                carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, frame, newName,
+                    Assets.Frames.FrameTransplant.Standing.Scenery, world, out reason);
+                if (carried == null) return reason ?? "the object could not be copied";
+                carry = Carry(carried);
+                ImportScenery(frameRow, carried,
+                    SceneryCollision(destination, source, frame, sourceWorld, carried, out collision));
+                kind = "scenery";
+            }
+
+            _host.MarkArchiveModified(destination);
+
+            outcome = new ObjectImportOutcome(kind, newName, carried.Pairs.Count, carried.Renderables.Count,
+                carry.Textures, carry.ItemDescriptions.Count, carry.Prefab, carry.Elsewhere, carry.Unresolved.Count,
+                collision);
+            _host.RaiseNotice(
+                $"Imported '{name}' from {sds.Name} as '{newName}' ({kind}): {outcome.Frames} frame(s), "
+                + $"{outcome.Meshes} mesh(es), {carry.Textures.Count} texture(s), {carry.ItemDescriptions.Count} item "
+                + $"description(s){(carry.Prefab ? ", a prefab entry" : "")} carried"
+                + (carry.Elsewhere.Count > 0 ? $"; {carry.Elsewhere.Count} texture(s) are in neither archive" : "")
+                + (carry.Unresolved.Count > 0 ? $"; {carry.Unresolved.Count} collision hull(s) found no description" : "")
+                + $"; collision: {collision}",
+                isError: carry.Unresolved.Count > 0);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+                                       or InvalidOperationException or Formats.SdsFormatException)
+        {
+            return "the import failed: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// The collision a piece of scenery brings: the source's hulls that stand inside its footprint, re-placed
+    /// by the same move that took the object to its new spot — or, when it had none of its own, one cooked
+    /// from its triangles. Returned as the edits that add them, for the import to apply and undo as one.
+    /// </summary>
+    private IReadOnlyList<Domain.IEditAction> SceneryCollision(FileInfo destination,
+        Formats.Frames.ExtractedSds source, Formats.Frames.ObjectTypes.FrameObjectBase original, Matrix4x4 sourceWorld,
+        Assets.Frames.FrameTransplant.TransplantedObject carried, out string summary)
+    {
+        SceneNode? layer = AllNodes().FirstOrDefault(n => n.Source is Assets.Adapters.CollisionDocumentAdapter c
+            && string.Equals(c.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase));
+        if (layer?.Source is not Assets.Adapters.CollisionDocumentAdapter document)
+        {
+            summary = "none — this archive's collision layer is not loaded";
+            return [];
+        }
+
+        Matrix4x4 targetWorld = carried.Root.WorldTransform;
+        var hulls = new List<Assets.Collisions.CollisionCarry.Hull>();
+        IReadOnlyList<string> theirFiles = source.Manifest.GetFiles("Collisions");
+        if (theirFiles.Count > 0 && Assets.Frames.FrameTransplant.BoundsOf(original) is { } bounds)
+        {
+            // The footprint in the source's world: the root-space box through the object's own matrix.
+            Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+            for (int corner = 0; corner < 8; corner++)
+            {
+                var p = new Vector3((corner & 1) == 0 ? bounds.Min.X : bounds.Max.X,
+                    (corner & 2) == 0 ? bounds.Min.Y : bounds.Max.Y, (corner & 4) == 0 ? bounds.Min.Z : bounds.Max.Z);
+                Vector3 w = Vector3.Transform(p, sourceWorld);
+                min = Vector3.Min(min, w);
+                max = Vector3.Max(max, w);
+            }
+            hulls.AddRange(Assets.Collisions.CollisionCarry.FromSource(Formats.Collisions.CollisionFile.Load(theirFiles[0]),
+                document.Collision, min, max, sourceWorld, targetWorld));
+        }
+
+        string? refusal = null;
+        if (hulls.Count == 0)
+        {
+            byte group = document.Collision.Instances.Count == 0
+                ? (byte)0
+                : document.Collision.Instances.GroupBy(i => i.Group).OrderByDescending(g => g.Count()).First().Key;
+            if (Assets.Collisions.CollisionCarry.FromGeometry(document.Collision,
+                    Assets.Frames.FrameTransplant.TrianglesOf(carried.Root), targetWorld, group, out refusal) is { } cooked)
+            {
+                hulls.Add(cooked);
+            }
+        }
+
+        var edits = new List<Domain.IEditAction>();
+        for (int i = 0; i < hulls.Count; i++)
+        {
+            string name = hulls.Count == 1 ? $"{carried.Root.Name} collision" : $"{carried.Root.Name} collision {i + 1}";
+            edits.AddRange(_host.CollisionEditing.BuildCreateHull(document, layer, hulls[i].Added, hulls[i].Placement, name) ?? []);
+        }
+        summary = hulls.Count == 0
+            ? "none — " + (refusal ?? "nothing to make one of")
+            : hulls[0].FromSource
+                ? $"{hulls.Count} hull(s) of its own from the source archive"
+                : "one cooked from its triangles (it had none of its own)";
+        return edits;
+    }
+
+    /// <summary>A name nothing in <paramref name="destination"/>'s scene or pack answers to yet:
+    /// <paramref name="stem"/>, or <c>stem_2</c>, <c>stem_3</c>, …</summary>
+    public string FreeName(FileInfo destination, string stem)
+    {
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SceneNode node in AllNodes())
+        {
+            if (node.Source is SceneDocumentAdapter scene
+                && string.Equals(scene.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (object value in scene.Frame.FrameObjects.Values)
+                {
+                    if (value is FrameObjectBase frame && frame.Name.String is { Length: > 0 } n) taken.Add(n);
+                }
+                foreach (ActorEntry actor in scene.Placements.All) taken.Add(actor.EntityName);
+            }
+        }
+        string candidate = stem;
+        for (int i = 2; taken.Contains(candidate); i++) candidate = $"{stem}_{i}";
+        return candidate;
+    }
+
+    private IEnumerable<SceneNode> AllNodes()
+    {
+        var stack = new Stack<SceneNode>(_host.Roots.Reverse());
+        while (stack.Count > 0)
+        {
+            SceneNode node = stack.Pop();
+            yield return node;
+            for (int i = node.Children.Count - 1; i >= 0; i--) stack.Push(node.Children[i]);
+        }
     }
 
     // The carried frames as tree rows, nested the way the loader nests them, with a GPU mesh on every row
