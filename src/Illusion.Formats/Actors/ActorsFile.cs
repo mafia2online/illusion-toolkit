@@ -422,6 +422,10 @@ public sealed class ActorsFile
         Binary.Items.Add(item);
         Binary.ItemOffsets.Add(0); // recomputed on write
         Reindex();
+        // A light arrives with its row still describing where it stood in the other archive. Settled now
+        // rather than at the next write, so the clip box shown for it is already the one it has here and an
+        // edit to that box is not shifted again later.
+        SyncLightFrame(copy);
         return copy;
     }
 
@@ -577,39 +581,133 @@ public sealed class ActorsFile
     private const int LightMatrixOffset = 18;
     private const int LightMatrixSize = 48;
 
+    // How far a stored inverse may drift from the true one before it counts as stale. Shipped lights sit
+    // below 1e-4 (float rounding at world coordinates); a light left with another place's inverse is off by
+    // hundreds.
+    private const double LightInverseTolerance = 1e-2;
+
     /// <summary>
-    /// A light says where it is twice: in its actor record, and in the transform at the head of its behaviour
-    /// blob — the one the frame it spawns is built from. In every shipped pack the two agree (measured: each
-    /// light's x appears exactly twice). The record is what the editor moves, so the blob's copy follows it
-    /// here, just before the pack is written; left behind, a light moved or brought in from another archive
-    /// would keep shining where it used to stand.
+    /// A light says where it is four times: in its actor record, in the transform at the head of its behaviour
+    /// blob (the one the frame it spawns is built from), in the INVERSE of that transform at the blob's tail,
+    /// and in the world-space box its glow is clipped to. In every shipped pack they agree — measured over the
+    /// lights of several archives: the head translation equals the record's position, and head times tail is
+    /// the identity to 1e-4. The record is what the editor moves, so the rest follows it here, just before the
+    /// pack is written.
     /// <para>
-    /// Only the translation is carried over, and only when it actually differs, so a pack nobody touched still
-    /// writes byte for byte. A row shared by several lights cannot hold more than one place and is left alone
-    /// — give each light a row of its own.
+    /// The inverse is the one that matters most and shows least: the game works a light out in the light's own
+    /// space, so a light whose inverse still describes the archive it was brought from is placed correctly,
+    /// reads correctly in every field, and lights nothing.
+    /// </para>
+    /// <para>
+    /// Each part is written only when it is actually out of step, so a pack nobody touched still writes byte
+    /// for byte. The box is carried along by the distance the light moved, keeping whatever shape it was given.
+    /// A row shared by several lights cannot hold more than one place and is left alone — give each light a
+    /// row of its own.
     /// </para>
     /// </summary>
     private void SyncLightFrames()
     {
+        foreach (ActorEntry actor in ActorList) SyncLightFrame(actor);
+    }
+
+    private void SyncLightFrame(ActorEntry actor)
+    {
         if (!ArePropertiesTyped) return;
-        foreach (ActorEntry actor in ActorList)
+        if (!actor.IsTyped || actor.Type != EntityType.LightEntity) return;
+        if (actor.InitPropId < 0 || actor.InitPropId >= Binary.PropRows.Count) return;
+        if (CountSharersOf(actor.InitPropId) != 1) return;
+        byte[] blob = Binary.PropRows[actor.InitPropId].Payload;
+        if (blob.Length < LightMatrixOffset + LightMatrixSize) return;
+
+        var was = new Vector3(
+            BitConverter.ToSingle(blob, LightMatrixOffset + 12),
+            BitConverter.ToSingle(blob, LightMatrixOffset + 28),
+            BitConverter.ToSingle(blob, LightMatrixOffset + 44));
+        bool moved = Vector3.DistanceSquared(was, actor.Position) >= 1e-8f;
+        if (moved)
         {
-            if (!actor.IsTyped || actor.Type != EntityType.LightEntity) continue;
-            if (actor.InitPropId < 0 || actor.InitPropId >= Binary.PropRows.Count) continue;
-            if (CountSharersOf(actor.InitPropId) != 1) continue;
-            byte[] blob = Binary.PropRows[actor.InitPropId].Payload;
-            if (blob.Length < LightMatrixOffset + LightMatrixSize) continue;
-
-            var was = new Vector3(
-                BitConverter.ToSingle(blob, LightMatrixOffset + 12),
-                BitConverter.ToSingle(blob, LightMatrixOffset + 28),
-                BitConverter.ToSingle(blob, LightMatrixOffset + 44));
-            if (Vector3.DistanceSquared(was, actor.Position) < 1e-8f) continue;
-
             BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 12, 4), actor.Position.X);
             BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 28, 4), actor.Position.Y);
             BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 44, 4), actor.Position.Z);
         }
+
+        // The tail is found from the blob's own length word (which does not count itself): the inverse
+        // matrix is the last thing in it, and the clip box sits before it behind one flag byte.
+        int inverseAt = BitConverter.ToInt32(blob, 0) + 4 - LightMatrixSize;
+        int boxAt = inverseAt - 1 - 24;
+        if (boxAt < LightMatrixOffset + LightMatrixSize || inverseAt + LightMatrixSize > blob.Length) return;
+
+        if (moved)
+        {
+            Vector3 by = actor.Position - was;
+            for (int corner = 0; corner < 2; corner++)
+            {
+                int at = boxAt + corner * 12;
+                BitConverter.TryWriteBytes(blob.AsSpan(at, 4), BitConverter.ToSingle(blob, at) + by.X);
+                BitConverter.TryWriteBytes(blob.AsSpan(at + 4, 4), BitConverter.ToSingle(blob, at + 4) + by.Y);
+                BitConverter.TryWriteBytes(blob.AsSpan(at + 8, 4), BitConverter.ToSingle(blob, at + 8) + by.Z);
+            }
+        }
+
+        double[] world = ReadLightMatrix(blob, LightMatrixOffset);
+        if (!TryInvertLightMatrix(world, out double[] inverse)) return;
+        if (LightMatrixDrift(world, ReadLightMatrix(blob, inverseAt)) < LightInverseTolerance) return;
+        for (int i = 0; i < 12; i++)
+        {
+            BitConverter.TryWriteBytes(blob.AsSpan(inverseAt + i * 4, 4), (float)inverse[i]);
+        }
+    }
+
+    private static double[] ReadLightMatrix(byte[] blob, int at)
+    {
+        var m = new double[12];
+        for (int i = 0; i < 12; i++) m[i] = BitConverter.ToSingle(blob, at + i * 4);
+        return m;
+    }
+
+    // Inverse of a 3x4 affine matrix (rotation and scale in the first three columns, translation in the
+    // fourth), in doubles: at world coordinates in the hundreds a float inverse loses the last digits the
+    // shipped ones have.
+    private static bool TryInvertLightMatrix(double[] m, out double[] inverse)
+    {
+        inverse = new double[12];
+        double c00 = m[5] * m[10] - m[6] * m[9];
+        double c01 = m[6] * m[8] - m[4] * m[10];
+        double c02 = m[4] * m[9] - m[5] * m[8];
+        double det = m[0] * c00 + m[1] * c01 + m[2] * c02;
+        if (Math.Abs(det) < 1e-12) return false;
+
+        inverse[0] = c00 / det;
+        inverse[1] = (m[2] * m[9] - m[1] * m[10]) / det;
+        inverse[2] = (m[1] * m[6] - m[2] * m[5]) / det;
+        inverse[4] = c01 / det;
+        inverse[5] = (m[0] * m[10] - m[2] * m[8]) / det;
+        inverse[6] = (m[2] * m[4] - m[0] * m[6]) / det;
+        inverse[8] = c02 / det;
+        inverse[9] = (m[1] * m[8] - m[0] * m[9]) / det;
+        inverse[10] = (m[0] * m[5] - m[1] * m[4]) / det;
+        for (int row = 0; row < 3; row++)
+        {
+            int r = row * 4;
+            inverse[r + 3] = -(inverse[r] * m[3] + inverse[r + 1] * m[7] + inverse[r + 2] * m[11]);
+        }
+        return true;
+    }
+
+    // Largest element by which world times candidate misses the identity.
+    private static double LightMatrixDrift(double[] world, double[] candidate)
+    {
+        double worst = 0;
+        for (int row = 0; row < 3; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                double value = column == 3 ? world[row * 4 + 3] : 0;
+                for (int k = 0; k < 3; k++) value += world[row * 4 + k] * candidate[k * 4 + column];
+                worst = Math.Max(worst, Math.Abs(value - (row == column ? 1 : 0)));
+            }
+        }
+        return worst;
     }
 
 }
