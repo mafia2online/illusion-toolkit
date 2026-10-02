@@ -57,6 +57,7 @@ internal static class McpProbes
         "camera_get", "camera_look_at", "camera_set", "camera_frame_selection", "view_set",
         "viewport_screenshot", "object_move", "scene_delete_selected", "scene_duplicate_selected",
         "actor_import", "object_properties", "object_set_property", "editor_undo", "editor_redo",
+        "editor_mirror_winter",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional

@@ -233,6 +233,46 @@ internal sealed class AppEditorSession : IEditorSession
             report.Failed.Select(f => (f.Archive, f.Error)).ToList());
     }
 
+    public string? MirrorToWinter(out SeasonMirrorOutcome? outcome)
+    {
+        outcome = null;
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (window.WholeMapCheck.IsChecked == true || window.AreaCombo.SelectedItem is not MapArea area)
+        {
+            return "load one district first — the whole map has no single winter archive";
+        }
+        if (area.Winter == null) return $"'{area.BaseName}' has no winter variant";
+        if (window.WinterToggle.IsChecked == true)
+        {
+            return "the winter variant is loaded — load the summer one: it is the summer scene that gets mirrored";
+        }
+
+        try
+        {
+            // The mirror reads the working copy on disk, so what is only in memory has to be written first.
+            host.SaveEdits();
+            Assets.Sds.SeasonMirror.Report? report =
+                Assets.Sds.SeasonMirror.ToWinter(area.Summer, area.Winter, out string? reason);
+            if (report == null) return reason ?? "the winter archive could not be written";
+
+            host.MarkArchiveModified(area.Winter);
+            outcome = new SeasonMirrorOutcome(area.Winter.FullName, report.Matched, report.Added, report.Dropped,
+                report.Reshaped, report.Files, report.Textures);
+            host.RaiseNotice(
+                $"Mirrored {area.BaseName} into {area.Winter.Name}: {report.Matched} object(s) kept their winter "
+                + $"materials, {report.Added} added, {report.Dropped} dropped, {report.Files.Count} file(s) and "
+                + $"{report.Textures.Count} texture(s) written — Build packs it", isError: false);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or Formats.SdsFormatException)
+        {
+            return "failed to mirror: " + ex.Message;
+        }
+    }
+
     public CameraInfo Camera()
     {
         var pose = Host.CameraPose;

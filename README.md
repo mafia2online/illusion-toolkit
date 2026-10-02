@@ -203,6 +203,15 @@ independently, so one failure (the game holding a file open, say) does not block
 `.sds` and its extracted mirror - from the File menu, the tree's context menu or the viewport's.
 *(Material-library edits are not covered by the backup flow.)*
 
+**Winter.** A district ships twice, `<name>.sds` and `<name>_z.sds`, and an edit to one is not in the
+other. For 13 of the 23 districts the two are the same scene - identical buffers, collisions, actors
+and name table, and a frame resource that differs only in which materials are swapped for their
+snow-covered `^zima` counterparts. For those, `editor_mirror_winter` writes the summer working copy
+over the winter one with each object's winter materials kept, adds the textures winter lacks, and
+queues the winter archive for Build. The other ten (eastside, greenfield, hunters, kingstone,
+midtown, port, sandisland, seagift, southport, westside) have a winter scene of their own and are
+refused - edit that archive directly. `--probe-season-mirror` covers both.
+
 ### MCP server
 
 An MCP endpoint runs for the lifetime of the application at `http://127.0.0.1:2010/mcp` - loopback
@@ -210,7 +219,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 64 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 65 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -225,7 +234,7 @@ map editor itself.
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
-| **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_undo`, `editor_redo`, `editor_notices` |
+| **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |

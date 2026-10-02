@@ -54,6 +54,10 @@ public interface IEditorSession
     /// <summary>Saves, then packs every archive with edits, keeping a backup of each.</summary>
     BuildOutcome Build();
 
+    /// <summary>Saves, then carries the loaded district's edits into its winter archive's working copy and
+    /// queues that archive for a Build. Null on success.</summary>
+    string? MirrorToWinter(out SeasonMirrorOutcome? outcome);
+
     CameraInfo Camera();
 
     /// <summary>Looks at <paramref name="target"/> from the direction <paramref name="fromAxis"/> points

@@ -47,5 +47,13 @@ public sealed record BuildOutcome(
     IReadOnlyList<(string Archive, string? Backup)> Packed,
     IReadOnlyList<(string Archive, string Error)> Failed);
 
+/// <summary>What mirroring a district into its winter archive did: how many winter meshes kept their own
+/// materials on the summer object of the same name, how many objects winter gained and lost, how many no
+/// longer lined up slot for slot (they keep summer's materials), and the files and textures written into
+/// the winter working copy.</summary>
+public sealed record SeasonMirrorOutcome(
+    string WinterArchive, int Matched, int Added, int Dropped, int Reshaped,
+    IReadOnlyList<string> Files, IReadOnlyList<string> Textures);
+
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);

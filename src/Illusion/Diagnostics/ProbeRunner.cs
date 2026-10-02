@@ -158,6 +158,12 @@ internal static class ProbeRunner
             case "--probe-save":
                 SaveProbes.RunSaveProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // The winter mirror on scratch copies of a district's two working copies: an unedited pair is left
+            // alone, an object winter lacks arrives, and an archive that is not the twin is refused.
+            // Output: %TEMP%\illusion_season_mirror.txt
+            case "--probe-season-mirror":
+                SeasonMirrorProbes.RunSeasonMirrorProbe(args.Length >= 2 ? args[1] : "eastside");
+                return true;
             // Renders the viewport transform overlay (compact, actions-off Vector3Box at large coords) to a PNG so
             // the fields-fit / no-clip can be eyeballed. Output: %TEMP%\illusion_panel.png
             case "--probe-panel":

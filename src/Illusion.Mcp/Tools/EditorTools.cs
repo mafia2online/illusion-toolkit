@@ -277,6 +277,34 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "editor_mirror_winter")]
+    [Description("Carry the loaded district's edits into its winter archive (<name>_z.sds). The two archives are one scene shipped twice, differing only in which materials are swapped for their snow-covered counterparts and in their textures - so this saves, writes the summer scene over the winter one with each object's winter materials kept, copies the buffers, collisions, actors and name table across, and adds the textures winter lacks. It writes the winter WORKING COPY and queues the archive; editor_build then packs it. Load the summer variant first.")]
+    public static async Task<string> MirrorWinter(IEditorSession editor, IUiThreadMarshal ui)
+    {
+        try
+        {
+            SeasonMirrorOutcome? outcome = null;
+            string? failed = await ui.RunAsync(() => editor.MirrorToWinter(out outcome));
+            if (failed != null || outcome == null) return ToolResult.Invalid(failed ?? "nothing was mirrored");
+            return ToolResult.Json(new
+            {
+                success = true,
+                winterArchive = outcome.WinterArchive,
+                objectsMatched = outcome.Matched,
+                objectsAdded = outcome.Added,
+                objectsDropped = outcome.Dropped,
+                objectsReshaped = outcome.Reshaped,
+                filesWritten = outcome.Files,
+                texturesAdded = outcome.Textures,
+                status = await ui.RunAsync(editor.Status),
+            });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "camera_get")]
     [Description("Where the viewport camera is: position, yaw and pitch (radians) and orbit distance.")]
     public static async Task<string> CameraGet(IEditorSession editor, IUiThreadMarshal ui)
