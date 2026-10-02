@@ -433,6 +433,83 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "scene_duplicate_selected")]
+    [Description("Duplicate the selected objects in place (undoable) and leave the copies selected: a static mesh gets its own deep copy, a collision placement another placement, an actor another record that shares its behaviour row. Returns the copies' names — move them with object_move.")]
+    public static async Task<string> DuplicateSelected(IEditorSession editor, IUiThreadMarshal ui)
+    {
+        try
+        {
+            IReadOnlyList<string> copies = [];
+            string? refused = await ui.RunAsync(() => editor.DuplicateSelected(out copies));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, copies });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "actor_import")]
+    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). Only actors that place no object of their own scene can travel: lights, sounds. Undoable. Find candidates with decode_actors on the source .act file.")]
+    public static async Task<string> ImportActor(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Full path of the source Actors_*.act file, in an extracted archive.")] string sourceActFile,
+        [Description("Entity name of the actor to copy, as decode_actors lists it.")] string actorName,
+        [Description("Name for the copy; must be new in the loaded area's pack.")] string newName,
+        [Description("World position [x, y, z] to put it at.")] float[] position)
+    {
+        try
+        {
+            if (position.Length != 3) return ToolResult.Invalid("position takes three numbers");
+            if (await ui.RunAsync(() => editor.ImportActor(sourceActFile, actorName, newName, position)) is { } refused)
+                return ToolResult.Invalid(refused);
+            return ToolResult.Json(new { success = true, name = newName, status = await ui.RunAsync(editor.Status) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "object_properties")]
+    [Description("The property panel of one object as a flat list: group, id, label, kind, whether it is read-only, and the value as text. For an actor this includes its behaviour fields — a light's colour, range and intensity.")]
+    public static async Task<string> Properties(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Object name, or a path suffix when the name is ambiguous.")] string name)
+    {
+        try
+        {
+            IReadOnlyList<ObjectProperty> properties = await ui.RunAsync(() => editor.Properties(name));
+            return ToolResult.Json(new { success = true, count = properties.Count, properties });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "object_set_property")]
+    [Description("Set one property of an object (undoable). Name the property by its id from object_properties (or its label). The value is text: a number, true/false, 'x, y, z' for a vector, 0x… for a hash. A behaviour row can be shared by several actors — the group title says how many — and then the change is theirs too.")]
+    public static async Task<string> SetProperty(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Object name, or a path suffix when the name is ambiguous.")] string name,
+        [Description("Property id (e.g. 'Behaviour.24') or label.")] string property,
+        [Description("New value, as text.")] string value)
+    {
+        try
+        {
+            if (await ui.RunAsync(() => editor.SetProperty(name, property, value)) is { } refused) return ToolResult.Invalid(refused);
+            return ToolResult.Json(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "editor_undo")]
     [Description("Undo the last edit in the editor's history. A Blender push is one history entry.")]
     public static async Task<string> Undo(IEditorSession editor, IUiThreadMarshal ui)

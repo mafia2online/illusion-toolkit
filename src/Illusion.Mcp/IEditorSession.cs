@@ -76,6 +76,19 @@ public interface IEditorSession
     /// <summary>Moves one object (undoable): to a world position, and/or by a world offset.</summary>
     string? Move(string name, float[]? position, float[]? offset);
 
+    /// <summary>Copies an actor out of another archive's pack (<paramref name="sourceActFile"/>) into the
+    /// loaded area, under <paramref name="newName"/>, at a world position. Undoable. Null on success.</summary>
+    string? ImportActor(string sourceActFile, string actorName, string newName, float[] position);
+
+    /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
+    string? DuplicateSelected(out IReadOnlyList<string> copies);
+
+    /// <summary>The property panel of one object, flattened: every field with its id, kind and value.</summary>
+    IReadOnlyList<ObjectProperty> Properties(string name);
+
+    /// <summary>Sets one property by id (undoable). The value is text, parsed by the property's kind.</summary>
+    string? SetProperty(string name, string propertyId, string value);
+
     /// <summary>Deletes the selection (undoable). Null on success.</summary>
     string? DeleteSelected(out int deleted);
 

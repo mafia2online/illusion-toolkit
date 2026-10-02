@@ -335,6 +335,141 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? ImportActor(string sourceActFile, string actorName, string newName, float[] position)
+    {
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (!File.Exists(sourceActFile)) return $"no such file: {sourceActFile}";
+
+        SceneNode? actorsRow = AllNodes(host).FirstOrDefault(n => n.Source is Assets.Adapters.ActorDocumentAdapter);
+        if (actorsRow == null) return "the loaded area has no actor pack to add to";
+
+        Formats.Actors.ActorsFile source;
+        try
+        {
+            source = Formats.Actors.ActorsFile.Load(sourceActFile);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException)
+        {
+            return "the source pack could not be read: " + ex.Message;
+        }
+        Formats.Actors.ActorEntry? actor = source.Actors.FirstOrDefault(
+            a => string.Equals(a.EntityName, actorName, StringComparison.OrdinalIgnoreCase));
+        if (actor == null) return $"no actor named '{actorName}' in {Path.GetFileName(sourceActFile)}";
+
+        SceneNode? node = host.ActorEditing.Import(
+            actorsRow, source, actor, newName, new Vector3(position[0], position[1], position[2]), out string? reason);
+        return node == null ? reason ?? "the pack refused the actor" : null;
+    }
+
+    public string? DuplicateSelected(out IReadOnlyList<string> copies)
+    {
+        copies = [];
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (!host.CanDuplicateSelection()) return "nothing in the selection can be duplicated";
+        var before = new HashSet<SceneNode>(host.SelectedNodes);
+        host.DuplicateSelected();
+        // A duplicate leaves its copies selected; a selection that did not move means nothing was copied.
+        var made = host.SelectedNodes.Where(n => !before.Contains(n)).ToList();
+        if (made.Count == 0) return "nothing was duplicated — editor_notices says why";
+        copies = made.Select(n => n.Name).ToList();
+        return null;
+    }
+
+    public IReadOnlyList<ObjectProperty> Properties(string name)
+    {
+        D3DImageHost host = Host;
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) throw new InvalidOperationException(unresolved);
+        if (node!.Source is not Domain.Properties.IPropertySource source) return [];
+        var rows = new List<ObjectProperty>();
+        foreach (Domain.Properties.PropertyGroup group in source.GetPropertyGroups())
+        {
+            foreach (Domain.Properties.PropertyDescriptor p in group.Properties)
+            {
+                rows.Add(new ObjectProperty(group.Title, p.Id, p.Label, p.Kind.ToString(), p.IsReadOnly || p.Set == null, Show(p)));
+            }
+        }
+        return rows;
+    }
+
+    public string? SetProperty(string name, string propertyId, string value)
+    {
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        if (node!.Source is not Domain.Properties.IPropertySource source) return $"'{name}' has no properties";
+        Domain.Properties.PropertyDescriptor? property = source.GetPropertyGroups()
+            .SelectMany(g => g.Properties)
+            .FirstOrDefault(p => string.Equals(p.Id, propertyId, StringComparison.OrdinalIgnoreCase)
+                                 || string.Equals(p.Label, propertyId, StringComparison.OrdinalIgnoreCase));
+        if (property == null) return $"'{name}' has no property '{propertyId}' — object_properties lists them";
+        if (property.IsReadOnly || property.Set == null) return $"'{property.Label}' is read-only";
+        if (!TryParse(property, value, out object? parsed)) return $"'{value}' is not a {property.Kind} value";
+        host.CommitPropertyEdit(node, property, property.Get(), parsed);
+        return null;
+    }
+
+    private static string Show(Domain.Properties.PropertyDescriptor p)
+    {
+        object? v = p.Get();
+        IFormatProvider inv = System.Globalization.CultureInfo.InvariantCulture;
+        return v switch
+        {
+            null => "",
+            float f => f.ToString("0.######", inv),
+            Vector3 vec => string.Create(inv, $"{vec.X:0.######}, {vec.Y:0.######}, {vec.Z:0.######}"),
+            ulong h => "0x" + h.ToString("X16", inv),
+            bool b => b ? "true" : "false",
+            IReadOnlyList<string> lines => string.Join(" | ", lines.Take(6)),
+            IFormattable f => f.ToString(null, inv),
+            _ => v.ToString() ?? "",
+        };
+    }
+
+    private static bool TryParse(Domain.Properties.PropertyDescriptor p, string text, out object? value)
+    {
+        IFormatProvider inv = System.Globalization.CultureInfo.InvariantCulture;
+        const System.Globalization.NumberStyles Num = System.Globalization.NumberStyles.Float;
+        value = null;
+        switch (p.Kind)
+        {
+            case Domain.Properties.PropertyKind.Int or Domain.Properties.PropertyKind.Flags:
+                if (!long.TryParse(text, System.Globalization.NumberStyles.Integer, inv, out long n) || n < p.Min || n > p.Max) return false;
+                value = n;
+                return true;
+            case Domain.Properties.PropertyKind.Float:
+                if (!float.TryParse(text, Num, inv, out float f)) return false;
+                value = f;
+                return true;
+            case Domain.Properties.PropertyKind.Bool:
+                if (!bool.TryParse(text, out bool b)) return false;
+                value = b;
+                return true;
+            case Domain.Properties.PropertyKind.Text:
+                value = text;
+                return true;
+            case Domain.Properties.PropertyKind.UInt64Hex:
+                string hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? text[2..] : text;
+                if (!ulong.TryParse(hex, System.Globalization.NumberStyles.HexNumber, inv, out ulong h)) return false;
+                value = h;
+                return true;
+            case Domain.Properties.PropertyKind.Vector3:
+                string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
+                if (parts.Length != 3 || !float.TryParse(parts[0], Num, inv, out float x)
+                    || !float.TryParse(parts[1], Num, inv, out float y) || !float.TryParse(parts[2], Num, inv, out float z))
+                {
+                    return false;
+                }
+                value = new Vector3(x, y, z);
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public string? DeleteSelected(out int deleted)
     {
         deleted = 0;

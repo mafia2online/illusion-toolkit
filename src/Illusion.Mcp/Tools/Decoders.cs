@@ -47,7 +47,7 @@ internal static class Decoders
 
     // ── Actors ──
 
-    internal static object Actors(byte[] payload, int offset, int limit)
+    internal static object Actors(byte[] payload, int offset, int limit, bool includeProperties = false)
     {
         using var stream = new MemoryStream(payload, writable: false);
         ActorsFile file = ActorsFile.Read(stream);
@@ -95,6 +95,11 @@ internal static class Decoders
                 flags = a.Flags,
                 activateOnInit = a.ActivateOnInit,
                 initPropId = a.InitPropId,
+                // The behaviour row's fields, by name — what a light's colour and reach or a sound's volume
+                // are. Only on request: a row runs to dozens of fields and most callers want the placement.
+                properties = includeProperties
+                    ? file.PropertiesOf(a)?.Fields.Select(f => new { name = f.Name, kind = f.Kind.ToString(), value = f.Display })
+                    : null,
             }),
         };
     }

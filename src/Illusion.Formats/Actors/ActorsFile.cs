@@ -103,7 +103,7 @@ public sealed class ActorsFile
     /// </summary>
     public IReadOnlyList<ActorPropertyRow> PropertyRows => propertyRows ??= BuildPropertyRows();
 
-    private IReadOnlyList<ActorPropertyRow>? propertyRows;
+    private List<ActorPropertyRow>? propertyRows;
 
     /// <summary>The behavior row an actor uses, or null when it has none (or points outside the table).</summary>
     public ActorPropertyRow? PropertiesOf(ActorEntry actor)
@@ -113,7 +113,7 @@ public sealed class ActorsFile
         return actor.InitPropId >= 0 && actor.InitPropId < rows.Count ? rows[actor.InitPropId] : null;
     }
 
-    private IReadOnlyList<ActorPropertyRow> BuildPropertyRows()
+    private List<ActorPropertyRow> BuildPropertyRows()
     {
         var rows = new List<ActorPropertyRow>(Binary.PropRows.Count);
         for (int i = 0; i < Binary.PropRows.Count; i++)
@@ -305,6 +305,152 @@ public sealed class ActorsFile
         return copy;
     }
 
+    /// <summary>
+    /// Copies an actor out of ANOTHER pack into this one, under a name of its own and with its own copy of the
+    /// behaviour row it points at — how a district that has no light of its own is given one from an interior
+    /// that does.
+    ///
+    /// <para>
+    /// Only an actor that is whole in its record and its row can travel: one whose linked frame is not an
+    /// object of its own archive's scene. That is what a light or a sound is — the entity makes that frame
+    /// itself, under the name the record gives — and it is why the copy is linked to a frame named after
+    /// itself rather than to the original's. An actor that places a scene object would arrive pointing at an
+    /// object this archive does not have, and is refused.
+    /// </para>
+    /// </summary>
+    /// <param name="from">The pack <paramref name="actor"/> belongs to. Both packs must be stored the same way
+    /// (compressed or not): the record's tail and the row's blob are carried as bytes.</param>
+    public ActorEntry? Import(ActorsFile from, ActorEntry actor, string name, Vector3 position, out string? skipReason)
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(actor);
+        skipReason = null;
+
+        int index = from.ActorList.IndexOf(actor);
+        if (index < 0 || index >= from.Binary.Items.Count)
+        {
+            skipReason = "the actor does not belong to the source pack";
+            return null;
+        }
+        if (!actor.IsTyped)
+        {
+            skipReason = "the actor's record could not be typed, so it cannot be rebuilt";
+            return null;
+        }
+        if (from.IsCompressed != IsCompressed || from.ActorFileVersion != ActorFileVersion)
+        {
+            skipReason = "the two packs are stored differently (version or compression), so a record of one is not a record of the other";
+            return null;
+        }
+        if (actor.FrameHash != 0 && from.SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+        {
+            skipReason = "it places an object of its own archive's scene, which this archive does not have";
+            return null;
+        }
+        if (string.IsNullOrEmpty(name) || ActorList.Any(a => a.EntityName == name))
+        {
+            skipReason = $"the name '{name}' is empty or already taken in this pack";
+            return null;
+        }
+
+        Native.Model.ActorItemW source = from.Binary.Items[index];
+        short propId = -1;
+        if (source.InitPropId >= 0)
+        {
+            if (!from.ArePropertiesTyped || !ArePropertiesTyped || source.InitPropId >= from.Binary.PropRows.Count)
+            {
+                skipReason = "its behaviour row cannot be read out of one pack or written into the other";
+                return null;
+            }
+            if (Binary.PropRows.Count >= short.MaxValue)
+            {
+                skipReason = "this pack's behaviour table is full";
+                return null;
+            }
+            Native.Model.ActorPropRowW row = CloneRow(from.Binary.PropRows[source.InitPropId]);
+            Binary.PropRows.Add(row);
+            propId = (short)(Binary.PropRows.Count - 1);
+            // The cached views are live over the wire rows and an undo entry may hold one, so the list grows
+            // rather than being rebuilt.
+            propertyRows?.Add(new ActorPropertyRow(this, row, propId));
+        }
+
+        ulong hash = Hashing.Fnv64.Hash(name);
+        var item = new Native.Model.ActorItemW
+        {
+            Typed = source.Typed,
+            TypeId = source.TypeId,
+            TypeName = source.TypeName,
+            EntityName = name,
+            Name1 = source.Name1,
+            SceneSector = "",
+            LinkedDefinition = source.LinkedDefinition,
+            LinkedFrame = name,
+            EntityHash = hash,
+            FrameHash = hash,
+            Position = position,
+            RotationX = source.RotationX,
+            RotationY = source.RotationY,
+            RotationZ = source.RotationZ,
+            RotationW = source.RotationW,
+            Scale = source.Scale,
+            Flags = source.Flags,
+            InitPropId = propId,
+            Raw = [.. source.Raw],
+        };
+        var copy = new ActorEntry
+        {
+            Index = ActorList.Count,
+            IsTyped = true,
+            TypeId = actor.TypeId,
+            TypeName = actor.TypeName,
+            EntityName = name,
+            Name1 = actor.Name1,
+            SceneSector = "",
+            LinkedDefinition = actor.LinkedDefinition,
+            LinkedFrame = name,
+            EntityHash = hash,
+            FrameHash = hash,
+            Position = position,
+            Rotation = actor.Rotation,
+            Scale = actor.Scale,
+            Flags = actor.Flags,
+            InitPropId = propId,
+        };
+
+        ActorList.Add(copy);
+        Binary.Items.Add(item);
+        Binary.ItemOffsets.Add(0); // recomputed on write
+        Reindex();
+        return copy;
+    }
+
+    private static Native.Model.ActorPropRowW CloneRow(Native.Model.ActorPropRowW row)
+    {
+        var copy = new Native.Model.ActorPropRowW
+        {
+            BufferType = row.BufferType,
+            TypeName = row.TypeName,
+            Payload = [.. row.Payload],
+        };
+        foreach (Native.Model.ActorPropFieldW field in row.Fields)
+        {
+            copy.Fields.Add(new Native.Model.ActorPropFieldW
+            {
+                Kind = field.Kind,
+                Offset = field.Offset,
+                Size = field.Size,
+                Name = field.Name,
+                Num = field.Num,
+                F0 = field.F0,
+                F1 = field.F1,
+                F2 = field.F2,
+                Text = field.Text,
+            });
+        }
+        return copy;
+    }
+
     /// <summary>Drops a copy made by <c>Duplicate</c> (undo). Returns the same token <see cref="Restore"/>
     /// takes, so a redo puts back the very row that was undone — copying again would mint a different record
     /// under a different name, leaving the tree pointing at one the pack never got.</summary>
@@ -422,7 +568,48 @@ public sealed class ActorsFile
 
     public void Write(Stream output)
     {
+        SyncLightFrames();
         output.WriteBytes(Native.Misc.NativeMiscFiles.ActorsToBytes(this));
+    }
+
+    // Where a light's behaviour blob keeps the transform of the frame the entity makes for itself: a 3x4
+    // matrix, row by row with the translation as each row's fourth value, right after the flags word.
+    private const int LightMatrixOffset = 18;
+    private const int LightMatrixSize = 48;
+
+    /// <summary>
+    /// A light says where it is twice: in its actor record, and in the transform at the head of its behaviour
+    /// blob — the one the frame it spawns is built from. In every shipped pack the two agree (measured: each
+    /// light's x appears exactly twice). The record is what the editor moves, so the blob's copy follows it
+    /// here, just before the pack is written; left behind, a light moved or brought in from another archive
+    /// would keep shining where it used to stand.
+    /// <para>
+    /// Only the translation is carried over, and only when it actually differs, so a pack nobody touched still
+    /// writes byte for byte. A row shared by several lights cannot hold more than one place and is left alone
+    /// — give each light a row of its own.
+    /// </para>
+    /// </summary>
+    private void SyncLightFrames()
+    {
+        if (!ArePropertiesTyped) return;
+        foreach (ActorEntry actor in ActorList)
+        {
+            if (!actor.IsTyped || actor.Type != EntityType.LightEntity) continue;
+            if (actor.InitPropId < 0 || actor.InitPropId >= Binary.PropRows.Count) continue;
+            if (CountSharersOf(actor.InitPropId) != 1) continue;
+            byte[] blob = Binary.PropRows[actor.InitPropId].Payload;
+            if (blob.Length < LightMatrixOffset + LightMatrixSize) continue;
+
+            var was = new Vector3(
+                BitConverter.ToSingle(blob, LightMatrixOffset + 12),
+                BitConverter.ToSingle(blob, LightMatrixOffset + 28),
+                BitConverter.ToSingle(blob, LightMatrixOffset + 44));
+            if (Vector3.DistanceSquared(was, actor.Position) < 1e-8f) continue;
+
+            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 12, 4), actor.Position.X);
+            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 28, 4), actor.Position.Y);
+            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 44, 4), actor.Position.Z);
+        }
     }
 
 }
