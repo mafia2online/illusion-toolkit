@@ -94,8 +94,9 @@ public interface IEditorSession
     /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
     /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's rotation; null keeps
     /// the rotation the original has.</param>
+    /// <param name="collision">For scenery: auto (its own hulls, else its convex hull), convex, box, mesh or none.</param>
     string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        out ObjectImportOutcome? outcome);
+        string? collision, out ObjectImportOutcome? outcome);
 
     /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
     string? DuplicateSelected(out IReadOnlyList<string> copies);

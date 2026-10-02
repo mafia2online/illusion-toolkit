@@ -404,7 +404,7 @@ internal sealed class AppEditorSession : IEditorSession
     }
 
     public string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        out ObjectImportOutcome? outcome)
+        string? collision, out ObjectImportOutcome? outcome)
     {
         outcome = null;
         if (Window is not { } window) return NotOpen;
@@ -416,8 +416,13 @@ internal sealed class AppEditorSession : IEditorSession
         }
         FileInfo destination = area.FileFor(window.WinterToggle.IsChecked == true);
 
+        Assets.Collisions.CollisionChoice hulls = Assets.Collisions.CollisionChoice.Auto;
+        if (!string.IsNullOrEmpty(collision) && !Enum.TryParse(collision, ignoreCase: true, out hulls))
+        {
+            return $"collision '{collision}' is none of auto, convex, box, mesh, none";
+        }
         return host.ObjectImporting.Import(destination, sourceArchive, name, newName,
-            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome);
+            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls);
     }
 
     public string? DuplicateSelected(out IReadOnlyList<string> copies)

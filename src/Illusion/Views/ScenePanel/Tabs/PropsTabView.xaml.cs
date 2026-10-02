@@ -56,6 +56,13 @@ public partial class PropsTabView : UserControl
     /// of the camera). The window places the object.</summary>
     public event Action<PropEntry, Point?>? PlaceRequested;
 
+    /// <summary>The collision the chooser above the tiles asks scenery to bring.</summary>
+    public Assets.Collisions.CollisionChoice Collision =>
+        CollisionBox.SelectedItem is ComboBoxItem { Tag: string tag }
+        && Enum.TryParse(tag, out Assets.Collisions.CollisionChoice choice)
+            ? choice
+            : Assets.Collisions.CollisionChoice.Auto;
+
     private void LoadCatalog(bool force)
     {
         if (_loading || (_loaded && !force)) return;

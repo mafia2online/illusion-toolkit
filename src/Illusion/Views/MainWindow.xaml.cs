@@ -117,7 +117,7 @@ public partial class MainWindow : Window
 
         // Props: tiles of the Props tab are dragged onto the viewport (or double-clicked) to bring a stock
         // object into the loaded district.
-        Scene.EnableProps(PlaceProp);
+        PropsPanel.PlaceRequested += PlaceProp;
         Viewport.AllowDrop = true;
         Viewport.DragOver += (_, e) =>
         {
@@ -528,6 +528,19 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
+    // The Props button: the left column folds away to nothing and comes back at the width it had.
+    private double _propsWidth = 330;
+
+    private void PropsToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        bool show = PropsToggle.IsChecked == true;
+        if (!show && PropsColumn.ActualWidth > 40) _propsWidth = PropsColumn.ActualWidth;
+        PropsColumn.Width = new GridLength(show ? _propsWidth : 0);
+        PropsPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        PropsSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // A prop from the Props tab: carried into the loaded district (the season on screen), standing where the
     // drop landed on the scene — or, for a double-click, on whatever is in the middle of the view. Named after
     // what it is, made unique in the archive.
@@ -557,7 +570,7 @@ public partial class MainWindow : Window
         try
         {
             if (Viewport.ObjectImporting.Import(destination, entry.Archive, entry.Name, name, position, null,
-                    out _) is { } refused)
+                    out _, PropsPanel.Collision) is { } refused)
             {
                 Viewport.RaiseNotice($"{entry.Label} not placed — {refused}", isError: true);
             }

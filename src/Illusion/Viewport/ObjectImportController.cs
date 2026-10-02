@@ -88,8 +88,9 @@ internal sealed class ObjectImportController
     /// </summary>
     /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
     /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's; null keeps it.</param>
+    /// <param name="hulls">What collision scenery brings (an actor's object always brings its own).</param>
     public string? Import(FileInfo destination, string sourceArchive, string name, string newName, Vector3 at,
-        float? yawDegrees, out Mcp.ObjectImportOutcome? outcome)
+        float? yawDegrees, out Mcp.ObjectImportOutcome? outcome, Assets.Collisions.CollisionChoice hulls = default)
     {
         outcome = null;
         if (_host.BridgeEditedCount > 0) return "a Blender edit session is open — end it first";
@@ -192,7 +193,7 @@ internal sealed class ObjectImportController
                 if (carried == null) return reason ?? "the object could not be copied";
                 carry = Carry(carried);
                 ImportScenery(frameRow, carried,
-                    SceneryCollision(destination, source, frame, sourceWorld, carried, out collision));
+                    SceneryCollision(destination, source, frame, sourceWorld, carried, hulls, out collision));
                 kind = "scenery";
             }
 
@@ -220,13 +221,19 @@ internal sealed class ObjectImportController
 
     /// <summary>
     /// The collision a piece of scenery brings: the source's hulls that stand inside its footprint, re-placed
-    /// by the same move that took the object to its new spot — or, when it had none of its own, one cooked
-    /// from its triangles. Returned as the edits that add them, for the import to apply and undo as one.
+    /// by the same move that took the object to its new spot — or one cooked here, as its convex hull, its box
+    /// or its triangles, when it had none of its own or <paramref name="choice"/> asks for one. Returned as the
+    /// edits that add them, for the import to apply and undo as one.
     /// </summary>
     private IReadOnlyList<Domain.IEditAction> SceneryCollision(FileInfo destination,
         Formats.Frames.ExtractedSds source, Formats.Frames.ObjectTypes.FrameObjectBase original, Matrix4x4 sourceWorld,
-        Assets.Frames.FrameTransplant.TransplantedObject carried, out string summary)
+        Assets.Frames.FrameTransplant.TransplantedObject carried, Assets.Collisions.CollisionChoice choice, out string summary)
     {
+        if (choice == Assets.Collisions.CollisionChoice.None)
+        {
+            summary = "none, as asked";
+            return [];
+        }
         SceneNode? layer = AllNodes().FirstOrDefault(n => n.Source is Assets.Adapters.CollisionDocumentAdapter c
             && string.Equals(c.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase));
         if (layer?.Source is not Assets.Adapters.CollisionDocumentAdapter document)
@@ -238,7 +245,8 @@ internal sealed class ObjectImportController
         Matrix4x4 targetWorld = carried.Root.WorldTransform;
         var hulls = new List<Assets.Collisions.CollisionCarry.Hull>();
         IReadOnlyList<string> theirFiles = source.Manifest.GetFiles("Collisions");
-        if (theirFiles.Count > 0 && Assets.Frames.FrameTransplant.BoundsOf(original) is { } bounds)
+        if (choice == Assets.Collisions.CollisionChoice.Auto && theirFiles.Count > 0
+            && Assets.Frames.FrameTransplant.BoundsOf(original) is { } bounds)
         {
             // The footprint in the source's world: the root-space box through the object's own matrix.
             Vector3 min = new(float.MaxValue), max = new(float.MinValue);
@@ -260,8 +268,14 @@ internal sealed class ObjectImportController
             byte group = document.Collision.Instances.Count == 0
                 ? (byte)0
                 : document.Collision.Instances.GroupBy(i => i.Group).OrderByDescending(g => g.Count()).First().Key;
+            Assets.Collisions.HullShape shape = choice switch
+            {
+                Assets.Collisions.CollisionChoice.Box => Assets.Collisions.HullShape.Box,
+                Assets.Collisions.CollisionChoice.Mesh => Assets.Collisions.HullShape.Mesh,
+                _ => Assets.Collisions.HullShape.Convex,
+            };
             if (Assets.Collisions.CollisionCarry.FromGeometry(document.Collision,
-                    Assets.Frames.FrameTransplant.TrianglesOf(carried.Root), targetWorld, group, out refusal) is { } cooked)
+                    Assets.Frames.FrameTransplant.TrianglesOf(carried.Root), targetWorld, group, shape, out refusal) is { } cooked)
             {
                 hulls.Add(cooked);
             }
@@ -277,7 +291,13 @@ internal sealed class ObjectImportController
             ? "none — " + (refusal ?? "nothing to make one of")
             : hulls[0].FromSource
                 ? $"{hulls.Count} hull(s) of its own from the source archive"
-                : "one cooked from its triangles (it had none of its own)";
+                : choice switch
+                {
+                    Assets.Collisions.CollisionChoice.Box => "its box, cooked here",
+                    Assets.Collisions.CollisionChoice.Mesh => "one cooked from all its triangles",
+                    Assets.Collisions.CollisionChoice.Convex => "its convex hull, cooked here",
+                    _ => "its convex hull, cooked here (it had none of its own)",
+                };
         return edits;
     }
 

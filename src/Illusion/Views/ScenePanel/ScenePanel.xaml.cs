@@ -225,9 +225,6 @@ public partial class ScenePanel : UserControl
     /// <inheritdoc cref="RenderTabView.HideCityFilters"/>
     public void HideCityFilters() => Tabs.RenderFilters.HideCityFilters();
 
-    /// <inheritdoc cref="ScenePropertyTabs.EnableProps"/>
-    public void EnableProps(Action<Assets.Library.PropEntry, Point?> place) => Tabs.EnableProps(place);
-
     /// <inheritdoc cref="RenderTabView.SetSnowFilter"/>
     public void SetSnowFilter(bool on) => Tabs.RenderFilters.SetSnowFilter(on);
 

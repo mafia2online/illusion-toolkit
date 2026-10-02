@@ -509,14 +509,15 @@ public sealed class EditorTools
         [Description("Entity name of an actor in the source archive, or the name of a frame object in its scene.")] string name,
         [Description("Name for the copy; must be new in the loaded area (it names both the object and, for an actor, the actor).")] string newName,
         [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
-        [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null)
+        [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null,
+        [Description("Collision for scenery: 'auto' (default — its own hulls from the source, else its convex hull), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null)
     {
         try
         {
             if (position.Length != 3) return ToolResult.Invalid("position takes three numbers");
             ObjectImportOutcome? outcome = null;
             string? refused = await ui.RunAsync(
-                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, out outcome));
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, out outcome));
             if (refused != null) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
         }

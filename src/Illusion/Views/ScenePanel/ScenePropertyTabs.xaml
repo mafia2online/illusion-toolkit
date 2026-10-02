@@ -18,15 +18,6 @@
             <v:RenderTabView x:Name="Render" />
         </TabItem>
 
-        <!-- Props: the stock game's furniture, doors and plants to drag into the district. Only the map editor
-             turns it on (EnableProps) — on a resource stage there is no district to put anything in. -->
-        <TabItem x:Name="PropsTab" Header="Props" Tag="&#xE7B8;"
-                 ToolTip="Props — stock doors, furniture and plants to drag into the scene"
-                 Foreground="{x:Static v:PaletteInk.Amber}"
-                 Style="{StaticResource VerticalTab}" Visibility="Collapsed">
-            <v:PropsTabView x:Name="Props" />
-        </TabItem>
-
         <TabItem x:Name="TuningTab" Header="Tuning"
                  ToolTip="Tuning — the entity data this archive carries (for a car, how it drives)"
                  v:TabIcon.Icon="{x:Static v:TuningTabIcon.Geometry}"

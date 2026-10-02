@@ -209,6 +209,9 @@ public sealed class SceneDocumentAdapter : ISceneDocument
                 SdsWriter.SaveFrameNameTable(_frame, SourceArchive);
                 _nameTableDirty = false;
             }
+            // Textures an import carried in that the scene no longer names — an undone import, or one a scene
+            // closed without saving took with it — leave with this save.
+            Sds.ArchiveCarry.SweepUnused(extracted, _frame);
         }
 
         // The pools describe geometry the FRAME RESOURCE indexes, so they go only when it went. A refused car

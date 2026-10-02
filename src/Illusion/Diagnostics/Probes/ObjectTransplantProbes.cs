@@ -268,6 +268,25 @@ internal static class ObjectTransplantProbes
                 first.Prefab && barePrefabs.Count == 1 && PrefabFile.Load(barePrefabs[0]).Contains(definition)
                 && PrefabFile.Load(barePrefabs[0]).PrefabCount == 1
                 && carriedDoor.CollisionHashes.All(ArchiveCarry.ItemDescriptionsOf(bareAfter).ContainsKey));
+
+            // ── Simplified hulls: what a prop with no collision of its own is given ──
+            var cube = new List<Vector3>();
+            for (int i = 0; i < 8; i++) cube.Add(new Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1));
+            for (int i = 0; i < 50; i++) cube.Add(new Vector3(0.2f + i % 5 * 0.1f, 0.3f + i % 7 * 0.05f, 0.5f));
+            (Vector3[] Vertices, int[] Triangles)? box = Assets.Collisions.ConvexHull.Build(cube);
+            Check("the hull of a cube with points inside it is the cube: 8 corners, 12 triangles",
+                box is { } cubeHull && cubeHull.Vertices.Length == 8 && cubeHull.Triangles.Length == 36 && Encloses(cubeHull, cube),
+                box == null ? "no hull" : $"{box.Value.Vertices.Length} vertices, {box.Value.Triangles.Length / 3} triangles");
+
+            List<Vector3> model = [.. FrameTransplant.TrianglesOf(scenery).SelectMany(m => m.Positions)];
+            (Vector3[] Vertices, int[] Triangles)? hull = Assets.Collisions.ConvexHull.Build(model);
+            int modelTriangles = FrameTransplant.TrianglesOf(scenery).Sum(m => m.Indices.Length / 3);
+            Check("a stock model's convex hull holds every one of its vertices, faces out, and is a fraction of its size",
+                hull is { } modelHull && Encloses(modelHull, model, tolerance: 0.04f) && modelHull.Triangles.Length / 3 < Math.Max(200, modelTriangles / 2),
+                hull == null ? "no hull" : $"'{scenery.Name}': {modelTriangles} triangles → {hull.Value.Triangles.Length / 3}");
+            Check("a flat thing has no convex hull, and gets a box instead",
+                Assets.Collisions.ConvexHull.Build([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)]) == null
+                && Assets.Collisions.ConvexHull.Box([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)]) is { Triangles.Length: 36 });
         }
         catch (Exception ex)
         {
@@ -366,6 +385,31 @@ internal static class ObjectTransplantProbes
         }
         check($"{what} has the shape its original has, frame for frame", frames > 0 && wrong == 0, $"{frames} frame(s), {wrong} wrong{(first == null ? "" : ", first " + first)}");
         check($"{what} draws from buffers of its own that hold the original's bytes", badBuffers == 0, $"{buffers} LOD(s), {badBuffers} wrong");
+    }
+
+    // Every point is behind (or on) every face — the hull holds them — and the faces point away from the middle.
+    // The tolerance covers the grid the hull snaps its points to.
+    private static bool Encloses((Vector3[] Vertices, int[] Triangles) hull, IReadOnlyList<Vector3> points, float tolerance = 1e-4f)
+    {
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+        foreach (Vector3 p in points)
+        {
+            min = Vector3.Min(min, p);
+            max = Vector3.Max(max, p);
+        }
+        float slack = tolerance * MathF.Max(max.X - min.X, MathF.Max(max.Y - min.Y, max.Z - min.Z));
+        Vector3 middle = hull.Vertices.Aggregate(Vector3.Zero, (a, v) => a + v) / hull.Vertices.Length;
+        for (int t = 0; t < hull.Triangles.Length; t += 3)
+        {
+            Vector3 a = hull.Vertices[hull.Triangles[t]], b = hull.Vertices[hull.Triangles[t + 1]], c = hull.Vertices[hull.Triangles[t + 2]];
+            Vector3 n = Vector3.Normalize(Vector3.Cross(b - a, c - a));
+            if (Vector3.Dot(n, middle - a) > 0) return false;
+            foreach (Vector3 p in points)
+            {
+                if (Vector3.Dot(n, p - a) > slack) return false;
+            }
+        }
+        return true;
     }
 
     private static string CopyWithoutTextures(string from, string to)

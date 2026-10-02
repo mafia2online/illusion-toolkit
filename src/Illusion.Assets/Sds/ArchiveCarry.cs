@@ -20,9 +20,12 @@ namespace Illusion.Assets.Sds;
 /// left alone and shared.
 /// </para>
 /// <para>
-/// This writes the working copy at once, not at Save. Carried resources are inert until something names
-/// them, so an import that is later undone leaves a few unused files behind rather than a scene that names
-/// resources a discarded edit took away.
+/// This writes the working copy at once, not at Save — the viewport looks a texture up the moment it builds
+/// a mesh. So an import that is undone, or a scene closed without saving, leaves textures nothing uses. Every
+/// texture carried is therefore written down beside the working copy (<see cref="RegisterName"/>), and each
+/// save of the scene sweeps the ones no material of it names any more (<see cref="SweepUnused"/>). Only
+/// what this class brought is ever swept: an archive's own textures may be named by things a scene does not
+/// show (effects, decals, scripts) and are never touched.
 /// </para>
 /// </summary>
 public static class ArchiveCarry
@@ -87,6 +90,7 @@ public static class ArchiveCarry
             }
             if (!CopyEntry(from, to, fromDir, toDir, texture)) continue;
             added.Add(texture);
+            Remember(toDir, texture);
             TextureSearchIndex.Register(Path.Combine(toDir, texture));
 
             // A texture stored split keeps its top level in a companion entry, and its own entry says so —
@@ -173,6 +177,86 @@ public static class ArchiveCarry
             return to.AddEntry(fields[0].Value, name, version, [.. fields.Skip(2).Take(fields.Count - 3)]);
         }
         return false;
+    }
+
+    // Beside the working copy, never in its manifest: packing goes by the manifest, so the game never sees it.
+    private const string RegisterName = "illusion_carried.json";
+
+    private static HashSet<string> ReadRegister(string dir)
+    {
+        string path = Path.Combine(dir, RegisterName);
+        try
+        {
+            return File.Exists(path)
+                ? new HashSet<string>(System.Text.Json.JsonSerializer.Deserialize<List<string>>(File.ReadAllText(path)) ?? [],
+                    StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static void WriteRegister(string dir, HashSet<string> names)
+    {
+        string path = Path.Combine(dir, RegisterName);
+        if (names.Count == 0)
+        {
+            File.Delete(path);
+            return;
+        }
+        AtomicFile.WriteAllBytes(path, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(names.Order(StringComparer.OrdinalIgnoreCase).ToList()));
+    }
+
+    private static void Remember(string dir, string texture)
+    {
+        HashSet<string> names = ReadRegister(dir);
+        if (names.Add(texture)) WriteRegister(dir, names);
+    }
+
+    /// <summary>
+    /// Drops the textures this class carried into <paramref name="extracted"/> that no material of
+    /// <paramref name="scene"/> names — left behind by an import that was undone, or by a scene closed without
+    /// saving it. Their MIP companions go with them. Returns what was dropped.
+    /// </summary>
+    public static IReadOnlyList<string> SweepUnused(string extracted, Formats.Frames.FrameResource scene)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extracted);
+        ArgumentNullException.ThrowIfNull(scene);
+        HashSet<string> carried = ReadRegister(extracted);
+        if (carried.Count == 0) return [];
+
+        MafiaMaterials.EnsureLoaded();
+        var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Formats.Frames.Resources.FrameMaterial block in scene.FrameMaterials.Values)
+        {
+            foreach (Formats.Frames.Resources.MaterialStruct[] lod in block.Materials)
+            {
+                foreach (Formats.Frames.Resources.MaterialStruct slot in lod)
+                {
+                    foreach (string texture in MafiaMaterials.Collection?.FindByHash(slot.MaterialHash)?.CollectTextures() ?? [])
+                    {
+                        named.Add(texture);
+                    }
+                }
+            }
+        }
+
+        SdsManifest manifest = SdsManifest.Load(extracted);
+        var dropped = new List<string>();
+        foreach (string texture in carried.ToList())
+        {
+            if (named.Contains(texture)) continue;
+            foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
+            {
+                if (manifest.RemoveEntry(file)) dropped.Add(file);
+                File.Delete(Path.Combine(extracted, file));
+            }
+            carried.Remove(texture);
+        }
+        WriteRegister(extracted, carried);
+        return dropped;
     }
 
     /// <summary>

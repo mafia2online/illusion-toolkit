@@ -89,11 +89,12 @@ public static class CollisionCarry
 
     /// <summary>
     /// A hull cooked from render triangles given in WORLD space, placed at <paramref name="targetWorld"/>'s
-    /// position and heading (a placement cannot carry a scale, so the geometry is cooked at the size it is).
+    /// position and heading (a placement cannot carry a scale, so the geometry is cooked at the size it is),
+    /// shaped as <paramref name="shape"/> says — the triangles themselves, their convex hull, or their box.
     /// Null with a reason when the cooker is not there or refuses the geometry.
     /// </summary>
     public static Hull? FromGeometry(CollisionFile target, IReadOnlyList<(Vector3[] Positions, uint[] Indices)> meshes,
-        Matrix4x4 targetWorld, byte group, out string? reason)
+        Matrix4x4 targetWorld, byte group, HullShape shape, out string? reason)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(meshes);
@@ -128,6 +129,23 @@ public static class CollisionCarry
         {
             reason = "the object has no triangles to make a hull of";
             return null;
+        }
+
+        // A stand-in rather than the model: the hull of every point the triangles use, or the box around them.
+        // A thin or flat object has no volume to hull and gets its box.
+        if (shape != HullShape.Mesh)
+        {
+            List<Vector3> used = [.. indices.Distinct().Select(i => positions[i])];
+            (Vector3[] Vertices, int[] Triangles)? simple = shape == HullShape.Convex
+                ? ConvexHull.Build(used) ?? ConvexHull.Box(used)
+                : ConvexHull.Box(used);
+            if (simple is not { } hull)
+            {
+                reason = "the object has no volume to make a hull of";
+                return null;
+            }
+            positions = [.. hull.Vertices];
+            indices = [.. hull.Triangles];
         }
 
         ushort[] surfaces = Enumerable.Repeat(UniversalHard, indices.Count / 3).ToArray();
