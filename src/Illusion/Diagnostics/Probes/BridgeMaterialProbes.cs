@@ -65,6 +65,19 @@ internal static class BridgeMaterialProbes
             double error = MeanError(gradient, DecodeTopLevel(dds, w, h));
             Check("top level decodes close to the source", error < 4.0, $"mean abs error {error:F2}/255");
 
+            // From 256×256 up the game stores a texture split; one written whole came out black in game.
+            (byte[] wholeEntry, byte[]? noTop) = DdsEncoder.Encode(gradient, w, h);
+            Check("a texture with a side under 256 stays one file", noTop == null && wholeEntry.Length == dds.Length);
+            (byte[] halfEntry, byte[]? topLevel) = DdsEncoder.Encode(Gradient(256, 256, 0), 256, 256);
+            Check("a 256×256 texture is split: the top level alone in its own file",
+                topLevel != null && topLevel.Length == 128 + 256 * 256 / 2
+                && BitConverter.ToUInt32(topLevel, 8) == 0x1007 && BitConverter.ToInt32(topLevel, 28) == 1
+                && BitConverter.ToUInt32(topLevel, 108) == 0x1000
+                && BitConverter.ToInt32(topLevel, 12) == 256 && BitConverter.ToInt32(topLevel, 16) == 256);
+            Check("...and the entry itself starts at half resolution with the rest of the chain",
+                BitConverter.ToInt32(halfEntry, 12) == 128 && BitConverter.ToInt32(halfEntry, 16) == 128
+                && BitConverter.ToInt32(halfEntry, 28) == 8 && BitConverter.ToUInt32(halfEntry, 8) == 0x21007);
+
             // ── The resolver, against a real district ──
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
             var sds = new FileInfo(Path.Combine(MafiaEnvironment.CityFolder, district + ".sds"));
@@ -114,6 +127,36 @@ internal static class BridgeMaterialProbes
                 resolver.Resolved.Count == 1 && resolver.Resolved[0].Authored && resolver.Resolved[0].Name == ProbeMaterial);
             Check("the archive is queued for a rebuild", resolver.TouchedArchives.ContainsKey(sds.FullName));
             Check("the folder still packs", Packs(extracted, out string? packError), packError ?? "");
+
+            // The stock archives charge a split texture's top level to its TEXTURE entry (the Mipmap entry
+            // carries zero). A packer that leaves it out under-reports the archive's video memory.
+            SdsArchive packed = SdsArchive.Pack(extracted, GameProfile.MafiaII);
+            int textureType = packed.ResourceTypes.FindIndex(t => t.Name == "Texture");
+            long charged = packed.Entries.Where(e => e.TypeId == textureType).Sum(e => (long)e.SlotVramRequired);
+            long expectedVram = 0;
+            foreach (string file in SdsManifest.Load(extracted).GetFiles("Texture"))
+            {
+                expectedVram += new FileInfo(file).Length - 128;
+                var companion = new FileInfo(Path.Combine(extracted, "MIP_" + Path.GetFileName(file)));
+                if (companion.Exists) expectedVram += companion.Length - 128;
+            }
+            Check("packing charges every texture its own payload plus its MIP companion's",
+                charged == expectedVram, $"{charged} vs {expectedVram}");
+
+            // A rooted resource name ("/missions/…") must not be mistaken for a missing file and unsaid.
+            string pruneDir = Path.Combine(Path.GetTempPath(), "illusion_prune_probe");
+            if (Directory.Exists(pruneDir)) Directory.Delete(pruneDir, recursive: true);
+            Directory.CreateDirectory(Path.Combine(pruneDir, "missions", "probe"));
+            File.WriteAllBytes(Path.Combine(pruneDir, "missions", "probe", "sectors.bin"), new byte[4]);
+            File.WriteAllText(Path.Combine(pruneDir, "SDSContent.xml"),
+                "<SDSResource><ResourceEntry><Type>AudioSectors</Type><File>/missions/probe/sectors.bin</File>"
+                + "<Version>6</Version></ResourceEntry><ResourceEntry><Type>Texture</Type><File>gone.dds</File>"
+                + "<HasMIP>0</HasMIP><Version>2</Version></ResourceEntry></SDSResource>");
+            List<string> dropped = SdsWriter.PruneMissingEntries(pruneDir);
+            Check("pruning keeps a present resource with a rooted name and drops only the missing one",
+                dropped.Count == 1 && dropped[0] == "gone.dds"
+                && SdsManifest.Load(pruneDir).HasFile("/missions/probe/sectors.bin"), string.Join(", ", dropped));
+            Directory.Delete(pruneDir, recursive: true);
 
             // Second push: the same material, now by hash, with different pixels.
             byte[] before = File.ReadAllBytes(texturePath);
@@ -206,6 +249,16 @@ internal static class BridgeMaterialProbes
                     Check($"addon material '{m.Name}': texture written", File.Exists(path), tex ?? "(none)");
                     if (!File.Exists(path)) continue;
                     writtenFiles.Add(path);
+                    string companionPath = Path.Combine(extracted, "MIP_" + tex);
+                    bool split = DdsEncoder.IsSplit(BitConverter.ToInt32(File.ReadAllBytes(path), 16) * 2, 256)
+                        && File.Exists(companionPath);
+                    if (File.Exists(companionPath))
+                    {
+                        writtenFiles.Add(companionPath);
+                        Check($"addon material '{m.Name}': a 256+ image arrived split, with HasMIP and a Mipmap entry",
+                            split && SdsManifest.Load(extracted).EntryFields(tex!) is { } f && f[2].Value == "1"
+                            && SdsManifest.Load(extracted).HasFile("MIP_" + tex));
+                    }
                     File.Copy(path, Path.Combine(Path.GetTempPath(), "illusion_bridge_material_pushed.dds"), overwrite: true);
                 }
                 Check("the addon's material was created", pushedHashes.Count > 0);

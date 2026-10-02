@@ -4,9 +4,11 @@ using Illusion.Formats.Archive;
 namespace Illusion.Assets.Textures;
 
 /// <summary>
-/// Puts a new texture into an archive's extracted folder: the .dds on disk AND its <c>Texture</c> entry in
+/// Puts a texture into an archive's extracted folder: the .dds on disk AND its <c>Texture</c> entry in
 /// SDSContent.xml — packing follows the manifest, so a file that is only on disk never reaches the game.
-/// The texture is announced to <see cref="TextureSearchIndex"/> so the material editor finds it at once.
+/// A texture the game stores split (see <see cref="DdsEncoder"/>) also gets its <c>MIP_</c> file and
+/// <c>Mipmap</c> entry. The texture is announced to <see cref="TextureSearchIndex"/> so the material editor
+/// finds it at once.
 /// </summary>
 public static class ArchiveTextureWriter
 {
@@ -32,21 +34,39 @@ public static class ArchiveTextureWriter
         }
     }
 
-    /// <summary>Writes the texture and lists it in the manifest. Returns the full path of the .dds.</summary>
-    public static string Write(string extractedDir, string fileName, byte[] dds)
+    /// <summary>
+    /// Writes the texture and lists it in the manifest; <paramref name="topLevel"/> is the separately
+    /// streamed top level of a split texture, or null. Rewriting a name the archive already has replaces
+    /// both the files and the entries — a re-push may have crossed the size at which a texture is split.
+    /// Returns the full path of the .dds.
+    /// </summary>
+    public static string Write(string extractedDir, string fileName, byte[] dds, byte[]? topLevel)
     {
         ArgumentException.ThrowIfNullOrEmpty(extractedDir);
         ArgumentException.ThrowIfNullOrEmpty(fileName);
         ArgumentNullException.ThrowIfNull(dds);
 
         string path = Path.Combine(extractedDir, fileName);
-        string temp = path + ".tmp";
-        File.WriteAllBytes(temp, dds);
-        File.Move(temp, path, overwrite: true);
+        string mipName = "MIP_" + fileName;
+        string mipPath = Path.Combine(extractedDir, mipName);
+        Replace(path, dds);
+        if (topLevel != null) Replace(mipPath, topLevel);
+        else File.Delete(mipPath);
 
-        SdsManifest.Load(extractedDir).AddEntry("Texture", fileName, TextureEntryVersion, [("HasMIP", "0")]);
+        SdsManifest manifest = SdsManifest.Load(extractedDir);
+        manifest.RemoveEntry(fileName);
+        manifest.RemoveEntry(mipName);
+        manifest.AddEntry("Texture", fileName, TextureEntryVersion, [("HasMIP", topLevel != null ? "1" : "0")]);
+        if (topLevel != null) manifest.AddEntry("Mipmap", mipName, TextureEntryVersion);
         TextureSearchIndex.Register(path);
         return path;
+    }
+
+    private static void Replace(string path, byte[] bytes)
+    {
+        string temp = path + ".tmp";
+        File.WriteAllBytes(temp, bytes);
+        File.Move(temp, path, overwrite: true);
     }
 
     // Texture names are hashed as written and travel through XML and file systems: keep them to the

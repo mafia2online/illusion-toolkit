@@ -173,7 +173,8 @@ public sealed class AuthoredMaterialResolver
         try
         {
             string file = ArchiveTextureWriter.PickName(dir, image.Name, reuse);
-            ArchiveTextureWriter.Write(dir, file, DdsEncoder.EncodeDxt1(block.Data, image.Width, image.Height));
+            (byte[] texture, byte[]? topLevel) = DdsEncoder.Encode(block.Data, image.Width, image.Height);
+            ArchiveTextureWriter.Write(dir, file, texture, topLevel);
             _written[(dir, image.Block)] = file;
             TouchedArchives[document.SourceArchive.FullName] = document.SourceArchive;
             return file;

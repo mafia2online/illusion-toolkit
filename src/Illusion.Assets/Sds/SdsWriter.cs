@@ -38,7 +38,7 @@ public static class SdsWriter
     /// is the only thing that lets a Build succeed at all.
     /// </summary>
     /// <returns>The file names that were unsaid.</returns>
-    private static List<string> PruneMissingEntries(string extracted)
+    internal static List<string> PruneMissingEntries(string extracted)
     {
         var dropped = new List<string>();
         SdsManifest manifest;
@@ -47,7 +47,11 @@ public static class SdsWriter
 
         foreach ((string _, string file) in manifest.Entries.ToArray())
         {
-            if (File.Exists(Path.Combine(extracted, file))) continue;
+            // Names out of the archive are often rooted ("/missions/city11_Little_Italy/SoundSectors_city11.bin"),
+            // and Path.Combine treats a rooted second argument as absolute: the file was looked for at the
+            // drive root, never found, and a perfectly present resource was unsaid on every Build — a
+            // district lost its AudioSectors that way. Joined the way the handlers join it.
+            if (File.Exists(Path.Combine(extracted, file.TrimStart('/', '\\')))) continue;
             if (manifest.RemoveEntry(file)) dropped.Add(file);
         }
         return dropped;

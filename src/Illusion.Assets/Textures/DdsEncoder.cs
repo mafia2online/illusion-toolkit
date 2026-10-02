@@ -4,10 +4,17 @@ using System.Numerics;
 namespace Illusion.Assets.Textures;
 
 /// <summary>
-/// Encodes RGBA8 pixels into the DDS shape the game ships its ordinary textures in: DXT1, a full MIP
-/// chain down to 1×1, and the exact header stock files carry (flags 0x21007, caps 0x401000, no pitch).
-/// A texture written this way stands alone as one <c>Texture</c> entry with <c>HasMIP = 0</c> — the
-/// layout of 2809 stock textures across the city archives — so it needs no companion <c>Mipmap</c> entry.
+/// Encodes RGBA8 pixels into the DDS shapes the game ships its textures in: DXT1 with the exact headers
+/// stock files carry.
+/// <para>
+/// The game stores a texture in one of two ways, and which one is decided by size (measured over the city,
+/// car, shop and crash archives — 6747 split textures, none of them an exception):
+/// a texture with a side under 256 is ONE file, a full MIP chain down to 1×1, in a <c>Texture</c> entry
+/// with <c>HasMIP = 0</c>; anything from 256×256 up is SPLIT — its top level alone in a <c>Mipmap</c>
+/// entry (streamed in when the object is near), and everything from half resolution down in the
+/// <c>Texture</c> entry with <c>HasMIP = 1</c>. No stock texture of 256×256 or more keeps its top level in
+/// the Texture entry, and one written that way came out black in game.
+/// </para>
 /// </summary>
 public static class DdsEncoder
 {
@@ -16,16 +23,43 @@ public static class DdsEncoder
     /// <summary>Whether <paramref name="size"/> is a power of two the encoder accepts (1…4096).</summary>
     public static bool IsValidDimension(int size) => size is >= 1 and <= 4096 && (size & (size - 1)) == 0;
 
+    /// <summary>Whether the game stores a texture of this size split (see the class summary).</summary>
+    public static bool IsSplit(int width, int height) => Math.Min(width, height) >= 256;
+
     /// <summary>
-    /// Encodes <paramref name="rgba"/> (rows top-down, 4 bytes per pixel; alpha is ignored — DXT1 is
-    /// opaque) into a complete .dds file. Both dimensions must be powers of two.
+    /// Encodes <paramref name="rgba"/> the way the game stores a texture of that size. <c>Texture</c> is
+    /// the .dds for the <c>Texture</c> entry; <c>TopLevel</c> is the .dds for its <c>Mipmap</c> companion,
+    /// or null when the texture is small enough to be one file.
     /// </summary>
-    public static byte[] EncodeDxt1(ReadOnlySpan<byte> rgba, int width, int height)
+    public static (byte[] Texture, byte[]? TopLevel) Encode(ReadOnlySpan<byte> rgba, int width, int height)
+    {
+        Validate(rgba, width, height);
+        if (!IsSplit(width, height)) return (EncodeDxt1(rgba, width, height), null);
+
+        var top = new byte[HeaderSize + BlockBytes(width, height)];
+        WriteHeader(top, width, height, 1);
+        byte[] full = rgba.ToArray();
+        EncodeLevel(full, width, height, top.AsSpan(HeaderSize));
+        byte[] half = Downsample(full, width, height, out int halfWidth, out int halfHeight);
+        return (EncodeDxt1(half, halfWidth, halfHeight), top);
+    }
+
+    private static void Validate(ReadOnlySpan<byte> rgba, int width, int height)
     {
         if (!IsValidDimension(width) || !IsValidDimension(height))
             throw new ArgumentException($"texture dimensions must be powers of two up to 4096, got {width}×{height}");
         if (rgba.Length != width * height * 4)
             throw new ArgumentException($"expected {width * height * 4} bytes of RGBA, got {rgba.Length}");
+    }
+
+    /// <summary>
+    /// Encodes <paramref name="rgba"/> (rows top-down, 4 bytes per pixel; alpha is ignored — DXT1 is
+    /// opaque) into ONE .dds file with a full MIP chain. Both dimensions must be powers of two. This is the
+    /// whole texture only below 256×256 — use <see cref="Encode"/> for anything headed into the game.
+    /// </summary>
+    public static byte[] EncodeDxt1(ReadOnlySpan<byte> rgba, int width, int height)
+    {
+        Validate(rgba, width, height);
 
         int mips = 1 + BitOperations.Log2((uint)Math.Max(width, height));
         int total = HeaderSize;
@@ -55,7 +89,9 @@ public static class DdsEncoder
         dds[2] = (byte)'S';
         dds[3] = (byte)' ';
         BinaryPrimitives.WriteUInt32LittleEndian(dds[4..], 124);       // dwSize
-        BinaryPrimitives.WriteUInt32LittleEndian(dds[8..], 0x21007);   // CAPS | HEIGHT | WIDTH | PIXELFORMAT | MIPMAPCOUNT
+        // CAPS | HEIGHT | WIDTH | PIXELFORMAT, plus MIPMAPCOUNT on a chain — a single level carries neither
+        // that flag nor the MIPMAP cap, exactly like the stock top-level files.
+        BinaryPrimitives.WriteUInt32LittleEndian(dds[8..], mips > 1 ? 0x21007u : 0x1007u);
         BinaryPrimitives.WriteUInt32LittleEndian(dds[12..], (uint)height);
         BinaryPrimitives.WriteUInt32LittleEndian(dds[16..], (uint)width);
         BinaryPrimitives.WriteUInt32LittleEndian(dds[28..], (uint)mips);
@@ -65,7 +101,7 @@ public static class DdsEncoder
         dds[85] = (byte)'X';
         dds[86] = (byte)'T';
         dds[87] = (byte)'1';
-        BinaryPrimitives.WriteUInt32LittleEndian(dds[108..], 0x401000); // DDSCAPS_TEXTURE | DDSCAPS_MIPMAP
+        BinaryPrimitives.WriteUInt32LittleEndian(dds[108..], mips > 1 ? 0x401000u : 0x1000u); // TEXTURE (| MIPMAP)
     }
 
     // Box filter, each axis halved independently so a non-square texture keeps shrinking its long side
