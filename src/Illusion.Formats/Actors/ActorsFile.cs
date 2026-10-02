@@ -581,26 +581,28 @@ public sealed class ActorsFile
     private const int LightMatrixOffset = 18;
     private const int LightMatrixSize = 48;
 
-    // How far a stored inverse may drift from the true one before it counts as stale. Shipped lights sit
-    // below 1e-4 (float rounding at world coordinates); a light left with another place's inverse is off by
-    // hundreds.
+    // How far a stored inverse may be from the true one and still count as one. Shipped lights sit below
+    // 3e-4 (float rounding at world coordinates); a tail that holds something else is off by hundreds.
     private const double LightInverseTolerance = 1e-2;
 
     /// <summary>
     /// A light says where it is four times: in its actor record, in the transform at the head of its behaviour
     /// blob (the one the frame it spawns is built from), in the INVERSE of that transform at the blob's tail,
-    /// and in the world-space box its glow is clipped to. In every shipped pack they agree — measured over the
-    /// lights of several archives: the head translation equals the record's position, and head times tail is
-    /// the identity to 1e-4. The record is what the editor moves, so the rest follows it here, just before the
-    /// pack is written.
+    /// and in the world-space box its glow is clipped to. The record is what the editor moves, so when it has
+    /// moved the rest follows it here — when a light is imported, and just before the pack is written.
     /// <para>
     /// The inverse is the one that matters most and shows least: the game works a light out in the light's own
     /// space, so a light whose inverse still describes the archive it was brought from is placed correctly,
     /// reads correctly in every field, and lights nothing.
     /// </para>
     /// <para>
-    /// Each part is written only when it is actually out of step, so a pack nobody touched still writes byte
-    /// for byte. The box is carried along by the distance the light moved, keeping whatever shape it was given.
+    /// A light that has NOT moved is never touched, so a pack nobody edited still writes byte for byte. That
+    /// rule is narrower than "make the tail right" on purpose. Measured over the 4265 light rows of the
+    /// install's 1050 packs: 4193 hold the exact inverse (worst error 2.7e-4), and the 72 lights of three
+    /// Joe's Adventures archives hold zeroes or noise there instead — shipped that way, so whatever the game
+    /// does with them is not this code's to correct. For the same reason a moved light gets a new inverse
+    /// only if the one it had was a true inverse of where it stood; a tail that never was one is left as it
+    /// is. The box is carried along by the distance the light moved, keeping whatever shape it was given.
     /// A row shared by several lights cannot hold more than one place and is left alone — give each light a
     /// row of its own.
     /// </para>
@@ -616,45 +618,66 @@ public sealed class ActorsFile
         if (!actor.IsTyped || actor.Type != EntityType.LightEntity) return;
         if (actor.InitPropId < 0 || actor.InitPropId >= Binary.PropRows.Count) return;
         if (CountSharersOf(actor.InitPropId) != 1) return;
-        byte[] blob = Binary.PropRows[actor.InitPropId].Payload;
+        Native.Model.ActorPropRowW row = Binary.PropRows[actor.InitPropId];
+        byte[] blob = row.Payload;
         if (blob.Length < LightMatrixOffset + LightMatrixSize) return;
 
         var was = new Vector3(
             BitConverter.ToSingle(blob, LightMatrixOffset + 12),
             BitConverter.ToSingle(blob, LightMatrixOffset + 28),
             BitConverter.ToSingle(blob, LightMatrixOffset + 44));
-        bool moved = Vector3.DistanceSquared(was, actor.Position) >= 1e-8f;
-        if (moved)
-        {
-            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 12, 4), actor.Position.X);
-            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 28, 4), actor.Position.Y);
-            BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 44, 4), actor.Position.Z);
-        }
+        if (Vector3.DistanceSquared(was, actor.Position) < 1e-8f) return;
 
         // The tail is found from the blob's own length word (which does not count itself): the inverse
-        // matrix is the last thing in it, and the clip box sits before it behind one flag byte.
+        // matrix is the last thing in it, and the clip box sits before it behind one flag byte. Whether the
+        // tail holds an inverse at all is asked of the matrix as it was, before the move.
         int inverseAt = BitConverter.ToInt32(blob, 0) + 4 - LightMatrixSize;
         int boxAt = inverseAt - 1 - 24;
-        if (boxAt < LightMatrixOffset + LightMatrixSize || inverseAt + LightMatrixSize > blob.Length) return;
+        bool hasTail = boxAt >= LightMatrixOffset + LightMatrixSize && inverseAt + LightMatrixSize <= blob.Length;
+        bool hadInverse = hasTail
+            && LightMatrixDrift(ReadLightMatrix(blob, LightMatrixOffset), ReadLightMatrix(blob, inverseAt))
+                < LightInverseTolerance;
 
-        if (moved)
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 12, 4), actor.Position.X);
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 28, 4), actor.Position.Y);
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 44, 4), actor.Position.Z);
+        if (!hasTail) return;
+
+        Vector3 by = actor.Position - was;
+        for (int corner = 0; corner < 2; corner++)
         {
-            Vector3 by = actor.Position - was;
-            for (int corner = 0; corner < 2; corner++)
-            {
-                int at = boxAt + corner * 12;
-                BitConverter.TryWriteBytes(blob.AsSpan(at, 4), BitConverter.ToSingle(blob, at) + by.X);
-                BitConverter.TryWriteBytes(blob.AsSpan(at + 4, 4), BitConverter.ToSingle(blob, at + 4) + by.Y);
-                BitConverter.TryWriteBytes(blob.AsSpan(at + 8, 4), BitConverter.ToSingle(blob, at + 8) + by.Z);
-            }
+            int at = boxAt + corner * 12;
+            BitConverter.TryWriteBytes(blob.AsSpan(at, 4), BitConverter.ToSingle(blob, at) + by.X);
+            BitConverter.TryWriteBytes(blob.AsSpan(at + 4, 4), BitConverter.ToSingle(blob, at + 4) + by.Y);
+            BitConverter.TryWriteBytes(blob.AsSpan(at + 8, 4), BitConverter.ToSingle(blob, at + 8) + by.Z);
         }
+        // The box is also a NAMED field of the row, and on write the core pokes every named field's value back
+        // over the blob — so a field left holding the old corners would put them straight back.
+        AdoptFloatFields(row, boxAt, 24);
 
-        double[] world = ReadLightMatrix(blob, LightMatrixOffset);
-        if (!TryInvertLightMatrix(world, out double[] inverse)) return;
-        if (LightMatrixDrift(world, ReadLightMatrix(blob, inverseAt)) < LightInverseTolerance) return;
+        if (!hadInverse) return;
+        if (!TryInvertLightMatrix(ReadLightMatrix(blob, LightMatrixOffset), out double[] inverse)) return;
         for (int i = 0; i < 12; i++)
         {
             BitConverter.TryWriteBytes(blob.AsSpan(inverseAt + i * 4, 4), (float)inverse[i]);
+        }
+        AdoptFloatFields(row, inverseAt, LightMatrixSize);
+    }
+
+    // Re-reads the float and vector fields lying inside [at, at + length) from the blob, after the blob was
+    // written to directly. Only those two kinds: nothing else is ever written that way.
+    private static void AdoptFloatFields(Native.Model.ActorPropRowW row, int at, int length)
+    {
+        foreach (Native.Model.ActorPropFieldW field in row.Fields)
+        {
+            if (field.Offset < at || field.Offset >= at + length) continue;
+            var kind = (ActorPropertyKind)field.Kind;
+            if (kind is not (ActorPropertyKind.Float or ActorPropertyKind.Vector3)) continue;
+            int offset = (int)field.Offset;
+            field.F0 = BitConverter.ToSingle(row.Payload, offset);
+            if (kind != ActorPropertyKind.Vector3) continue;
+            field.F1 = BitConverter.ToSingle(row.Payload, offset + 4);
+            field.F2 = BitConverter.ToSingle(row.Payload, offset + 8);
         }
     }
 

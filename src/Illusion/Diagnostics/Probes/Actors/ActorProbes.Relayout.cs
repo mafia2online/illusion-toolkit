@@ -163,6 +163,9 @@ internal static partial class ActorProbes
 
             // ── Relink: the scene reference has to follow the actor ──
             if (plain != null || withCutscenes != null) CheckRelink((withCutscenes ?? plain)!, sb, Check);
+
+            // ── Import: an actor that arrives from another archive's pack ──
+            CheckLightImport(files, sb, Check);
         }
         catch (Exception ex)
         {
