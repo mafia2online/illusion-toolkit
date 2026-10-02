@@ -120,15 +120,14 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "scene_select")]
-    [Description("Replace the editor's selection with the named objects. A name is the object's name; when two objects share it, give enough of the tree path (as scene_find reports it) to tell them apart. While a Blender session is open only the objects in that session can be selected.")]
+    [Description("Replace the editor's selection with the named objects; an empty list clears it (a selection is outlined through walls, so clear it before a screenshot that should show what the player sees). A name is the object's name; when two objects share it, give enough of the tree path (as scene_find reports it) to tell them apart. While a Blender session is open only the objects in that session can be selected.")]
     public static async Task<string> Select(
         IEditorSession editor,
         IUiThreadMarshal ui,
-        [Description("Object names (or path suffixes) to select together.")] string[] names)
+        [Description("Object names (or path suffixes) to select together. Empty clears the selection.")] string[] names)
     {
         try
         {
-            if (names.Length == 0) return ToolResult.Invalid("no names given");
             if (await ui.RunAsync(() => editor.Select(names)) is { } refused) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
         }
@@ -161,6 +160,42 @@ public sealed class EditorTools
                     return ToolResult.Json(new { success = false, error = "the editor refused", notices = said });
                 if (DateTime.UtcNow > deadline)
                     return ToolResult.Json(new { success = false, error = "timed out waiting for Blender", notices = said });
+            }
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "blender_push")]
+    [Description("Ask Blender to push the edit session's objects back as they are now (the addon's Push button), wait for the push to land and return what the editor reported: objects applied, what was rebuilt or re-cooked, what was refused and why. After a push that rebuilt topology, blender_end and blender_open again before editing further.")]
+    public static async Task<string> BlenderPush(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("How long to wait for the push to land, in seconds. Default 120.")] int timeoutSeconds = 120)
+    {
+        try
+        {
+            DateTime started = DateTime.Now;
+            if (await ui.RunAsync(editor.RequestBlenderPush) is { } refused) return ToolResult.Invalid(refused);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(Math.Max(5, timeoutSeconds));
+            while (true)
+            {
+                await Task.Delay(Poll);
+                var said = (await ui.RunAsync(() => editor.Notices(8))).Where(n => n.Time >= started).ToList();
+                // Either line ends a push: the summary every applied push prints, or the failure to apply it.
+                if (said.FirstOrDefault(n => n.Text.Contains("Blender push", StringComparison.Ordinal)) is { } landed)
+                    return ToolResult.Json(new { success = !landed.Error, notices = said });
+                if (DateTime.UtcNow > deadline)
+                {
+                    return ToolResult.Json(new
+                    {
+                        success = false,
+                        error = "no push arrived — Blender sends nothing when nothing changed since the last push",
+                        notices = said,
+                    });
+                }
             }
         }
         catch (Exception ex)

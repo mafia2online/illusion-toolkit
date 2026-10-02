@@ -31,12 +31,16 @@ public interface IEditorSession
     /// must touch.</summary>
     IReadOnlyList<SceneObjectInfo> Find(string? nameContains, string? kind, float[]? boxMin, float[]? boxMax, int limit);
 
-    /// <summary>Replaces the selection. A name is an object name, or a path suffix when the name alone is
-    /// ambiguous. Null on success.</summary>
+    /// <summary>Replaces the selection; no names clears it. A name is an object name, or a path suffix
+    /// when the name alone is ambiguous. Null on success.</summary>
     string? Select(IReadOnlyList<string> names);
 
     /// <summary>Sends the selection to Blender (what Tab does). Null when the request was started.</summary>
     string? OpenInBlender();
+
+    /// <summary>Asks Blender to push what it holds now. Null when the request was sent; the outcome
+    /// arrives as a notice.</summary>
+    string? RequestBlenderPush();
 
     /// <summary>Leaves the Blender edit session; everything pushed so far stays in the scene.</summary>
     string? EndBlenderSession();

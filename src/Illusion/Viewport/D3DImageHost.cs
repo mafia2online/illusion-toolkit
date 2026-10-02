@@ -700,6 +700,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>How many objects are currently open in Blender (0 = no active edit session).</summary>
     public int BridgeEditedCount => BridgeSession.ExportedCount;
 
+    /// <inheritdoc cref="Bridge.BridgeSessionController.RequestPush"/>
+    public bool RequestBridgePush() => BridgeSession.RequestPush();
+
     /// <summary>Ends the Blender edit session (un-ghosts the scene); the Blender side stays open.</summary>
     public void EndBridgeEditSession() => BridgeSession.EndEditSession();
 

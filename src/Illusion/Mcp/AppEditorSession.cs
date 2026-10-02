@@ -173,8 +173,15 @@ internal sealed class AppEditorSession : IEditorSession
                 return $"'{name}' is not part of the open Blender session — blender_end first";
             nodes.Add(node!);
         }
-        host.Selection.SetSelection(nodes, nodes[^1]);
+        host.Selection.SetSelection(nodes, nodes.Count > 0 ? nodes[^1] : null);
         return null;
+    }
+
+    public string? RequestBlenderPush()
+    {
+        if (Window is not { } window) return NotOpen;
+        if (window.Viewport.BridgeEditedCount == 0) return "no Blender edit session is open — blender_open first";
+        return window.Viewport.RequestBridgePush() ? null : "the connection to Blender is gone — blender_open again";
     }
 
     public string? OpenInBlender()
