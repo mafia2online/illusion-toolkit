@@ -42,6 +42,8 @@ internal static class BridgeMaterialProbes
         byte[]? manifestBytes = null;
         var writtenFiles = new List<string>();
         var pushedHashes = new List<ulong>();
+        HashSet<string>? folderBefore = null;
+        string? extractedDir = null;
         ulong createdHash = 0;
         try
         {
@@ -94,18 +96,15 @@ internal static class BridgeMaterialProbes
                 l => l.Equals("default.mtl", StringComparison.OrdinalIgnoreCase)) ?? catalog.Libraries[0];
             Check("probe material name is free", MafiaMaterials.FindHashByName(ProbeMaterial) == null);
 
-            ulong? Create(string name, string texture)
-            {
-                ulong? hash = catalog.CreateMaterial(library, name);
-                if (hash != null) catalog.SetTexture(hash.Value, "S000", texture);
-                return hash;
-            }
+            var catalogHost = new CatalogAuthoredMaterials(catalog, library);
+            folderBefore = new HashSet<string>(Directory.GetFiles(extracted), StringComparer.OrdinalIgnoreCase);
+            extractedDir = extracted;
 
             // First push: no hash, pixels attached.
             var first = new ExchangeContainer();
             MeshMaterialInfo slot = NewSlot(first, gradient, w, h);
             var payload = new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { slot } };
-            var resolver = new AuthoredMaterialResolver(first, Create, (hash, texture) => catalog.SetTexture(hash, "S000", texture));
+            var resolver = new AuthoredMaterialResolver(first, catalogHost);
             bool resolved = resolver.TryResolve(payload, document, out string? reason);
             Check("a hash-less slot with an image resolves", resolved, reason ?? "");
             if (!resolved) return;
@@ -178,7 +177,7 @@ internal static class BridgeMaterialProbes
             var second = new ExchangeContainer();
             MeshMaterialInfo again = NewSlot(second, Gradient(w, h, 128), w, h);
             again.Hash = slot.Hash;
-            var repush = new AuthoredMaterialResolver(second, Create, (hash, tex) => catalog.SetTexture(hash, "S000", tex));
+            var repush = new AuthoredMaterialResolver(second, catalogHost);
             bool reresolved = repush.TryResolve(
                 new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { again } }, document, out reason);
             Check("a re-push with new pixels resolves", reresolved, reason ?? "");
@@ -195,7 +194,7 @@ internal static class BridgeMaterialProbes
                 var third = new ExchangeContainer();
                 MeshMaterialInfo byName = NewSlot(third, gradient, w, h);
                 byName.Name = stockName;
-                var bind = new AuthoredMaterialResolver(third, Create, (_, _) => false);
+                var bind = new AuthoredMaterialResolver(third, catalogHost);
                 bool bound = bind.TryResolve(
                     new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { byName } }, document, out reason);
                 Check("a name the game already has binds to that material",
@@ -206,7 +205,7 @@ internal static class BridgeMaterialProbes
             // No image, no material: refused in words, nothing created.
             var fourth = new ExchangeContainer();
             var bare = new MeshMaterialInfo { Hash = "", Name = "illusion_probe_bare", Authored = true };
-            var refuse = new AuthoredMaterialResolver(fourth, Create, (_, _) => false);
+            var refuse = new AuthoredMaterialResolver(fourth, catalogHost);
             bool refused = !refuse.TryResolve(
                 new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { bare } }, document, out reason);
             Check("a new material without an image is refused with a reason",
@@ -216,7 +215,7 @@ internal static class BridgeMaterialProbes
             // made again; without them the push is refused and the ack tells the datablock to forget.
             var fifth = new ExchangeContainer();
             var lost = new MeshMaterialInfo { Hash = "0x00000000DEADBEEF", Name = "illusion_probe_lost", Authored = true };
-            var forget = new AuthoredMaterialResolver(fifth, Create, (_, _) => false);
+            var forget = new AuthoredMaterialResolver(fifth, catalogHost);
             bool forgotten = !forget.TryResolve(
                 new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { lost } }, document, out reason);
             Check("a remembered material the library lost, sent without pixels, is refused and forgotten",
@@ -226,7 +225,7 @@ internal static class BridgeMaterialProbes
             MeshMaterialInfo stale = NewSlot(fifth, gradient, w, h);
             stale.Name = "illusion_probe_lost";
             stale.Hash = "0x00000000DEADBEEF";
-            var remake = new AuthoredMaterialResolver(fifth, Create, (_, _) => false);
+            var remake = new AuthoredMaterialResolver(fifth, catalogHost);
             bool remade = remake.TryResolve(
                 new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { stale } }, document, out reason)
                 && ulong.TryParse(stale.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out recreated)
@@ -236,11 +235,76 @@ internal static class BridgeMaterialProbes
             foreach (string file in Directory.GetFiles(extracted, "illusion_probe_image*.dds"))
                 if (!writtenFiles.Contains(file)) writtenFiles.Add(file);
 
+            // ── A normal and a specular map ──
+            byte[] packedMaps = NormalSpecularPacker.Pack(
+                Solid(8, 8, 200, 60, 255), 8, 8, Solid(4, 4, 90, 90, 90), 4, 4, out int packedW, out int packedH);
+            Check("packing keeps normal X in red, inverts green, and puts the specular level in blue",
+                packedW == 8 && packedH == 8 && packedMaps[0] == 200 && packedMaps[1] == 195 && packedMaps[2] == 90
+                && packedMaps[3] == 255, $"{packedMaps[0]},{packedMaps[1]},{packedMaps[2]}");
+            byte[] flatMaps = NormalSpecularPacker.Pack(null, 0, 0, Solid(4, 4, 40, 40, 40), 4, 4, out _, out _);
+            Check("a specular map alone rides a flat normal", flatMaps[0] == 128 && flatMaps[1] == 128 && flatMaps[2] == 40);
+
+            const string mappedName = "illusion_probe_mapped";
+            var sixth = new ExchangeContainer();
+            MeshMaterialInfo mapped = NewSlot(sixth, gradient, w, h);
+            mapped.Name = mappedName;
+            mapped.NormalImage = Image(sixth, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+            mapped.SpecularImage = Image(sixth, "illusion_probe_spec.png", 32, 32, 70, 70, 70);
+            var withMaps = new AuthoredMaterialResolver(sixth, catalogHost);
+            ulong mappedHash = 0;
+            bool mappedOk = withMaps.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { mapped } }, document, out reason)
+                && ulong.TryParse(mapped.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out mappedHash);
+            Check("a material with a normal and a specular map resolves", mappedOk, reason ?? "");
+            if (mappedOk && MafiaMaterials.Collection?.FindByHash(mappedHash) is Formats.Materials.Versions.Material_v57 nm)
+            {
+                pushedHashes.Add(mappedHash);
+                static string Shape(Formats.Materials.Versions.Material_v57 m) =>
+                    $"{m.Unk0}|{(uint)m.Flags}|"
+                    + string.Join(",", m.Samplers.Select(x => $"{x.ID}:{x.TexType}:{Convert.ToHexString(x.SamplerStates)}"))
+                    + "|" + string.Join(",", m.Parameters.Select(x => $"{x.ID}:{x.Paramaters.Length}"));
+                var onShader = MafiaMaterials.Collection.Libraries.Values
+                    .SelectMany(l => l.Materials.Values).OfType<Formats.Materials.Versions.Material_v57>()
+                    .Where(m => m.ShaderID == nm.ShaderID && !ReferenceEquals(m, nm)).ToList();
+                string commonShape = onShader.GroupBy(Shape).OrderByDescending(g => g.Count()).First().Key;
+                Check("it is created on the normal-mapped shader, in the commonest stock shape of that shader",
+                    nm.ShaderID == 5159568776351604322 && nm.ShaderHash == 1949812732 && Shape(nm) == commonShape,
+                    $"{Shape(nm)} vs {commonShape}, over {onShader.Count} stock materials");
+                MafiaMaterials.MaterialTextures maps = MafiaMaterials.GetMaterialTextures(mappedHash);
+                string mapsPath = Path.Combine(extracted, maps.Normal ?? "?");
+                Check("diffuse in S000, the combined normal/specular texture in S001",
+                    maps.Diffuse != null && maps.Normal == mappedName + "_ns.dds" && File.Exists(mapsPath),
+                    $"{maps.Diffuse} / {maps.Normal}");
+                float[]? spec = nm.GetParameterByKey("D013")?.Paramaters;
+                Check("Blender's default roughness and specular become the commonest stock power and level",
+                    spec is [16f, 0.3f], spec == null ? "no D013" : string.Join(", ", spec));
+                if (File.Exists(mapsPath))
+                {
+                    byte[] top = DecodeTopLevel(File.ReadAllBytes(mapsPath), 64, 64);
+                    Check("the texture on disk holds a flat normal in red and green and the specular level in blue",
+                        Math.Abs(top[0] - 128) < 8 && Math.Abs(top[1] - 127) < 8 && Math.Abs(top[2] - 70) < 8,
+                        $"{top[0]},{top[1]},{top[2]}");
+                }
+            }
+
+            // A plain material that gains a normal map on a later push needs another shader: it is replaced
+            // under the same name, so the hash every mesh refers to does not move.
+            var seventh = new ExchangeContainer();
+            MeshMaterialInfo gained = NewSlot(seventh, gradient, w, h);
+            gained.Hash = slot.Hash;
+            gained.NormalImage = Image(seventh, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+            var upgrade = new AuthoredMaterialResolver(seventh, catalogHost);
+            bool upgraded = upgrade.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { gained } }, document, out reason);
+            Check("a plain material that gains a normal map is replaced under the same hash",
+                upgraded && gained.Hash == slot.Hash && MafiaMaterials.GetMaterialTextures(createdHash).Normal != null
+                && MafiaMaterials.Collection?.FindByHash(createdHash)?.ShaderID == 5159568776351604322, reason ?? gained.Hash);
+
             // ── A container written by the addon itself ──
             if (pushedContainer != null)
             {
                 ExchangeContainer pushed = ExchangeReader.Read(pushedContainer);
-                var fromBlender = new AuthoredMaterialResolver(pushed, Create, (hash, tex) => catalog.SetTexture(hash, "S000", tex));
+                var fromBlender = new AuthoredMaterialResolver(pushed, catalogHost);
                 int meshes = 0;
                 foreach (ExchangeObject obj in pushed.Objects.Where(o => o.Kind == ExchangeSchema.KindMesh))
                 {
@@ -288,6 +352,11 @@ internal static class BridgeMaterialProbes
         {
             foreach (string file in writtenFiles)
                 if (File.Exists(file)) File.Delete(file);
+            if (extractedDir != null && folderBefore != null)
+            {
+                foreach (string file in Directory.GetFiles(extractedDir))
+                    if (!folderBefore.Contains(file)) File.Delete(file);
+            }
             if (manifestPath != null && manifestBytes != null) File.WriteAllBytes(manifestPath, manifestBytes);
             if (createdHash != 0) MafiaMaterialCatalog.Instance.RemoveMaterial(createdHash); // never saved to disk
             foreach (ulong hash in pushedHashes) MafiaMaterialCatalog.Instance.RemoveMaterial(hash);
@@ -309,6 +378,27 @@ internal static class BridgeMaterialProbes
             Height = h,
             Block = container.AddBlock(ExchangeSchema.DtypeU8, 4, w * h, rgba),
         },
+    };
+
+    private static byte[] Solid(int w, int h, byte r, byte g, byte b)
+    {
+        var rgba = new byte[w * h * 4];
+        for (int i = 0; i < rgba.Length; i += 4)
+        {
+            rgba[i] = r;
+            rgba[i + 1] = g;
+            rgba[i + 2] = b;
+            rgba[i + 3] = 255;
+        }
+        return rgba;
+    }
+
+    private static MaterialImageRef Image(ExchangeContainer container, string name, int w, int h, byte r, byte g, byte b) => new()
+    {
+        Name = name,
+        Width = w,
+        Height = h,
+        Block = container.AddBlock(ExchangeSchema.DtypeU8, 4, w * h, Solid(w, h, r, g, b)),
     };
 
     private static byte[] Gradient(int w, int h, int shift)

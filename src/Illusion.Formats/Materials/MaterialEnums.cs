@@ -46,5 +46,11 @@ public enum MaterialFlags : uint //No idea which ones are used.
 
 public enum MaterialPreset
 {
-    Default = 0
+    /// <summary>Plain diffuse: one texture (S000), no parameters.</summary>
+    Default = 0,
+
+    /// <summary>Diffuse plus a combined normal/specular map (S001: normal X and Y in red and green, the
+    /// specular level in blue) and the specular power and level (D013) — the shader 1209 stock materials
+    /// use, on the same vertex declaration a plain mesh has.</summary>
+    DiffuseNormal = 1,
 }

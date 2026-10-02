@@ -30,6 +30,28 @@ public sealed class MeshMaterialInfo
     [JsonPropertyName("diffuseImage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MaterialImageRef? DiffuseImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the image behind the Normal Map node, in Blender's convention
+    /// (green up). Sent together with the other images whenever any of them changed.</summary>
+    [JsonPropertyName("normalImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? NormalImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the image wired into the specular input.</summary>
+    [JsonPropertyName("specularImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? SpecularImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the Principled specular level (0.5 is Blender's default) and
+    /// roughness, where they are plain values rather than textures.</summary>
+    [JsonPropertyName("specularLevel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? SpecularLevel { get; set; }
+
+    /// <inheritdoc cref="SpecularLevel"/>
+    [JsonPropertyName("roughness")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? Roughness { get; set; }
 }
 
 /// <summary>

@@ -71,6 +71,18 @@ public class IMaterial
             ShaderID = 4894707398632176459;
             Flags = (MaterialFlags)31461376;
         }
+        else if (Preset == MaterialPreset.DiffuseNormal)
+        {
+            // Samplers S000,S001 and the single parameter D013 on every one of the 1209 stock materials
+            // of this shader; these flags on 981 of them.
+            ShaderHash = 1949812732;
+            ShaderID = 5159568776351604322;
+            Flags = (MaterialFlags)31461376;
+            Parameters = new List<MaterialParameter>
+            {
+                new() { ID = "D013", Paramaters = new[] { 16f, 0.3f } }, // SpecularPowerAndLevel, the commonest pair
+            };
+        }
     }
 
     public virtual HashName? GetTextureByID(string SamplerName)

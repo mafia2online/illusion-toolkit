@@ -65,15 +65,26 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat?.GetSamplerByKey(slotId) == null) return false;
         mat.SetTextureFor(slotId, textureName);
+        // A sampler's TexType is 0 only while its slot is empty; every stock sampler that names a texture
+        // carries 2, and one left at 0 samples nothing in game. A slot added in the editor starts empty at
+        // 0, so binding a texture is where it has to become 2.
+        if (textureName.Length > 0 && mat is Material_v57 v57
+            && v57.Samplers.FirstOrDefault(s => s.ID == slotId) is { TexType: 0 } sampler)
+        {
+            sampler.TexType = 2;
+        }
         MarkDirty(lib);
         return true;
     }
 
-    public ulong? CreateMaterial(string library, string name)
+    public ulong? CreateMaterial(string library, string name) => CreateMaterial(library, name, normalMapped: false);
+
+    public ulong? CreateMaterial(string library, string name, bool normalMapped)
     {
         MaterialLibrary? lib = FindLibrary(library);
         if (lib == null) return null;
-        IMaterial? created = GameMaterialCreator.AddDefault(lib, name);
+        IMaterial? created = GameMaterialCreator.Add(
+            lib, name, normalMapped ? MaterialPreset.DiffuseNormal : MaterialPreset.Default);
         if (created == null) return null;
         MarkDirty(lib);
         return created.GetMaterialHash();

@@ -145,13 +145,64 @@ def base_color_image(material):
     Looks through the colour-adjusting nodes people put in between (Hue/Saturation, a Mix, curves):
     those are not baked — the image itself is what travels — but they must not hide it.
     """
+    principled = _principled(material)
+    return None if principled is None else _image_behind(principled.inputs.get("Base Color"))
+
+
+def normal_map_image(material):
+    """The image behind the Normal Map node feeding the Principled BSDF's Normal, or None.
+
+    Only a tangent-space Normal Map node counts: a Bump node's height map is a different thing, and
+    sending it as a normal map would light the surface from nowhere.
+    """
+    principled = _principled(material)
+    socket = None if principled is None else principled.inputs.get("Normal")
+    if socket is None or not socket.is_linked:
+        return None
+    node = socket.links[0].from_node
+    if node.type != 'NORMAL_MAP':
+        return None
+    return _image_behind(node.inputs.get("Color"))
+
+
+def specular_image(material):
+    """The image feeding the Principled BSDF's specular level, or None."""
+    socket = _specular_socket(material)
+    return None if socket is None else _image_behind(socket)
+
+
+def specular_level(material):
+    """The specular level as a plain value (Blender's default is 0.5); None when a texture drives it."""
+    socket = _specular_socket(material)
+    return None if socket is None or socket.is_linked else float(socket.default_value)
+
+
+def roughness(material):
+    """The roughness as a plain value; None when a texture drives it."""
+    principled = _principled(material)
+    socket = None if principled is None else principled.inputs.get("Roughness")
+    return None if socket is None or socket.is_linked else float(socket.default_value)
+
+
+def _principled(material):
     tree = getattr(material, "node_tree", None)
     if tree is None:
         return None
-    principled = next((n for n in tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    return next((n for n in tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+
+
+def _specular_socket(material):
+    principled = _principled(material)
     if principled is None:
         return None
-    socket = principled.inputs.get("Base Color")
+    for name in ("Specular IOR Level", "Specular"):  # 4.x renamed it
+        socket = principled.inputs.get(name)
+        if socket is not None:
+            return socket
+    return None
+
+
+def _image_behind(socket):
     for _ in range(8):
         if socket is None or not socket.is_linked:
             return None

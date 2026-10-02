@@ -19,15 +19,23 @@ public static class ArchiveTextureWriter
     /// A texture file name built from <paramref name="imageName"/> that no texture of the game already
     /// answers to — neither in this archive nor anywhere else in the mirror, since a shared name would
     /// either overwrite a shipped texture or be shadowed by one. <paramref name="reuse"/> is a name the
-    /// caller already owns (a re-push of the same image) and is handed back unchanged.
+    /// caller already owns (a re-push of the same image) and is handed back unchanged; so is a name in this
+    /// archive whose file is byte for byte <paramref name="content"/> — two materials sharing one image
+    /// share one texture.
     /// </summary>
-    public static string PickName(string extractedDir, string imageName, string? reuse = null)
+    public static string PickName(string extractedDir, string imageName, string? reuse = null, byte[]? content = null)
     {
         string stem = Sanitize(Path.GetFileNameWithoutExtension(imageName));
         string candidate = stem + ".dds";
         for (int n = 2; ; n++)
         {
             if (string.Equals(candidate, reuse, StringComparison.OrdinalIgnoreCase)) return candidate;
+            var existing = new FileInfo(Path.Combine(extractedDir, candidate));
+            if (content != null && existing.Exists && existing.Length == content.Length
+                && File.ReadAllBytes(existing.FullName).AsSpan().SequenceEqual(content))
+            {
+                return candidate;
+            }
             if (!File.Exists(Path.Combine(extractedDir, candidate)) && TextureSearchIndex.FindPath(candidate) == null)
                 return candidate;
             candidate = $"{stem}_{n}.dds";

@@ -1,4 +1,5 @@
 using Illusion.Assets;
+using Illusion.Assets.Bridge;
 using Illusion.Assets.Materials;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
@@ -124,20 +125,39 @@ internal sealed class MaterialEditController
         return hash;
     }
 
+    // ── Materials made in Blender (the bridge's IAuthoredMaterialHost, with history) ──
+
     /// <summary>
-    /// Creates a default-preset material whose diffuse slot already names <paramref name="diffuseTexture"/>
-    /// — how a material made in Blender arrives. ONE history entry: undoing it removes the material, texture
-    /// binding and all, and redo restores that same instance.
+    /// Creates a material that arrived from Blender, complete — its shader chosen by whether it carries a
+    /// normal map, its textures bound, its specular set. ONE history entry: undoing it removes the
+    /// material, bindings and all, and redo restores that same instance.
     /// </summary>
-    public ulong? CreateTexturedMaterial(string library, string name, string diffuseTexture)
+    public ulong? CreateAuthored(string library, AuthoredMaterial material)
     {
-        ulong? hash = Catalog.CreateMaterial(library, name);
+        MafiaMaterialCatalog catalog = MafiaMaterialCatalog.Instance;
+        ulong? hash = catalog.CreateMaterial(library, material.Name, material.NormalMapped);
         if (hash == null) return null;
-        Catalog.SetTexture(hash.Value, "S000", diffuseTexture);
+        CatalogAuthoredMaterials.Apply(catalog, hash.Value, material);
         _host.Editing.History.Push(new CreateEdit(this, hash.Value));
         AfterMaterialChanged(hash.Value);
         return hash;
     }
+
+    /// <summary>Brings a Blender-made material of the same shape up to date — each change through the path
+    /// the editor itself uses, so each is its own undoable edit and a value that did not change records
+    /// nothing.</summary>
+    public bool UpdateAuthored(ulong hash, AuthoredMaterial material)
+    {
+        if (!SetTexture(hash, "S000", material.Diffuse)) return false;
+        if (material.NormalSpecular == null) return true;
+        if (!SetTexture(hash, "S001", material.NormalSpecular)) return false;
+        return SetParameter(hash, "D013", [material.SpecularPower, material.SpecularLevel]);
+    }
+
+    /// <summary>Replaces a Blender-made material that gained or lost its normal map — a different shader,
+    /// so a different record under the same name and hash. A delete and a create, both undoable.</summary>
+    public ulong? ReplaceAuthored(string library, ulong hash, AuthoredMaterial material) =>
+        DeleteMaterial(hash) ? CreateAuthored(library, material) : null;
 
     /// <summary>
     /// A texture FILE was rewritten under the name the material already uses: nothing in the catalog

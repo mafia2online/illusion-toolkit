@@ -646,10 +646,7 @@ internal sealed class BridgeSessionController : IDisposable
 
             // Materials made in Blender become game materials BEFORE their meshes are applied — the mesh
             // path only knows slots by hash. The catalog edits run on the UI thread, where the history lives.
-            authored = new AuthoredMaterialResolver(
-                container,
-                (name, texture) => _host.Dispatcher.Invoke(() => CreateAuthoredMaterial(name, texture)),
-                (hash, texture) => _host.Dispatcher.Invoke(() => _host.MaterialEditing.SetTexture(hash, "S000", texture)));
+            authored = new AuthoredMaterialResolver(container, new AuthoredMaterialHost(_host));
             ISceneDocument? bridgeDocument = _host.Dispatcher.Invoke(() => _exported.Values
                 .Select(DocumentNodeOf).FirstOrDefault(n => n != null && _host.Tree.IsInScene(n))?.Source as ISceneDocument);
 
@@ -1104,14 +1101,23 @@ internal sealed class BridgeSessionController : IDisposable
         }
     }
 
-    // New materials go to default.mtl — the library every edition of the game loads, and where the file
-    // import puts the ones it creates.
-    private ulong? CreateAuthoredMaterial(string name, string diffuseTexture)
+    // The resolver's catalog edits, marshalled to the UI thread and recorded on the shared history.
+    private sealed class AuthoredMaterialHost : IAuthoredMaterialHost
     {
-        IReadOnlyList<string> libraries = _host.MaterialCatalog.Libraries;
-        string? library = libraries.FirstOrDefault(l => l.Equals("default.mtl", StringComparison.OrdinalIgnoreCase))
-            ?? libraries.FirstOrDefault();
-        return library == null ? null : _host.MaterialEditing.CreateTexturedMaterial(library, name, diffuseTexture);
+        private readonly D3DImageHost _host;
+
+        public AuthoredMaterialHost(D3DImageHost host) => _host = host;
+
+        private static string? Library => CatalogAuthoredMaterials.TargetLibrary(Assets.Materials.MafiaMaterialCatalog.Instance);
+
+        public ulong? Create(AuthoredMaterial material) => _host.Dispatcher.Invoke(() =>
+            Library is { } library ? _host.MaterialEditing.CreateAuthored(library, material) : null);
+
+        public bool Update(ulong hash, AuthoredMaterial material) =>
+            _host.Dispatcher.Invoke(() => _host.MaterialEditing.UpdateAuthored(hash, material));
+
+        public ulong? Replace(ulong hash, AuthoredMaterial material) => _host.Dispatcher.Invoke(() =>
+            Library is { } library ? _host.MaterialEditing.ReplaceAuthored(library, hash, material) : null);
     }
 
     private static string ShortId(string id)

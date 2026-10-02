@@ -294,34 +294,53 @@ def _describe_authored(material, entry, blocks, image_refs, signatures):
     """Add what the toolkit needs to turn a material made in Blender into a game material.
 
     A material the toolkit handed out is identified by its hash and nothing else. One made here has no
-    hash until a push creates it, and afterwards keeps the right to replace its own texture — so its
-    Base Color image rides along the first time, and again whenever it changed.
+    hash until a push creates it, and afterwards keeps the right to replace its own textures — so its
+    images ride along the first time, and again whenever anything about it changed. They travel
+    TOGETHER: the toolkit packs the normal and the specular map into one texture and picks the shader
+    by which maps exist, so it needs the whole material, not the part that moved.
     """
     game_hash = material.get("illusion_hash")
     if game_hash and not material.get(materials.AUTHORED_PROP):
         return
     entry["authored"] = True
-    image = materials.base_color_image(material)
-    if image is None:
+    diffuse = materials.base_color_image(material)
+    if diffuse is None:
         return
-    signature = materials.image_signature(image)
+    normal = materials.normal_map_image(material)
+    specular = materials.specular_image(material)
+    level = materials.specular_level(material)
+    roughness = materials.roughness(material)
+
+    # Unsaved paint on any image has no cheap identity, so it resends every time (signature None).
+    parts = [materials.image_signature(i) for i in (diffuse, normal, specular) if i is not None]
+    signature = None if any(p is None for p in parts) else "|".join(
+        parts + [f"n={normal is not None}", f"s={specular is not None}", f"level={level}", f"rough={roughness}"])
     if game_hash and signature is not None and signature == material.get(materials.SIGNATURE_PROP):
         return
 
-    ref = image_refs.get(image.name)
-    if ref is None:
-        packed = materials.image_rgba8(image)
-        if packed is None:
-            return
-        pixels, width, height = packed
-        ref = {
-            "name": image.name,
-            "width": width,
-            "height": height,
-            "block": _add_block(blocks, "u8", 4, width * height, pixels),
-        }
-        image_refs[image.name] = ref
-    entry["diffuseImage"] = ref
+    for key, image in (("diffuseImage", diffuse), ("normalImage", normal), ("specularImage", specular)):
+        if image is None:
+            continue
+        ref = image_refs.get(image.name)
+        if ref is None:
+            packed = materials.image_rgba8(image)
+            if packed is None:
+                if key == "diffuseImage":
+                    return
+                continue
+            pixels, width, height = packed
+            ref = {
+                "name": image.name,
+                "width": width,
+                "height": height,
+                "block": _add_block(blocks, "u8", 4, width * height, pixels),
+            }
+            image_refs[image.name] = ref
+        entry[key] = ref
+    if level is not None:
+        entry["specularLevel"] = level
+    if roughness is not None:
+        entry["roughness"] = roughness
     signatures[material.name] = signature
 
 

@@ -93,6 +93,14 @@ public class Material_v57 : IMaterial
 
             Samplers.Add(NewSampler);
         }
+        else if (Preset == MaterialPreset.DiffuseNormal)
+        {
+            // Same two fields, same majority on this shader: Unk0 128 on 1152 of 1209, TexType 2 on every
+            // bound sampler (a sampler reads 0 only where its texture name is empty).
+            Unk0 = 128;
+            Samplers.Add(new MaterialSampler_v57 { ID = "S000", TexType = 2 });
+            Samplers.Add(new MaterialSampler_v57 { ID = "S001", TexType = 2 });
+        }
     }
 
     public override HashName? GetTextureByID(string SamplerName)
