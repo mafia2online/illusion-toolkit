@@ -116,6 +116,21 @@ internal static class BridgeMaterialProbes
                 slot.Hash);
             Check("the material is named after the Blender one", MafiaMaterials.GetMaterialName(createdHash) == ProbeMaterial);
             Check("its diffuse slot names the new texture", texture == "illusion_probe_image.dds", texture ?? "(none)");
+
+            // A created material has to look like the stock ones on its shader in EVERY field, not only
+            // the ones the editor shows: one left at zero in Unk0 and the sampler's TexType drew black in
+            // game. The reference is whatever most stock materials on that shader carry.
+            if (MafiaMaterials.Collection?.FindByHash(createdHash) is Formats.Materials.Versions.Material_v57 made)
+            {
+                var peers = MafiaMaterials.Collection.Libraries.Values
+                    .SelectMany(l => l.Materials.Values).OfType<Formats.Materials.Versions.Material_v57>()
+                    .Where(m => m.ShaderID == made.ShaderID && !ReferenceEquals(m, made) && m.Samplers.Count > 0).ToList();
+                byte commonUnk0 = peers.GroupBy(m => m.Unk0).OrderByDescending(g => g.Count()).First().Key;
+                byte commonType = peers.GroupBy(m => m.Samplers[0].TexType).OrderByDescending(g => g.Count()).First().Key;
+                Check("the created material matches the stock record on its shader (Unk0, sampler TexType)",
+                    made.Unk0 == commonUnk0 && made.Samplers[0].TexType == commonType,
+                    $"Unk0 {made.Unk0} vs {commonUnk0}, TexType {made.Samplers[0].TexType} vs {commonType}, over {peers.Count} stock materials");
+            }
             string texturePath = Path.Combine(extracted, texture ?? "?");
             if (texture != null) writtenFiles.Add(texturePath);
             Check("the texture is on disk in the object's archive", File.Exists(texturePath));
