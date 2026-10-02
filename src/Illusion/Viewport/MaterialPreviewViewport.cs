@@ -159,14 +159,14 @@ public sealed class MaterialPreviewViewport : ViewportControl
         // Fan out indexed geometry: each triangle becomes 3 unique vertices with a shared face normal.
         int triCount = indices.Length / 3;
         var positions = new Vector3[triCount * 3];
-        var normals   = new Vector3[triCount * 3];
-        var uvs       = new Vector2[triCount * 3];   // zeroed — UV(0,0) samples the texture centre
-        var tangents  = new Vector3[triCount * 3];   // zeroed → shader skips normal-map sampling
-        var outIdx    = new uint[triCount * 3];
+        var normals = new Vector3[triCount * 3];
+        var uvs = new Vector2[triCount * 3];   // zeroed — UV(0,0) samples the texture centre
+        var tangents = new Vector3[triCount * 3];   // zeroed → shader skips normal-map sampling
+        var outIdx = new uint[triCount * 3];
 
         for (int t = 0; t < triCount; t++)
         {
-            Vector3 p0 = (allPositions[indices[t * 3    ]] - center) * scale;
+            Vector3 p0 = (allPositions[indices[t * 3]] - center) * scale;
             Vector3 p1 = (allPositions[indices[t * 3 + 1]] - center) * scale;
             Vector3 p2 = (allPositions[indices[t * 3 + 2]] - center) * scale;
 
