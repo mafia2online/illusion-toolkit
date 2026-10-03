@@ -59,6 +59,12 @@ internal static class McpProbes
         "actor_import", "object_properties", "object_set_property", "editor_undo", "editor_redo",
         "editor_mirror_winter",
         "object_import",
+        "editor_target",
+        "resource_list",
+        "resource_open",
+        "resource_status",
+        "car_tuning",
+        "car_tuning_set",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional

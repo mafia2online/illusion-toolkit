@@ -111,6 +111,9 @@ public partial class ResourceEditorWindow : Window
     /// <summary>The archive currently on the stage, or null before anything has been opened.</summary>
     public LibraryEntry? StagedEntry => _staged;
 
+    /// <summary>The stage's viewport — what the MCP session drives when the resource editor is its target.</summary>
+    internal Viewport.D3DImageHost TargetStage => Stage;
+
     /// <summary>
     /// Opens the window on a particular archive — what the map editor's "Open in library" jump will use once
     /// it exists. Safe to call before the catalog has finished building: the request is remembered and

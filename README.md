@@ -249,6 +249,7 @@ map editor itself.
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
+| **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -257,6 +258,9 @@ commands do: every edit lands in the same undo history, nothing reaches disk bef
 and nothing reaches the game before `editor_build` (which keeps the usual timestamped backup).
 `scene_find` answers in world space and tests a box against the mesh's triangles, not its bounds;
 `viewport_screenshot` is how a client checks what a push actually looks like.
+`editor_target resource` points the same tools at the resource editor's stage (one archive, such as
+a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
+entity-data tables the way the Tuning tab does.
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
 only one that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a

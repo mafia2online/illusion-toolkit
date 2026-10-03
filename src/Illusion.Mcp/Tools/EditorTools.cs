@@ -31,6 +31,137 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "editor_target")]
+    [Description("Choose which editor the scene tools drive: 'map' (the map editor, the default) or 'resource' (the resource editor — one archive such as a car on a stage). scene_find, scene_select, object_properties, object_set_property, object_move, scene_duplicate_selected, scene_delete_selected, camera_*, viewport_screenshot, view_set (shading only), editor_save, editor_build, editor_undo/redo and the blender_* tools all follow it. resource_open switches to 'resource' by itself.")]
+    public static async Task<string> SetTarget(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("'map' or 'resource'.")] string target)
+    {
+        try
+        {
+            string? note = await ui.RunAsync(() => editor.SetTarget(target));
+            return ToolResult.Json(new { success = true, note, resource = await ui.RunAsync(editor.ResourceStatus) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "resource_list")]
+    [Description("List archives of the game's library — cars, characters, city objects, interiors — by name fragment and/or folder fragment ('cars', 'hchar', 'shops'). Each: name, path under pc\\sds, kind, size, and whether it already has a working copy.")]
+    public static async Task<string> ResourceList(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Part of the archive name, e.g. 'shubert'. Omit for all.")] string? query = null,
+        [Description("Part of the folder path, e.g. 'cars'. Omit for all.")] string? folder = null,
+        [Description("At most this many. Default 100.")] int limit = 100)
+    {
+        try
+        {
+            IReadOnlyList<LibraryItem> items = await ui.RunAsync(() => editor.Library(query, folder, limit));
+            return ToolResult.Json(new { success = true, count = items.Count, archives = items });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "resource_open")]
+    [Description("Open an archive in the resource editor (opening the window if needed) and make it the target of the scene tools. Waits until it is on the stage. A car opens with its component tree (doors, bumpers, wheels) and its tuning.")]
+    public static async Task<string> ResourceOpen(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The archive: a path under pc\\sds such as 'cars/shubert_38.sds', a full path, or a bare name such as 'shubert_38'.")] string archive,
+        [Description("How long to wait for the load, in seconds. Default 120.")] int timeoutSeconds = 120)
+    {
+        try
+        {
+            if (await ui.RunAsync(() => editor.OpenResource(archive)) is { } refused) return ToolResult.Invalid(refused);
+            DateTime until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 1, 600));
+            ResourceStatus status;
+            do
+            {
+                await Task.Delay(400);
+                status = await ui.RunAsync(editor.ResourceStatus);
+            }
+            while ((status.Loading || status.Meshes == 0) && DateTime.UtcNow < until);
+            return ToolResult.Json(new { success = true, loaded = !status.Loading && status.Meshes > 0, resource = status });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "resource_status")]
+    [Description("The resource editor's state: open or not, which editor the scene tools drive, the archive on its stage, loading, meshes, selection, unsaved edits, pending builds.")]
+    public static async Task<string> ResourceStatusTool(IEditorSession editor, IUiThreadMarshal ui)
+    {
+        try
+        {
+            return ToolResult.Json(new { success = true, resource = await ui.RunAsync(editor.ResourceStatus) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    // The status of the editor editor_target points at: the resource editor's, or the map editor's.
+    private static async Task<object> StatusOf(IEditorSession editor, IUiThreadMarshal ui)
+    {
+        ResourceStatus resource = await ui.RunAsync(editor.ResourceStatus);
+        return resource.Target == "resource" ? resource : await ui.RunAsync(editor.Status);
+    }
+
+    [McpServerTool(Name = "car_tuning")]
+    [Description("A car's tuning (entity data) in the resource editor: its tables — a car ships a stock one and tuned variants, labelled by mass and power — and the fields of one table: band (Body, Engine, Gearbox, Wheels…), element (a wheel, a gear), label, name, kind and value. Filter with a name fragment.")]
+    public static async Task<string> CarTuning(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Which table, 1-based. Default 1.")] int table = 1,
+        [Description("Part of a field's name or label, e.g. 'mass', 'gear', 'torque'. Omit for all.")] string? query = null,
+        [Description("At most this many fields. Default 200.")] int limit = 200)
+    {
+        try
+        {
+            IReadOnlyList<TuningTableInfo> tables = [];
+            IReadOnlyList<TuningFieldInfo> fields = [];
+            string? refused = await ui.RunAsync(() => editor.Tuning(table, query, limit, out tables, out fields));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, tables, count = fields.Count, fields });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "car_tuning_set")]
+    [Description("Set one field of a car's tuning table (undoable with editor_undo; written to the working copy at once, packed into the archive by editor_build). Values: a number, true/false for a flag, 'x, y, z' for a vector, text for a name. When the name repeats — every wheel and gear has the same fields — give band and/or element as car_tuning lists them.")]
+    public static async Task<string> CarTuningSet(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The field's name, as car_tuning lists it (e.g. 'Mass', 'Wheel0.Scale'); a wheel's or gear's field may be given without its prefix ('Scale') together with element.")] string field,
+        [Description("The new value, as text.")] string value,
+        [Description("Which table, 1-based. Default 1.")] int table = 1,
+        [Description("The band, when the name repeats across bands.")] string? band = null,
+        [Description("The element (a wheel, a gear), when the name repeats inside the band.")] string? element = null)
+    {
+        try
+        {
+            TuningFieldInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.SetTuning(table, field, band, element, value, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, field = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "editor_list_areas")]
     [Description("Names of the areas (districts and interiors) the map editor can load. Empty until the editor is open — editor_open_area opens it.")]
     public static async Task<string> ListAreas(IEditorSession editor, IUiThreadMarshal ui)
@@ -129,7 +260,7 @@ public sealed class EditorTools
         try
         {
             if (await ui.RunAsync(() => editor.Select(names)) is { } refused) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -211,7 +342,7 @@ public sealed class EditorTools
         try
         {
             if (await ui.RunAsync(editor.EndBlenderSession) is { } refused) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -247,7 +378,7 @@ public sealed class EditorTools
             string? failed = await ui.RunAsync(() => editor.Save(out files));
             return failed != null
                 ? ToolResult.Invalid(failed)
-                : ToolResult.Json(new { success = true, filesWritten = files, status = await ui.RunAsync(editor.Status) });
+                : ToolResult.Json(new { success = true, filesWritten = files, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -393,7 +524,7 @@ public sealed class EditorTools
         {
             if (await ui.RunAsync(() => editor.SetView(renderMode, collision, crash, zones, navigation)) is { } refused)
                 return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -437,7 +568,7 @@ public sealed class EditorTools
             if ((position != null && position.Length != 3) || (offset != null && offset.Length != 3))
                 return ToolResult.Invalid("position and offset take three numbers each");
             if (await ui.RunAsync(() => editor.Move(name, position, offset)) is { } refused) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -572,7 +703,7 @@ public sealed class EditorTools
         try
         {
             if (await ui.RunAsync(editor.Undo) is { } refused) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -587,7 +718,7 @@ public sealed class EditorTools
         try
         {
             if (await ui.RunAsync(editor.Redo) is { } refused) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {

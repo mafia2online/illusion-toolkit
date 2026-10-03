@@ -238,6 +238,9 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         return true;
     }
 
+    /// <summary>Re-reads the tuning tables from the working copy — after an edit made from outside the panel.</summary>
+    public void ReloadTuning() => RefreshTuningAfterUndo();
+
     private void RefreshTuningAfterUndo()
     {
         _tuningArchive = null;      // defeat the same-archive cache — the file really did change

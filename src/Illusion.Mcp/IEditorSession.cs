@@ -110,6 +110,30 @@ public interface IEditorSession
     /// <summary>Deletes the selection (undoable). Null on success.</summary>
     string? DeleteSelected(out int deleted);
 
+    /// <summary>Points the scene tools at the map editor (<c>map</c>) or the resource editor (<c>resource</c>).
+    /// Null on success; a note when the chosen editor is not open yet.</summary>
+    string? SetTarget(string target);
+
+    /// <summary>The resource editor's state, and which editor the scene tools drive.</summary>
+    ResourceStatus ResourceStatus();
+
+    /// <summary>Opens the resource editor (if it is not open) on an archive — a path, a path under <c>pc\sds</c>
+    /// such as <c>cars/shubert_38.sds</c>, or a bare name — and makes it the target. Null when the load started.</summary>
+    string? OpenResource(string archive);
+
+    /// <summary>Archives of the game's library, by name fragment and/or folder fragment.</summary>
+    IReadOnlyList<LibraryItem> Library(string? query, string? folder, int limit);
+
+    /// <summary>The tuning tables of the archive on the resource editor's stage, and the fields of one of them
+    /// (1-based) whose name or label contains <paramref name="query"/>.</summary>
+    string? Tuning(int table, string? query, int limit, out IReadOnlyList<TuningTableInfo> tables,
+        out IReadOnlyList<TuningFieldInfo> fields);
+
+    /// <summary>Sets one tuning field (undoable; written to the working copy at once, packed by Build). The field
+    /// is its name; <paramref name="band"/> and <paramref name="element"/> narrow it when the name repeats (every
+    /// wheel has the same fields). Null on success.</summary>
+    string? SetTuning(int table, string field, string? band, string? element, string value, out TuningFieldInfo? result);
+
     string? Undo();
 
     string? Redo();
