@@ -183,6 +183,25 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "archive_build")]
+    [Description("Pack ONE archive's working copy (the extracted folder under <game>\\resources) back into its .sds, keeping a timestamped backup of the archive it replaces. For an edit made directly in the working copy — a script, a table file — that no editor session tracks; editor_build remains the way to pack what the editors changed. This OVERWRITES a game file: the game must not be running.")]
+    public static async Task<string> ArchiveBuild(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Full path of the .sds archive in the game folder (pc\\sds\\… or pc\\dlcs\\…).")] string archive)
+    {
+        try
+        {
+            PackedArchive? result = null;
+            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, packed = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "editor_list_areas")]
     [Description("Names of the areas (districts and interiors) the map editor can load. Empty until the editor is open — editor_open_area opens it.")]
     public static async Task<string> ListAreas(IEditorSession editor, IUiThreadMarshal ui)

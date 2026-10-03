@@ -788,6 +788,30 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? BuildArchive(string archive, out PackedArchive? result)
+    {
+        result = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(archive) || !Path.IsPathRooted(archive)) return "give the archive's full path";
+        var sds = new FileInfo(archive);
+        if (!sds.Exists || !sds.Extension.Equals(".sds", StringComparison.OrdinalIgnoreCase)) return $"no such archive: {archive}";
+        string extracted = Assets.MafiaEnvironment.ExtractedDir(sds);
+        if (!File.Exists(Path.Combine(extracted, "SDSContent.xml")))
+        {
+            return $"{sds.Name} has no working copy at {extracted} — nothing to pack";
+        }
+        try
+        {
+            Assets.Sds.SdsWriter.PackResult packed = Assets.Sds.SdsWriter.PackSds(sds, createBackup: true);
+            result = new PackedArchive(packed.Archive, packed.Backup);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
+        {
+            return "could not pack the archive (is the game running?): " + ex.Message;
+        }
+    }
+
     public string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result)
     {
         result = null;

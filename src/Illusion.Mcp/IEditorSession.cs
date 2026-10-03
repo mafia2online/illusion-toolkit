@@ -139,6 +139,10 @@ public interface IEditorSession
     /// success.</summary>
     string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result);
 
+    /// <summary>Packs one archive's working copy back into its .sds, keeping a backup of what it replaces — for an
+    /// edit made in the working copy itself (a script, a table) that no editor session tracks. Null on success.</summary>
+    string? BuildArchive(string archive, out PackedArchive? result);
+
     string? Undo();
 
     string? Redo();

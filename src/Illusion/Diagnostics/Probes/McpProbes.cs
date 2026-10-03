@@ -66,6 +66,7 @@ internal static class McpProbes
         "car_tuning",
         "car_tuning_set",
         "car_clone",
+        "archive_build",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
