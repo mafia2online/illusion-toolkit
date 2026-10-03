@@ -158,6 +158,12 @@ internal static class ProbeRunner
             case "--probe-save":
                 SaveProbes.RunSaveProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Two ways a surface came out black: which meshes of an archive carry no normals (foliage) and what
+            // the renderer is handed for them, and an instanced copy drawn beside a placed one.
+            // Output: %TEMP%\illusion_vertex_normals.txt
+            case "--probe-vertex-normals":
+                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
+                return true;
             // Renders the viewport transform overlay (compact, actions-off Vector3Box at large coords) to a PNG so
             // the fields-fit / no-clip can be eyeballed. Output: %TEMP%\illusion_panel.png
             case "--probe-panel":
