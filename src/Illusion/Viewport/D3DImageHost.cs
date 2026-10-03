@@ -304,19 +304,44 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         {
             return [];
         }
-        IReadOnlyList<ulong> hulls = Assets.Sds.ImportLinks.HullsOf(Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive),
-            frame.Frame.Name.String);
-        if (hulls.Count == 0 || FindCollisionLayer(documentNode) is not { } layer) return [];
+        string dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
+        string name = frame.Frame.Name.String;
+        if (Assets.Sds.ImportLinks.HullsOf(dir, name).Count == 0 || FindCollisionLayer(documentNode) is not { } layer) return [];
 
-        Vector3 at = frame.WorldTransform.Translation;
-        var found = new List<SceneNode>();
-        foreach (ulong hash in hulls)
+        // Every linked object of the archive bids for the placements of its hulls, nearest first, and a placement
+        // goes to the first bid only. A tie — a copy on top of its original — goes to the name that sorts first,
+        // so the answer does not change from one call to the next.
+        var standing = new Dictionary<string, Vector3>(StringComparer.Ordinal);
+        foreach (object value in scene.Frame.FrameObjects.Values)
         {
-            SceneNode? nearest = layer.Children
-                .Where(c => c.Source is CollisionInstanceAdapter ci && ci.Instance.Hash == hash
-                            && Vector3.Distance(ci.Instance.Position, at) < 5f)
-                .MinBy(c => Vector3.Distance(((CollisionInstanceAdapter)c.Source!).Instance.Position, at));
-            if (nearest != null) found.Add(nearest);
+            if (value is Formats.Frames.ObjectTypes.FrameObjectBase f && f.Name.String is { Length: > 0 } n) standing.TryAdd(n, f.WorldTransform.Translation);
+        }
+        var bids = new List<(float Distance, string Object, int Slot, int Placement)>();
+        List<SceneNode> placements = [.. layer.Children];
+        foreach ((string linked, List<ulong> hulls) in Assets.Sds.ImportLinks.All(dir))
+        {
+            if (!standing.TryGetValue(linked, out Vector3 at)) continue;
+            for (int slot = 0; slot < hulls.Count; slot++)
+            {
+                for (int i = 0; i < placements.Count; i++)
+                {
+                    if (placements[i].Source is not CollisionInstanceAdapter ci || ci.Instance.Hash != hulls[slot]) continue;
+                    float distance = Vector3.Distance(ci.Instance.Position, at);
+                    if (distance < 5f) bids.Add((distance, linked, slot, i));
+                }
+            }
+        }
+
+        var takenPlacements = new HashSet<int>();
+        var filledSlots = new HashSet<(string, int)>();
+        var found = new List<SceneNode>();
+        foreach ((_, string linked, int slot, int placement) in bids
+                     .OrderBy(b => b.Distance).ThenBy(b => b.Object, StringComparer.Ordinal).ThenBy(b => b.Placement))
+        {
+            if (takenPlacements.Contains(placement) || filledSlots.Contains((linked, slot))) continue;
+            takenPlacements.Add(placement);
+            filledSlots.Add((linked, slot));
+            if (linked == name) found.Add(placements[placement]);
         }
         return found;
     }
@@ -330,10 +355,58 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// deep, independent copies in their FrameResource — both undoable and persisted.</summary>
     public void DuplicateSelected()
     {
+        List<SceneNode> selected = [.. Selection.Selected];
+        int before = Editing.History.UndoCount;
         CollisionEditing.DuplicateSelected(); // collision placements (re-selects the copies)
         CrashEditing.DuplicateSelected();     // city_crash placements (re-selects the copies)
         ActorEditing.DuplicateSelected();     // actors (a copy of the record, under a fresh name)
         Editing.DuplicateSelected();          // frame objects (skips collision sources)
+        DuplicateLinkedCollision(selected);
+        // One Duplicate is one Ctrl+Z, the copies' collision included.
+        Editing.History.SquashSince(before, edits => new CompositeEdit(edits));
+    }
+
+    // A copy of an object carried in from another archive gets copies of the collision it was given — the same
+    // hulls, placed where the copy stands (where the original stands: a duplicate starts on top of it) — and is
+    // linked to them under its own name, so it then moves and is deleted with them like the original. Hulls the
+    // selection already held were copied by the collision duplicate and are left alone here.
+    private void DuplicateLinkedCollision(IReadOnlyList<SceneNode> selected)
+    {
+        foreach ((SceneNode source, SceneNode copy) in Editing.LastDuplicates)
+        {
+            if (copy.Source is not FrameNodeAdapter copyFrame
+                || copy.OwningDocumentNode() is not { Source: SceneDocumentAdapter scene } documentNode
+                || FindCollisionLayer(documentNode) is not { Source: CollisionDocumentAdapter collision } layer)
+            {
+                continue;
+            }
+            var hashes = new List<ulong>();
+            foreach (SceneNode hull in LinkedCollisionNodes(source))
+            {
+                if (hull.Source is not CollisionInstanceAdapter original) continue;
+                hashes.Add(original.Instance.Hash);
+                if (selected.Contains(hull)) continue;
+                var placement = new Formats.Collisions.CollisionInstance
+                {
+                    Position = original.Instance.Position,
+                    Rotation = original.Instance.Rotation,
+                    Hash = original.Instance.Hash,
+                    Unk4 = -1,
+                    Group = original.Instance.Group,
+                };
+                foreach (Domain.IEditAction edit in CollisionEditing.BuildCreateHull(collision, layer, null, placement,
+                             $"{copyFrame.Frame.Name} collision") ?? [])
+                {
+                    edit.Redo();
+                    Editing.History.Push(edit);
+                }
+            }
+            if (hashes.Count > 0)
+            {
+                Assets.Sds.ImportLinks.Set(Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive),
+                    copyFrame.Frame.Name.String, hashes);
+            }
+        }
     }
 
     /// <summary>Fills in the placements of a crash row when its tree branch opens. The copies are not

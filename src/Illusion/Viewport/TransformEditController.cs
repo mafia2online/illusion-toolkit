@@ -287,7 +287,9 @@ internal sealed class TransformEditController
     /// with a notice.</summary>
     public void DuplicateSelected()
     {
+        LastDuplicates = [];
         var items = new List<DuplicatedItem>();
+        var pairs = new List<(SceneNode Source, SceneNode Copy)>();
         int skipped = 0;
         string? lastReason = null;
         foreach (SceneNode n in _host.Selection.Selected.ToList())
@@ -313,16 +315,22 @@ internal sealed class TransformEditController
             _host.Persistence.MarkFrameModified(leaf);
             if (dup.IsOnNameTable) _host.Persistence.MarkNameTableDirty(leaf);
             items.Add(new DuplicatedItem(leaf, n.Parent, dup, mesh));
+            pairs.Add((n, leaf));
         }
 
         if (skipped > 0)
             _host.RaiseNotice($"{skipped} object(s) not duplicated — {lastReason ?? "unsupported object"}");
         if (items.Count == 0) return;
 
+        LastDuplicates = pairs;
         History.Push(new DuplicateEdit(this, items.ToArray())); // already applied above — pushed, not redone
         _host.Selection.SetSelection(items.Select(i => i.Node).ToList(), items[^1].Node);
         _host.RaiseSceneChanged();
     }
+
+    /// <summary>What the last <see cref="DuplicateSelected"/> copied: each source row and the row of its copy —
+    /// for the host, which gives a copy of an imported object copies of the collision it was given.</summary>
+    public IReadOnlyList<(SceneNode Source, SceneNode Copy)> LastDuplicates { get; private set; } = [];
 
     private sealed record DuplicatedItem(
         SceneNode Node, SceneNode Parent, FrameDuplicator.DuplicatedObject Duplicate, GpuMesh Mesh);

@@ -9,8 +9,9 @@ namespace Illusion.Assets.Sds;
 /// Nothing in the archive ties a static object to its collision: the hull is a placement in the collision
 /// resource that happens to stand where the object stands. For the objects this toolkit carried in, the tie is
 /// written down here, beside the working copy and outside its manifest (the game never sees it): the object's
-/// name and the hashes of the hulls it was given. The placements themselves are found again by hash, the one
-/// nearest the object — their positions change whenever the object is moved, their hulls do not.
+/// name and the hashes of the hulls it was given. The placements themselves are found again by hash, nearest
+/// first — their positions change whenever the object is moved, their hulls do not — and each placement goes
+/// to one object only: a copy stands on top of its original with the very same hull, and must not take it.
 /// </para>
 /// </summary>
 public static class ImportLinks
@@ -42,6 +43,13 @@ public static class ImportLinks
     {
         ArgumentException.ThrowIfNullOrEmpty(extractedDir);
         return frameName is { Length: > 0 } && Read(extractedDir).TryGetValue(frameName, out List<ulong>? hulls) ? hulls : [];
+    }
+
+    /// <summary>Every object of the archive that has hulls recorded, with them.</summary>
+    public static IReadOnlyDictionary<string, List<ulong>> All(string extractedDir)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extractedDir);
+        return Read(extractedDir);
     }
 
     private static Dictionary<string, List<ulong>> Read(string extractedDir)
