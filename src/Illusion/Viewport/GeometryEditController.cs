@@ -1,6 +1,7 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Bridge;
+using Illusion.Assets.Sds;
 using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Rendering.Gpu;
@@ -133,6 +134,103 @@ internal sealed class GeometryEditController
             _host.RaiseSceneChanged();
         }
         return outcomes;
+    }
+
+    /// <summary>
+    /// Hides triangles of a mesh (<see cref="TriangleHider"/>) as one undoable edit: the index buffers take
+    /// their planned contents and every level of detail the tree shows is redrawn. Refused for a mesh that
+    /// shares its geometry — the triangles would vanish from every object drawing it — and for instanced ones.
+    /// </summary>
+    /// <returns>Null when applied, or why not.</returns>
+    public string? HideTriangles(SceneNode node, IReadOnlyList<TriangleHider.Change> changes)
+    {
+        if (node.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh } adapter) return "not a mesh";
+        if (changes.Count == 0) return "nothing to hide";
+        if (node.Mesh is { Instanced: true }) return "an instanced mesh is drawn many times over — its triangles cannot be hidden in one place";
+        if (adapter.Document.GeometrySharers(mesh).Any()) return "other objects draw the same geometry — the triangles would vanish from all of them";
+        if (_host.Rnd == null) return "the viewport is not rendering yet";
+
+        var edit = new HiddenTrianglesEdit(this, node, adapter.Document, mesh, changes);
+        edit.Redo();
+        _host.Editing.History.Push(edit);
+        _host.RaiseSceneChanged();
+        return null;
+    }
+
+    // The rows that draw one mesh: its own (the first level) and a row per further level under it.
+    private static IEnumerable<SceneNode> LevelRows(SceneNode node)
+    {
+        yield return node;
+        foreach (SceneNode child in node.Children)
+        {
+            if (child.Kind == "Lod" && ReferenceEquals(child.Source, node.Source)) yield return child;
+        }
+    }
+
+    /// <summary>Index buffers swapped between two states, and the GPU meshes that draw each.</summary>
+    private sealed class HiddenTrianglesEdit : INodeEdit
+    {
+        private readonly GeometryEditController _owner;
+        private readonly SceneNode _node;
+        private readonly SceneDocumentAdapter _document;
+        private readonly FrameObjectSingleMesh _mesh;
+        private readonly IReadOnlyList<TriangleHider.Change> _changes;
+        private readonly List<(SceneNode Row, GpuMesh? Shown, GpuMesh? Hidden)> _rows = [];
+        private bool _applied;
+
+        public HiddenTrianglesEdit(GeometryEditController owner, SceneNode node, SceneDocumentAdapter document,
+            FrameObjectSingleMesh mesh, IReadOnlyList<TriangleHider.Change> changes)
+        {
+            _owner = owner;
+            _node = node;
+            _document = document;
+            _mesh = mesh;
+            _changes = changes;
+            foreach (SceneNode row in LevelRows(node)) _rows.Add((row, row.Mesh, null));
+        }
+
+        public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
+
+        public void Undo() => Apply(hidden: false);
+
+        public void Redo() => Apply(hidden: true);
+
+        private void Apply(bool hidden)
+        {
+            D3DImageHost host = _owner._host;
+            if (!host.Tree.IsInScene(_node) || host.Rnd == null) return; // streamed out — pruning backstop
+            foreach (TriangleHider.Change change in _changes)
+            {
+                change.Buffer.SetData(hidden ? change.After : change.Before);
+                _document.MarkIndexBufferDirty(change.Buffer.Hash); // a save may have written the other state
+            }
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                (SceneNode row, GpuMesh? shown, GpuMesh? gone) = _rows[i];
+                if (shown == null) continue; // a level the tree never drew
+                if (gone == null && hidden && SdsMeshLoader.BuildMeshData(_mesh, row.Lod) is { } data)
+                {
+                    gone = host.Rnd.CreateMeshGpu(data);
+                    gone.Owner = row;
+                    _rows[i] = (row, shown, gone);
+                }
+                if (gone == null) continue;
+                _owner.SwapMesh(row, hidden ? shown : gone, hidden ? gone : shown);
+            }
+            host.Persistence.MarkFrameModified(_node);
+            _applied = hidden;
+        }
+
+        // Dropped from history: whichever mesh of each pair is DETACHED belongs to this edit alone.
+        public void Discard()
+        {
+            foreach ((SceneNode _, GpuMesh? shown, GpuMesh? gone) in _rows)
+            {
+                if (gone == null) continue;
+                if (_applied) shown?.Dispose();
+                else gone.Dispose();
+            }
+        }
     }
 
     /// <summary>The other tree rows drawing the same geometry block as this node's mesh — the frames that just

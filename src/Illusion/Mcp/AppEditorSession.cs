@@ -876,6 +876,34 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
+    public string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
+        out HiddenTrianglesInfo? result)
+    {
+        result = null;
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 }) return "boxMin and boxMax are [x, y, z]";
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        if (node!.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
+        {
+            return $"'{name}' is a {node.Kind} — only a mesh has triangles to hide";
+        }
+        if (apply && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+
+        Assets.Sds.TriangleHider.Plan plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform,
+            new Vector3(boxMin[0], boxMin[1], boxMin[2]), new Vector3(boxMax[0], boxMax[1], boxMax[2]),
+            string.IsNullOrWhiteSpace(material) ? null : material);
+        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node, plan.Changes) is { } refused) return refused;
+
+        static float[] P(Vector3 v) => [v.X, v.Y, v.Z];
+        int levels = plan.Triangles.Count == 0 ? 0 : plan.Triangles.Max(t => t.Lod) + 1;
+        result = new HiddenTrianglesInfo(
+            plan.Triangles.Count,
+            [.. Enumerable.Range(0, levels).Select(l => plan.Triangles.Count(t => t.Lod == l))],
+            apply && plan.Changes.Count > 0,
+            [.. plan.Triangles.Take(Math.Clamp(sample, 0, 500)).Select(t => new TriangleInfo(t.Lod, t.Material, P(t.A), P(t.B), P(t.C)))]);
+        return null;
+    }
+
     public string? Undo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;

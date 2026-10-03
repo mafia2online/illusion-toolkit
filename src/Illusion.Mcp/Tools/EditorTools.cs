@@ -204,6 +204,30 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "mesh_hide_triangles")]
+    [Description("Cut an opening into a mesh WITHOUT rebuilding it: the triangles of the named mesh whose three corners all lie inside a world-space box are hidden on every level of detail (their indices are pointed at one vertex). No vertex is touched, so a stock facade keeps the channels Blender never sees (shadow-map UVs) — use this, not a Blender push, to open a painted door or garage shutter of a stock building. By default it only REPORTS what the box would take (count per LOD and the first triangles with their material and corners); pass apply=true to hide them as one undoable edit. Saved by editor_save, packed by editor_build. Refused for a mesh that shares its geometry with other objects.")]
+    public static async Task<string> MeshHideTriangles(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The mesh, by name or path suffix (scene_find has the names).")] string name,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only triangles whose material name contains this. Omit for any material.")] string? material = null,
+        [Description("Hide the triangles. Default false: report only.")] bool apply = false,
+        [Description("How many of the found triangles to list (0-500). Default 40.")] int sample = 40)
+    {
+        try
+        {
+            HiddenTrianglesInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.HideTriangles(name, boxMin, boxMax, material, apply, sample, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, hidden = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "car_substitute")]
     [Description("Build one car under ANOTHER car's name: pc\\sds\\cars\\<target>.sds is replaced by the source car's model, with the root frame, name table, prefab entry, entity data and buffers keyed by the target's model name. No table is touched — the game lists the target as before and finds the source's shape and tuning in its archive. For trying a car where nothing can be registered (a multiplayer that spawns from a fixed list of names). A timestamped backup of each replaced archive is kept in cars\\backups; the winter _z twin is replaced only where both cars have one. This OVERWRITES game files and the target's working copy: the game must not be running.")]
     public static async Task<string> CarSubstitute(

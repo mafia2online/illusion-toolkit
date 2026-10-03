@@ -153,6 +153,11 @@ public interface IEditorSession
     /// nothing of the game is written. Null on success.</summary>
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
+    /// <summary>Finds — and with <paramref name="apply"/> hides, as one undoable edit — the triangles of a mesh
+    /// whose corners all lie inside a world-space box, without rebuilding the mesh. Null on success.</summary>
+    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
+        out HiddenTrianglesInfo? result);
+
     string? Undo();
 
     string? Redo();

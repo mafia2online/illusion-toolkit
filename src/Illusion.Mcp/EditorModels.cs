@@ -41,6 +41,13 @@ public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, i
 /// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
 public sealed record PackedArchive(string Archive, string? Backup);
 
+/// <summary>One triangle of a mesh, in world space, with the material of its slot and its level of detail.</summary>
+public sealed record TriangleInfo(int Lod, string Material, float[] A, float[] B, float[] C);
+
+/// <summary>What a box takes out of a mesh: how many triangles on each level of detail, whether they were
+/// hidden or only found, and the first of them.</summary>
+public sealed record HiddenTrianglesInfo(int Triangles, IReadOnlyList<int> PerLod, bool Applied, IReadOnlyList<TriangleInfo> Sample);
+
 /// <summary>One car built under another's name: the model name the replaced archives are keyed by, each archive
 /// with the backup of what it held, and what was left as it was.</summary>
 public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);

@@ -190,6 +190,12 @@ internal static class ProbeRunner
             case "--probe-vertex-normals":
                 VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
                 return true;
+            // Hiding triangles of a stock mesh without a rebuild, in memory only: what a box finds, that
+            // nothing but the found triangles' indices changes, on every level of detail.
+            // Output: %TEMP%\illusion_hide_triangles.txt
+            case "--probe-hide-triangles":
+                HideTrianglesProbes.RunHideTrianglesProbe(args.Length >= 2 ? args[1] : "uppertown");
+                return true;
             case "--probe-geometry-sweep":
                 GeometrySweepProbes.RunGeometrySweepProbe();
                 return true;
