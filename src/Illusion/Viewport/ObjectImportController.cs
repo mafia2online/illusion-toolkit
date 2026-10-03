@@ -136,6 +136,11 @@ internal sealed class ObjectImportController
             // copy as soon as the frames are copied and BEFORE the viewport builds the meshes, which look their
             // textures up as they are made. Inert until something names them, so a refusal after this point
             // leaves a few unused files rather than a scene that names missing ones.
+            // Geometry this object's earlier imports already brought is drawn from rather than copied again.
+            Assets.Sds.ImportGeometry shared = Assets.Sds.ImportGeometry.Load(
+                Assets.MafiaEnvironment.ExtractedDir(destination),
+                Path.GetRelativePath(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds"), sds.FullName));
+
             Assets.Sds.ArchiveCarry.Report Carry(Assets.Frames.FrameTransplant.TransplantedObject copied) =>
                 Assets.Sds.ArchiveCarry.Carry(sourceDir, Assets.MafiaEnvironment.ExtractedDir(destination),
                     copied.MaterialHashes, copied.CollisionHashes, actor?.LinkedDefinition);
@@ -149,7 +154,7 @@ internal sealed class ObjectImportController
                 if (theirPlacements.PackOf(actor) is not { } theirPack) return $"'{name}' belongs to no pack";
 
                 carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, prototype, newName,
-                    Assets.Frames.FrameTransplant.Standing.Prototype, Matrix4x4.Identity, out reason);
+                    Assets.Frames.FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
                 if (carried == null) return reason ?? "the object could not be copied";
                 carry = Carry(carried);
                 if (ImportPlaced(actorsRow, frameRow, theirPack, actor, newName, at, facing,
@@ -189,7 +194,7 @@ internal sealed class ObjectImportController
                 world.Translation = at - Vector3.TransformNormal(standsOn, world);
 
                 carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, frame, newName,
-                    Assets.Frames.FrameTransplant.Standing.Scenery, world, out reason);
+                    Assets.Frames.FrameTransplant.Standing.Scenery, world, shared, out reason);
                 if (carried == null) return reason ?? "the object could not be copied";
                 carry = Carry(carried);
                 ImportScenery(frameRow, carried,
@@ -197,6 +202,7 @@ internal sealed class ObjectImportController
                 kind = "scenery";
             }
 
+            shared.Save();
             _host.MarkArchiveModified(destination);
 
             outcome = new ObjectImportOutcome(kind, newName, carried.Pairs.Count, carried.Renderables.Count,

@@ -270,8 +270,8 @@ inside is not decoded, and the responses say so rather than looking complete.
 
 - The Resource Editor tile is a stub.
 - Duplicating frame objects covers static single-mesh objects only.
-- Objects carried from another archive: skinned models cannot travel yet, each import copies
-  its geometry — import once and duplicate inside the district rather than importing the same thing twice.
+- Objects carried from another archive: skinned models cannot travel yet, importing the same object
+  again shares the geometry the first import brought, while Ctrl+D still makes a full copy.
 - A topology rebuild does not regenerate lower LODs or collision for that object.
 - `.sds.patch`, `.tra` and `cityareas.bin` are read-only. `StreamMap*.bin` is read-only in the
   editor; the MCP `edit_stream_map` tool can rewrite its strings in place (see above).

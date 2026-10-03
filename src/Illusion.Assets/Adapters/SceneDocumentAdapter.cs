@@ -20,6 +20,7 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     private readonly HashSet<ulong> _dirtyVertexBuffers = new();
     private readonly HashSet<ulong> _dirtyIndexBuffers = new();
     private bool _nameTableDirty;
+    private readonly Bridge.SdsGeometrySaver.PoolState _pools = new();
 
     public SceneDocumentAdapter(FrameResource frame, FileInfo sourceArchive, ActorPlacements? placements = null)
     {
@@ -217,9 +218,11 @@ public sealed class SceneDocumentAdapter : ISceneDocument
         // The pools describe geometry the FRAME RESOURCE indexes, so they go only when it went. A refused car
         // save wrote neither, and flushing the buffers anyway would leave the working copy holding vertices
         // no frame in it accounts for.
-        if (MarkerRowsRefused == null && (_dirtyVertexBuffers.Count > 0 || _dirtyIndexBuffers.Count > 0))
+        // Every pool is looked at, not only the dirty ones: a deleted object or a rebuilt mesh leaves buffers
+        // nothing draws from any more, and those stay out of the files (in memory they stay, for undo).
+        if (MarkerRowsRefused == null)
         {
-            Bridge.SdsGeometrySaver.SaveDirtyPools(_frame, _dirtyVertexBuffers, _dirtyIndexBuffers);
+            Bridge.SdsGeometrySaver.SavePools(_frame, _dirtyVertexBuffers, _dirtyIndexBuffers, _pools);
             _dirtyVertexBuffers.Clear(); // the working copy now matches memory
             _dirtyIndexBuffers.Clear();
         }

@@ -173,6 +173,11 @@ internal static class ProbeRunner
             case "--probe-prop-catalog":
                 PropCatalogProbes.RunPropCatalogProbe();
                 return true;
+            // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
+            // Output: %TEMP%\illusion_geometry_sweep.txt
+            case "--probe-geometry-sweep":
+                GeometrySweepProbes.RunGeometrySweepProbe();
+                return true;
             case "--probe-object-transplant":
                 ObjectTransplantProbes.RunObjectTransplantProbe(
                     args.Length >= 2 ? args[1] : "hill",

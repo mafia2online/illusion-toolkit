@@ -1066,9 +1066,13 @@ internal static class BridgeProbes
             var frame = ((FrameNodeAdapter)fn).Frame
                 as Formats.Frames.ObjectTypes.FrameObjectSingleMesh;
             ulong bufferHash = frame!.Geometry.LOD[0].VertexBufferRef.Hash;
-            // Pool paths come from the earlier OpenScene load — same files, same hashes.
+            // Pool paths come from the earlier OpenScene load — same files, same hashes. EVERY pool, not only the
+            // one carrying the edited buffer: a save also rewrites any pool holding a buffer nothing draws from
+            // (SdsGeometrySaver.SavePools), and a working copy edited by hand may have one.
             foreach (var src in fr.VertexBuffers.Sources)
-                if (src.Hashes.Contains(bufferHash)) restore[src.FilePath] = File.ReadAllBytes(src.FilePath);
+                if (File.Exists(src.FilePath)) restore[src.FilePath] = File.ReadAllBytes(src.FilePath);
+            foreach (var src in fr.IndexBuffers.Sources)
+                if (File.Exists(src.FilePath)) restore[src.FilePath] = File.ReadAllBytes(src.FilePath);
 
             Vector3 delta = new(payload.DecompressionFactor * 8f, 0f, 0f);
             Vector3 movedTarget = payload.Positions[0] + delta;
@@ -1409,10 +1413,9 @@ internal static class BridgeProbes
                         var scene = SdsMeshLoader.OpenScene(extracted);
                         ulong vbHash = frame.Geometry.LOD[0].VertexBufferRef.Hash;
                         ulong ibHash = frame.Geometry.LOD[0].IndexBufferRef.Hash;
-                        foreach (var src in scene.VertexBuffers.Sources)
-                            if (src.Hashes.Contains(vbHash)) restore.TryAdd(src.FilePath, File.ReadAllBytes(src.FilePath));
-                        foreach (var src in scene.IndexBuffers.Sources)
-                            if (src.Hashes.Contains(ibHash)) restore.TryAdd(src.FilePath, File.ReadAllBytes(src.FilePath));
+                        // Every pool: the save also rewrites any pool holding a buffer nothing draws from.
+                        foreach (var src in scene.VertexBuffers.Sources.Concat(scene.IndexBuffers.Sources))
+                            if (File.Exists(src.FilePath)) restore.TryAdd(src.FilePath, File.ReadAllBytes(src.FilePath));
 
                         subApplied.ApplyNew();
                         document.SaveWorkingCopy();

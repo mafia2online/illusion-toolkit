@@ -169,7 +169,19 @@ public static class FrameTransplant
     /// <param name="world">The root's world matrix, for <see cref="Standing.Scenery"/>. Ignored for a
     /// prototype, which keeps the transform it has.</param>
     public static TransplantedObject? TryTransplant(ISceneDocument document, FrameResource source,
-        FrameObjectBase root, string name, Standing standing, Matrix4x4 world, out string? skipReason)
+        FrameObjectBase root, string name, Standing standing, Matrix4x4 world, out string? skipReason) =>
+        TryTransplant(document, source, root, name, standing, world, shared: null, out skipReason);
+
+    /// <summary>
+    /// The same, drawing from geometry an earlier import of the same object already brought when
+    /// <paramref name="shared"/> remembers it and the scene still has it — the buffers and, when every level of
+    /// detail is there, the geometry block itself, which is how the shipped scenes put many copies of one thing
+    /// on one mesh. What is copied afresh is remembered in <paramref name="shared"/> for the next time; the caller
+    /// saves it.
+    /// </summary>
+    public static TransplantedObject? TryTransplant(ISceneDocument document, FrameResource source,
+        FrameObjectBase root, string name, Standing standing, Matrix4x4 world, ImportGeometry? shared,
+        out string? skipReason)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(root);
@@ -209,7 +221,8 @@ public static class FrameTransplant
 
         var result = new TransplantedObject { Resource = resource, Adapter = adapter, Anchor = anchor };
         string unique = Guid.NewGuid().ToString("N")[..8];
-        if (!CopyBuffers(source, resource, subtree, name, unique, result,
+        var reused = new HashSet<ulong>(); // source buffers this copy draws from without copying them
+        if (!CopyBuffers(source, resource, subtree, name, unique, result, shared, reused,
                 out Dictionary<ulong, HashName> vertexNames, out Dictionary<ulong, HashName> indexNames, out skipReason))
         {
             foreach (VertexBuffer vb in result.VertexBuffers) resource.VertexBuffers.Remove(vb.Hash);
@@ -243,7 +256,7 @@ public static class FrameTransplant
 
             if (copy is FrameObjectSingleMesh mesh && original is FrameObjectSingleMesh originalMesh)
             {
-                CopyBlocks(resource, originalMesh, mesh, geometries, materials, vertexNames, indexNames, result);
+                CopyBlocks(resource, originalMesh, mesh, geometries, materials, vertexNames, indexNames, reused, result);
             }
 
             resource.FrameObjects.Add(copy.RefID, copy);
@@ -368,7 +381,7 @@ public static class FrameTransplant
     // Verbatim copies of every buffer the subtree's meshes draw from, under fresh names, registered before
     // anything else mutates — the pools must have room first. A buffer several meshes share is copied once.
     private static bool CopyBuffers(FrameResource source, FrameResource resource, List<FrameObjectBase> subtree,
-        string name, string unique, TransplantedObject into,
+        string name, string unique, TransplantedObject into, ImportGeometry? shared, HashSet<ulong> reused,
         out Dictionary<ulong, HashName> vertexNames, out Dictionary<ulong, HashName> indexNames, out string? reason)
     {
         vertexNames = new Dictionary<ulong, HashName>();
@@ -387,6 +400,14 @@ public static class FrameTransplant
                     reason = $"'{mesh.Name}' draws from a buffer its own archive does not carry";
                     return false;
                 }
+                if (!vertexNames.ContainsKey(vertexHash)
+                    && shared?.Copied('v', vertexHash) is { } earlierVertex
+                    && resource.VertexBuffers.GetBuffer(new HashName(earlierVertex).Hash) is { } existingVertex
+                    && existingVertex.Data.AsSpan().SequenceEqual(vb.Data))
+                {
+                    vertexNames[vertexHash] = new HashName(earlierVertex);
+                    reused.Add(vertexHash);
+                }
                 if (!vertexNames.ContainsKey(vertexHash))
                 {
                     var bufferName = new HashName($"{name}_vb{vertexHash:x16}_{unique}");
@@ -398,6 +419,15 @@ public static class FrameTransplant
                     }
                     vertexNames[vertexHash] = bufferName;
                     into.VertexBuffers.Add(copy);
+                    shared?.Remember('v', vertexHash, bufferName.String);
+                }
+                if (!indexNames.ContainsKey(indexHash)
+                    && shared?.Copied('i', indexHash) is { } earlierIndex
+                    && resource.IndexBuffers.GetBuffer(new HashName(earlierIndex).Hash) is { } existingIndex
+                    && existingIndex.GetData().AsSpan().SequenceEqual(ib.GetData()))
+                {
+                    indexNames[indexHash] = new HashName(earlierIndex);
+                    reused.Add(indexHash);
                 }
                 if (!indexNames.ContainsKey(indexHash))
                 {
@@ -412,6 +442,7 @@ public static class FrameTransplant
                     }
                     indexNames[indexHash] = bufferName;
                     into.IndexBuffers.Add(copy);
+                    shared?.Remember('i', indexHash, bufferName.String);
                 }
             }
         }
@@ -422,10 +453,19 @@ public static class FrameTransplant
     // repointed at the copied buffers.
     private static void CopyBlocks(FrameResource resource, FrameObjectSingleMesh original, FrameObjectSingleMesh copy,
         Dictionary<FrameGeometry, FrameGeometry> geometries, Dictionary<FrameMaterial, FrameMaterial> materials,
-        Dictionary<ulong, HashName> vertexNames, Dictionary<ulong, HashName> indexNames, TransplantedObject into)
+        Dictionary<ulong, HashName> vertexNames, Dictionary<ulong, HashName> indexNames, HashSet<ulong> reused,
+        TransplantedObject into)
     {
         if (original.Refs.ContainsKey(FrameEntryRefTypes.Geometry))
         {
+            // Every level already here: the block that draws them is here too — share it, as the shipped scenes
+            // share one chair's block between all their chairs. It is not this copy's to take out on undo.
+            if (!geometries.ContainsKey(original.Geometry)
+                && original.Geometry.LOD.All(l => reused.Contains(l.VertexBufferRef.Hash) && reused.Contains(l.IndexBufferRef.Hash))
+                && resource.FrameGeometries.Values.FirstOrDefault(g => Draws(g, original.Geometry, vertexNames, indexNames)) is { } existing)
+            {
+                geometries[original.Geometry] = existing;
+            }
             if (!geometries.TryGetValue(original.Geometry, out FrameGeometry? geometry))
             {
                 geometry = resource.ConstructFrameAssetOfType<FrameGeometry>();
@@ -456,6 +496,26 @@ public static class FrameTransplant
             copy.Material = material;
             copy.ReplaceRef(FrameEntryRefTypes.Material, material.RefID);
         }
+    }
+
+    // Whether a block of this scene draws exactly what the source block does, from the buffers it was copied to.
+    private static bool Draws(FrameGeometry candidate, FrameGeometry original, Dictionary<ulong, HashName> vertexNames,
+        Dictionary<ulong, HashName> indexNames)
+    {
+        if (candidate.LOD is not { } lods || lods.Length != original.LOD.Length) return false;
+        if (candidate.DecompressionOffset != original.DecompressionOffset || candidate.DecompressionFactor != original.DecompressionFactor)
+        {
+            return false;
+        }
+        for (int i = 0; i < lods.Length; i++)
+        {
+            if (lods[i].VertexBufferRef.Hash != vertexNames[original.LOD[i].VertexBufferRef.Hash].Hash
+                || lods[i].IndexBufferRef.Hash != indexNames[original.LOD[i].IndexBufferRef.Hash].Hash)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     // Kept in step with ActorPrototypeCloner.CanClone, which is what decided the subtree could be copied.

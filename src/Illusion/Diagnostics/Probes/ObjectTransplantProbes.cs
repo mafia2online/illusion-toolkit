@@ -269,6 +269,60 @@ internal static class ObjectTransplantProbes
                 && PrefabFile.Load(barePrefabs[0]).PrefabCount == 1
                 && carriedDoor.CollisionHashes.All(ArchiveCarry.ItemDescriptionsOf(bareAfter).ContainsKey));
 
+            // ── The same object imported again draws from the geometry the first import brought ──
+            ImportGeometry shared = ImportGeometry.Load(dir, sourceArchive);
+            TransplantedObject? one = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_share_1",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
+            TransplantedObject? two = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_share_2",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
+            shared.Save();
+            static List<FrameObjectSingleMesh> Drawn(TransplantedObject t) =>
+                [.. t.Pairs.Values.OfType<FrameObjectSingleMesh>().Where(m => m.Refs.ContainsKey(FrameEntryRefTypes.Geometry))];
+            Check("imported twice, the second copy brings no buffers and draws from the first's geometry blocks",
+                one != null && two != null && one.VertexBuffers.Count > 0 && two.VertexBuffers.Count == 0
+                && two.IndexBuffers.Count == 0 && two.Geometries.Count == 0
+                && Drawn(two).All(m => Drawn(one).Any(f => ReferenceEquals(f.Geometry, m.Geometry))),
+                one == null || two == null ? reason ?? "" : $"{one.VertexBuffers.Count} buffers, then {two.VertexBuffers.Count}");
+            if (one == null || two == null) return;
+            TransplantedObject? three = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_share_3",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, ImportGeometry.Load(dir, sourceArchive), out reason);
+            Check("what was shared is remembered on disk, for the next session", three is { VertexBuffers.Count: 0 });
+            three?.Detach();
+            two.Detach();
+            Check("taking the copies out leaves the first one's geometry in place",
+                one.VertexBuffers.All(b => ours.VertexBuffers.GetBuffer(b.Hash) != null)
+                && one.Geometries.All(g => ours.FrameGeometries.ContainsKey(g.RefID)));
+            one.Detach();
+            TransplantedObject? four = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_share_4",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
+            Check("with the first one gone too, the next import copies the geometry again",
+                four is { } f4 && f4.VertexBuffers.Count == one.VertexBuffers.Count);
+            four?.Detach();
+
+            // ── Save leaves out of the pools what nothing draws from, and puts it back when something does ──
+            var poolState = new SdsGeometrySaver.PoolState();
+            TransplantedObject? swept = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_sweep",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, out reason);
+            if (swept == null) { Check("a copy to sweep", false, reason ?? ""); return; }
+            ulong[] sweptVertex = [.. swept.VertexBuffers.Select(b => b.Hash)];
+            SdsGeometrySaver.SavePools(ours, sweptVertex, [.. swept.IndexBuffers.Select(b => b.Hash)], poolState);
+            bool OnDisk(ulong hash)
+            {
+                var pools = ExtractedSds.Load(dir).VertexBuffers;
+                return pools.GetBuffer(hash) != null;
+            }
+            bool savedWith = sweptVertex.All(OnDisk);
+            foreach (Formats.Frames.Resources.FrameGeometry g in swept.Geometries) ours.FrameGeometries.Remove(g.RefID); // drawn by nothing now
+            (int rewritten, int leftOut) = SdsGeometrySaver.SavePools(ours, [], [], poolState);
+            bool savedWithout = sweptVertex.All(h => !OnDisk(h)) && sweptVertex.All(h => ours.VertexBuffers.GetBuffer(h) != null);
+            foreach (Formats.Frames.Resources.FrameGeometry g in swept.Geometries) ours.FrameGeometries.TryAdd(g.RefID, g);
+            SdsGeometrySaver.SavePools(ours, [], [], poolState);
+            bool savedAgain = sweptVertex.All(OnDisk);
+            Check("a save leaves buffers nothing draws from out of the files but in memory, and writes them back once drawn again",
+                savedWith && savedWithout && savedAgain && leftOut >= sweptVertex.Length,
+                $"{rewritten} pool file(s) rewritten, {leftOut} buffer(s) left out");
+            swept.Detach();
+
             // ── Simplified hulls: what a prop with no collision of its own is given ──
             var cube = new List<Vector3>();
             for (int i = 0; i < 8; i++) cube.Add(new Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1));
