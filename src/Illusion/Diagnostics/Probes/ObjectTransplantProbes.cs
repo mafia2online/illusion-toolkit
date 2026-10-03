@@ -115,6 +115,45 @@ internal static class ObjectTransplantProbes
             Check("carrying the same things a second time adds nothing",
                 again.ItemDescriptions.Count == 0 && !again.Prefab && again.Textures.Count == 0);
 
+            // A texture the object's archive does not hold comes from the archive that does: a weapon on the
+            // shop's shelf is drawn with textures of weapons.sds, which neither the shop nor the district has.
+            {
+                Illusion.Assets.MafiaMaterials.EnsureLoaded();
+                SdsManifest shop = SdsManifest.Load(sourceDir);
+                SdsManifest scratchManifest = SdsManifest.Load(dir);
+                string weaponsDir = SdsMeshLoader.EnsureExtracted(
+                    new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "weapons", "weapons.sds")));
+                (ulong Hash, string Texture)? foreign = null;
+                foreach (ulong hash in theirs.FrameMaterials.Values.SelectMany(b => b.Materials).SelectMany(l => l).Select(m => m.MaterialHash).Distinct())
+                {
+                    string? texture = (Illusion.Assets.MafiaMaterials.Collection?.FindByHash(hash)?.CollectTextures() ?? [])
+                        .FirstOrDefault(t => t.Length > 0 && !shop.HasFile(t) && !scratchManifest.HasFile(t)
+                            && File.Exists(Path.Combine(weaponsDir, t)));
+                    if (texture == null) continue;
+                    foreign = (hash, texture);
+                    break;
+                }
+                Check("the shop draws something with a texture of weapons.sds", foreign != null, foreign?.Texture ?? "");
+                if (foreign is { } wanted)
+                {
+                    ArchiveCarry.Report none = ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null, _ => null);
+                    Check("a texture no archive is found to hold is reported, and nothing is written for it",
+                        none.Elsewhere.Contains(wanted.Texture) && !none.Textures.Contains(wanted.Texture) && none.Borrowed.Count == 0
+                        && !File.Exists(Path.Combine(dir, wanted.Texture)));
+                    ArchiveCarry.Report lent = ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null,
+                        name => Path.Combine(weaponsDir, name));
+                    Check("a texture a third archive holds is taken from it",
+                        lent.Textures.Contains(wanted.Texture) && !lent.Elsewhere.Contains(wanted.Texture)
+                        && lent.Borrowed.Any(b => b.Texture == wanted.Texture && b.Archive == Path.GetFileName(weaponsDir))
+                        && File.Exists(Path.Combine(dir, wanted.Texture)) && SdsManifest.Load(dir).HasFile(wanted.Texture),
+                        $"{wanted.Texture} from {string.Join(", ", lent.Borrowed.Select(b => b.Archive).Distinct())}");
+                    Check("with the bytes it has there",
+                        File.ReadAllBytes(Path.Combine(dir, wanted.Texture)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(weaponsDir, wanted.Texture))));
+                    Check("and a second carry adds nothing",
+                        ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null, name => Path.Combine(weaponsDir, name)).Textures.Count == 0);
+                }
+            }
+
             // ── A prop an actor places ──
             FrameObjectBase propRoot = theirPlacements.TargetOf(prop)!;
             TransplantedObject? carriedProp = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_prop",
