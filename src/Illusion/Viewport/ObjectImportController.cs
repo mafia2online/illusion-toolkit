@@ -212,7 +212,10 @@ internal sealed class ObjectImportController
                 $"Imported '{name}' from {sds.Name} as '{newName}' ({kind}): {outcome.Frames} frame(s), "
                 + $"{outcome.Meshes} mesh(es), {carry.Textures.Count} texture(s), {carry.ItemDescriptions.Count} item "
                 + $"description(s){(carry.Prefab ? ", a prefab entry" : "")} carried"
-                + (carry.Elsewhere.Count > 0 ? $"; {carry.Elsewhere.Count} texture(s) are in neither archive" : "")
+                + (carry.Borrowed.Count > 0
+                    ? $"; {carry.Borrowed.Count} of the textures came from {string.Join(", ", carry.Borrowed.Select(b => b.Archive).Distinct())}"
+                    : "")
+                + (carry.Elsewhere.Count > 0 ? $"; {carry.Elsewhere.Count} texture(s) are in no extracted archive" : "")
                 + (carry.Unresolved.Count > 0 ? $"; {carry.Unresolved.Count} collision hull(s) found no description" : "")
                 + $"; collision: {collision}",
                 isError: carry.Unresolved.Count > 0);

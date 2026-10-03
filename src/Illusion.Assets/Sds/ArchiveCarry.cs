@@ -20,6 +20,13 @@ namespace Illusion.Assets.Sds;
 /// left alone and shared.
 /// </para>
 /// <para>
+/// A texture need not be in the object's own archive. A weapon lying in a shop is drawn with textures that
+/// live in <c>weapons.sds</c>, which the game has loaded beside the shop and may not have loaded where the
+/// object lands. Such a texture is taken from whichever extracted archive holds it — the game itself ships the
+/// same texture in many archives (every cutscene archive with a gun in it carries the gun's) — so the object
+/// arrives with everything it is drawn with.
+/// </para>
+/// <para>
 /// This writes the working copy at once, not at Save — the viewport looks a texture up the moment it builds
 /// a mesh. So an import that is undone, or a scene closed without saving, leaves textures nothing uses. Every
 /// texture carried is therefore written down beside the working copy (<see cref="RegisterName"/>), and each
@@ -34,17 +41,20 @@ public static class ArchiveCarry
     /// <param name="Textures">Textures added to the destination.</param>
     /// <param name="ItemDescriptions">Item descriptions added to the destination, by hash.</param>
     /// <param name="Prefab">Whether a prefab entry was added.</param>
-    /// <param name="Elsewhere">Textures neither archive carries — they live in an archive of their own that
-    /// the game loads beside the source's, and may not be loaded where the destination is.</param>
+    /// <param name="Elsewhere">Textures neither archive carries and no extracted archive was found to hold.</param>
     /// <param name="Unresolved">Collision hashes no item description of the source answers to.</param>
+    /// <param name="Borrowed">Those of <paramref name="Textures"/> that came from a third archive, with its name.</param>
     public sealed record Report(
         IReadOnlyList<string> Textures, IReadOnlyList<ulong> ItemDescriptions, bool Prefab,
-        IReadOnlyList<string> Elsewhere, IReadOnlyList<ulong> Unresolved);
+        IReadOnlyList<string> Elsewhere, IReadOnlyList<ulong> Unresolved,
+        IReadOnlyList<(string Texture, string Archive)> Borrowed);
 
     /// <summary>Carries the three kinds from one extracted folder to another.</summary>
     /// <param name="definition">The actor's definition name, or null/empty for an object no actor places.</param>
+    /// <param name="findElsewhere">Where a texture the source does not hold is: its file inside some other
+    /// extracted archive, or null. The index of the whole mirror when not given.</param>
     public static Report Carry(string fromDir, string toDir, IReadOnlyCollection<ulong> materialHashes,
-        IReadOnlyCollection<ulong> collisionHashes, string? definition)
+        IReadOnlyCollection<ulong> collisionHashes, string? definition, Func<string, string?>? findElsewhere = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(fromDir);
         ArgumentException.ThrowIfNullOrEmpty(toDir);
@@ -56,18 +66,21 @@ public static class ArchiveCarry
 
         var textures = new List<string>();
         var elsewhere = new List<string>();
-        CarryTextures(from, to, fromDir, toDir, materialHashes, textures, elsewhere);
+        var borrowed = new List<(string Texture, string Archive)>();
+        CarryTextures(from, to, fromDir, toDir, materialHashes, textures, elsewhere, borrowed,
+            findElsewhere ?? TextureSearchIndex.FindPath);
 
         var descriptions = new List<ulong>();
         var unresolved = new List<ulong>();
         CarryItemDescriptions(from, to, fromDir, toDir, collisionHashes, descriptions, unresolved);
 
         bool prefab = !string.IsNullOrEmpty(definition) && CarryPrefab(from, to, fromDir, toDir, Fnv64.Hash(definition));
-        return new Report(textures, descriptions, prefab, elsewhere, unresolved);
+        return new Report(textures, descriptions, prefab, elsewhere, unresolved, borrowed);
     }
 
     private static void CarryTextures(SdsManifest from, SdsManifest to, string fromDir, string toDir,
-        IReadOnlyCollection<ulong> materialHashes, List<string> added, List<string> elsewhere)
+        IReadOnlyCollection<ulong> materialHashes, List<string> added, List<string> elsewhere,
+        List<(string Texture, string Archive)> borrowed, Func<string, string?> findElsewhere)
     {
         MafiaMaterials.EnsureLoaded();
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -83,21 +96,41 @@ public static class ArchiveCarry
         foreach (string texture in wanted.Order(StringComparer.OrdinalIgnoreCase))
         {
             if (to.HasFile(texture)) continue;
+
+            // From the object's own archive, or from whichever other extracted archive holds it.
+            SdsManifest holder = from;
+            string holderDir = fromDir;
             if (!from.HasFile(texture))
             {
-                elsewhere.Add(texture);
-                continue;
+                if (HolderOf(texture, toDir, findElsewhere) is not { } third)
+                {
+                    elsewhere.Add(texture);
+                    continue;
+                }
+                (holder, holderDir) = third;
             }
-            if (!CopyEntry(from, to, fromDir, toDir, texture)) continue;
+            if (!CopyEntry(holder, to, holderDir, toDir, texture)) continue;
             added.Add(texture);
+            if (!ReferenceEquals(holder, from)) borrowed.Add((texture, Path.GetFileName(holderDir)));
             Remember(toDir, texture);
             TextureSearchIndex.Register(Path.Combine(toDir, texture));
 
             // A texture stored split keeps its top level in a companion entry, and its own entry says so —
             // one without the other is a chain the game streams and does not find.
             string companion = SdsImportTypes.MipNameFor(texture);
-            if (from.HasFile(companion) && !to.HasFile(companion)) CopyEntry(from, to, fromDir, toDir, companion);
+            if (holder.HasFile(companion) && !to.HasFile(companion)) CopyEntry(holder, to, holderDir, toDir, companion);
         }
+    }
+
+    // The extracted archive, other than the destination, whose manifest lists the texture.
+    private static (SdsManifest Manifest, string Dir)? HolderOf(string texture, string toDir, Func<string, string?> find)
+    {
+        string? path = find(texture);
+        string? dir = path == null ? null : Path.GetDirectoryName(path);
+        if (dir == null || !File.Exists(path) || !File.Exists(Path.Combine(dir, "SDSContent.xml"))) return null;
+        if (string.Equals(Path.GetFullPath(dir), Path.GetFullPath(toDir), StringComparison.OrdinalIgnoreCase)) return null;
+        SdsManifest manifest = SdsManifest.Load(dir);
+        return manifest.HasFile(texture) ? (manifest, dir) : null;
     }
 
     private static void CarryItemDescriptions(SdsManifest from, SdsManifest to, string fromDir, string toDir,
