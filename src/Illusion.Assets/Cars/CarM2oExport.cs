@@ -17,8 +17,9 @@ namespace Illusion.Assets.Cars;
 
 /// <summary>
 /// A car as a resource a Mafia II Online server can ship: a folder with the resource's <c>package.json</c>, the
-/// car's archive under <c>cars/</c> (and its winter twin) and <c>vehicles.json</c>, which says what the
-/// archives hold.
+/// car's archive (and its winter twin) and <c>vehicles.json</c>, which says what the archives hold. An archive
+/// sits in the folder under the path the game loads it from — <c>sds/cars/&lt;name&gt;.sds</c> — the way the map
+/// export lays out its patches, and its entry names that target (<c>/sds/cars/&lt;name&gt;.sds</c>) beside the file.
 ///
 /// <para>
 /// Only what can travel goes in. The single-player registration — the row in <c>vehicles.tbl</c>, the paint
@@ -43,7 +44,7 @@ public static partial class CarM2oExport
     /// <summary>The version of <see cref="VehiclesFile"/>'s layout.</summary>
     public const int Format = 1;
 
-    private const string CarsFolder = "cars";
+    private const string CarsFolder = "sds/cars";
     private const int VehicleIdColumn = 0;
     private const int VehicleNameColumn = 2;
     private const int VehicleTextColumn = 3;
@@ -179,7 +180,9 @@ public static partial class CarM2oExport
         var entry = new JsonObject
         {
             ["model"] = model,
+            ["sds"] = $"/{CarsFolder}/{sources.Archive.Name.ToLowerInvariant()}",
             ["archive"] = $"{CarsFolder}/{sources.Archive.Name}",
+            ["winterSds"] = sources.WinterArchive != null ? JsonValue.Create($"/{CarsFolder}/{sources.WinterArchive.Name.ToLowerInvariant()}") : null,
             ["winterArchive"] = sources.WinterArchive != null ? JsonValue.Create($"{CarsFolder}/{sources.WinterArchive.Name}") : null,
         };
 
@@ -220,7 +223,7 @@ public static partial class CarM2oExport
         }
 
         // Everything is known; now the folder.
-        string cars = Path.Combine(output, CarsFolder);
+        string cars = Path.Combine(output, "sds", "cars");
         Directory.CreateDirectory(cars);
         var written = new List<string>();
         var files = new JsonArray();
@@ -334,7 +337,7 @@ public static partial class CarM2oExport
         };
         if (package["mafiahub"] is not JsonObject hub) package["mafiahub"] = hub = new JsonObject { ["priority"] = 0 };
         if (hub["files"] is not JsonArray shipped) hub["files"] = shipped = [];
-        foreach (string pattern in new[] { $"{CarsFolder}/**", VehiclesFile })
+        foreach (string pattern in new[] { "sds/**", VehiclesFile })
         {
             if (!shipped.Any(f => f?.GetValueKind() == JsonValueKind.String && f.GetValue<string>() == pattern)) shipped.Add(pattern);
         }

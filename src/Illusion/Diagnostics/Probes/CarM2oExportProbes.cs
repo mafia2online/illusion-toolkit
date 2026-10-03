@@ -119,7 +119,7 @@ internal static class CarM2oExportProbes
             var shipped = (package["mafiahub"]?["files"] as JsonArray)?.Select(f => f!.GetValue<string>()).ToList() ?? [];
             Check("package.json names the resource and ships the cars and their list",
                 package["name"]?.GetValue<string>() == "car-shubert-38-export" && package["version"] != null
-                && shipped.Contains("cars/**") && shipped.Contains(CarM2oExport.VehiclesFile), string.Join(", ", shipped));
+                && shipped.Contains("sds/**") && shipped.Contains(CarM2oExport.VehiclesFile), string.Join(", ", shipped));
 
             JsonNode document = JsonNode.Parse(File.ReadAllText(Path.Combine(output, CarM2oExport.VehiclesFile)))!;
             JsonNode? entry = (document["vehicles"] as JsonArray)?.FirstOrDefault();
@@ -148,9 +148,12 @@ internal static class CarM2oExportProbes
                     && files[i]!["size"]!.GetValue<long>() == archives[i].Length
                     && files[i]!["sha256"]!.GetValue<string>() == Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(archives[i].FullName)));
             }
-            Check("the archives are in cars/ as they were built, sized and hashed", intact
-                && entry["archive"]?.GetValue<string>() == "cars/" + archives[0].Name
-                && (archives.Count < 2 || entry["winterArchive"]?.GetValue<string>() == "cars/" + archives[1].Name));
+            Check("the archives are in sds/cars/ as they were built, sized and hashed", intact
+                && entry["archive"]?.GetValue<string>() == "sds/cars/" + archives[0].Name
+                && (archives.Count < 2 || entry["winterArchive"]?.GetValue<string>() == "sds/cars/" + archives[1].Name));
+            Check("each named by the path the game loads it from",
+                entry["sds"]?.GetValue<string>() == "/sds/cars/" + archives[0].Name
+                && (archives.Count < 2 || entry["winterSds"]?.GetValue<string>() == "/sds/cars/" + archives[1].Name));
             Check("nothing else is in the folder",
                 Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length == archives.Count + 2);
 

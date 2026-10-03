@@ -225,7 +225,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_export_m2o")]
-    [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships cars/** and vehicles.json), cars/<name>.sds with its winter _z twin, and vehicles.json — model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
+    [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships sds/** and vehicles.json), sds/cars/<name>.sds with its winter _z twin, and vehicles.json — the path the game loads each archive from, model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
     public static async Task<string> CarExportM2o(
         IEditorSession editor,
         IUiThreadMarshal ui,
