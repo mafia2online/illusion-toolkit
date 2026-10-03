@@ -216,17 +216,18 @@ internal sealed class AppEditorSession : IEditorSession
             if (nameContains != null && !node.Name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
             if (kind != null && !string.Equals(node.Kind, kind, StringComparison.OrdinalIgnoreCase)) continue;
 
-            // An instanced mesh's bounds span every copy across the map — not where this row is.
-            bool bounded = node.Mesh is { Instanced: false };
+            // What the row stands where: a drawn mesh, or — for a collision placement — its hull. An instanced
+            // mesh has neither: its bounds span every copy across the map, not where this row is.
+            Shape? shape = ShapeOf(node);
             Vector3? position = node.Source is IFrameNode frame ? frame.WorldTransform.Translation : null;
             int? triangles = null;
             Vector3 insideMin = default, insideMax = default;
             if (lo is { } min && hi is { } max)
             {
-                if (bounded)
+                if (shape is { } solid)
                 {
-                    if (!Overlaps(node.Mesh!.BoundsMin, node.Mesh.BoundsMax, min, max)) continue;
-                    triangles = TrianglesInBox(node.Mesh, min, max, out insideMin, out insideMax);
+                    if (!Overlaps(solid.Min, solid.Max, min, max)) continue;
+                    triangles = TrianglesInBox(solid, min, max, out insideMin, out insideMax);
                     if (triangles == 0) continue;   // its box reaches in; its geometry does not
                 }
                 else if (position is not { } p || !Overlaps(p, p, min, max))
@@ -238,28 +239,71 @@ internal sealed class AppEditorSession : IEditorSession
             found.Add(new SceneObjectInfo(
                 node.Name, node.Kind, PathOf(node),
                 position is { } at ? [at.X, at.Y, at.Z] : null,
-                bounded ? [node.Mesh!.BoundsMin.X, node.Mesh.BoundsMin.Y, node.Mesh.BoundsMin.Z] : null,
-                bounded ? [node.Mesh!.BoundsMax.X, node.Mesh.BoundsMax.Y, node.Mesh.BoundsMax.Z] : null,
+                shape is { } b0 ? [b0.Min.X, b0.Min.Y, b0.Min.Z] : null,
+                shape is { } b1 ? [b1.Max.X, b1.Max.Y, b1.Max.Z] : null,
                 node.IsSelected,
                 triangles,
                 triangles > 0 ? [insideMin.X, insideMin.Y, insideMin.Z] : null,
                 triangles > 0 ? [insideMax.X, insideMax.Y, insideMax.Z] : null,
-                node.Mesh?.PickPositions?.Length,
-                node.Mesh?.PickIndices?.Length / 3));
+                shape?.Positions?.Length ?? node.Mesh?.PickPositions?.Length,
+                (shape?.Indices?.Length ?? node.Mesh?.PickIndices?.Length) / 3));
         }
         return found;
+    }
+
+    /// <summary>The triangles a row occupies and their world-space bounds. Positions are null for a mesh that
+    /// keeps no CPU geometry — its bounds still stand.</summary>
+    private readonly record struct Shape(Vector3[]? Positions, uint[]? Indices, Matrix4x4 World, Vector3 Min, Vector3 Max);
+
+    // Decoded hulls, by the cooked bytes they came from: a re-cooked hull is another array and is decoded again.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], Tuple<Vector3[], uint[]>> Hulls = new();
+
+    private static Shape? ShapeOf(SceneNode node)
+    {
+        if (node.Mesh is { Instanced: false } mesh)
+        {
+            return new Shape(mesh.PickPositions, mesh.PickIndices, mesh.World, mesh.BoundsMin, mesh.BoundsMax);
+        }
+        if (node.Source is not Assets.Adapters.CollisionInstanceAdapter placement) return null;
+
+        byte[]? cooked = placement.Document.Collision.Meshes.FirstOrDefault(m => m.Hash == placement.Instance.Hash)?.CookedMesh;
+        if (cooked == null) return null;
+        Tuple<Vector3[], uint[]> hull = Hulls.GetValue(cooked, static bytes =>
+        {
+            try
+            {
+                Formats.Collisions.CookedTriangleMesh decoded = Formats.Collisions.CookedTriangleMesh.Decode(bytes);
+                return Tuple.Create(decoded.Vertices, Array.ConvertAll(decoded.Triangles, i => (uint)i));
+            }
+            catch (Formats.Collisions.CollisionDecodeException)
+            {
+                return Tuple.Create(Array.Empty<Vector3>(), Array.Empty<uint>());
+            }
+        });
+        if (hull.Item1.Length == 0) return null;
+
+        Matrix4x4 world = placement.WorldTransform;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (Vector3 vertex in hull.Item1)
+        {
+            Vector3 at = Vector3.Transform(vertex, world);
+            min = Vector3.Min(min, at);
+            max = Vector3.Max(max, at);
+        }
+        return new Shape(hull.Item1, hull.Item2, world, min, max);
     }
 
     /// <summary>How many of a mesh's triangles reach into a world-space box, and the extent of those
     /// triangles clipped to it. Null when the mesh keeps no CPU geometry to ask.</summary>
     private static int? TrianglesInBox(
-        Rendering.Gpu.GpuMesh mesh, Vector3 boxMin, Vector3 boxMax, out Vector3 insideMin, out Vector3 insideMax)
+        Shape shape, Vector3 boxMin, Vector3 boxMax, out Vector3 insideMin, out Vector3 insideMax)
     {
         insideMin = new Vector3(float.MaxValue);
         insideMax = new Vector3(float.MinValue);
-        if (mesh.PickPositions is not { } positions || mesh.PickIndices is not { } indices) return null;
+        if (shape.Positions is not { } positions || shape.Indices is not { } indices) return null;
 
-        Matrix4x4 world = mesh.World;
+        Matrix4x4 world = shape.World;
         int count = 0;
         for (int i = 0; i + 2 < indices.Length; i += 3)
         {

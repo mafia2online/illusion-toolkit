@@ -333,7 +333,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "scene_find")]
-    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Use it also to learn exact names before scene_select.")]
+    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Use it also to learn exact names before scene_select. A collision placement (kind 'CollisionInstance', named 'instance N') is found by its HULL: its bounds, vertex and triangle counts are the hull's, and a box is tested against the hull's triangles.")]
     public static async Task<string> Find(
         IEditorSession editor,
         IUiThreadMarshal ui,
