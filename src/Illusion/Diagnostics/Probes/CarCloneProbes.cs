@@ -129,6 +129,10 @@ internal static class CarCloneProbes
                 var nameTable = new FrameNameTable(manifest.GetFiles("FrameNameTable")[0]);
                 Check($"{label}: so does the name table", nameTable.Names.Values.Contains(Name),
                     string.Join(", ", nameTable.Names.Values));
+                // Every shipped car lists its root first; a clone that led with another frame had no model in game.
+                Check($"{label}: the name table still lists the root first",
+                    nameTable.FrameData is { Length: > 0 } entries && entries[0].Name == Name,
+                    string.Join(", ", (nameTable.FrameData ?? []).Select(e => e.Name)));
                 PrefabFile prefab = PrefabFile.Load(manifest.GetFiles("PREFAB")[0]);
                 Check($"{label}: the prefab entry follows it",
                     prefab.Contains(Fnv64.Hash(Name)) && !prefab.Contains(Fnv64.Hash("Shubert_38")));
@@ -138,6 +142,34 @@ internal static class CarCloneProbes
                 Check($"{label}: packs", Packs(to));
             }
             Check("the toolkit reads the clone as a car", Car.ReadFrom(cars[0].To) != null);
+
+            // A rebuilt name table has to be the table the archive shipped with — order included.
+            int cars_ = 0, same = 0;
+            var differing = new List<string>();
+            foreach (string archive in Directory.EnumerateFiles(Path.Combine(sds, "cars"), "*.sds"))
+            {
+                string folder = MafiaEnvironment.ExtractedDir(new FileInfo(archive));
+                if (!File.Exists(Path.Combine(folder, "SDSContent.xml"))) continue;
+                ExtractedSds loaded = ExtractedSds.Load(folder);
+                IReadOnlyList<string> tableFiles = loaded.Manifest.GetFiles("FrameNameTable");
+                if (loaded.FrameResource == null || tableFiles.Count == 0) continue;
+                // Five shipped tables list a frame twice or name a frame the resource does not hold; a table
+                // built from the frames has one entry per frame, so those are out of this comparison.
+                FrameNameTable.Data[] shipped = loaded.FrameNameTable?.FrameData ?? [];
+                if (shipped.Any(e => e.FrameIndex < 0) || shipped.Select(e => e.FrameIndex).Distinct().Count() != shipped.Length)
+                {
+                    continue;
+                }
+                var rebuilt = new FrameNameTable();
+                rebuilt.BuildDataFromResource(loaded.FrameResource);
+                using var ms = new MemoryStream();
+                using (var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true)) rebuilt.WriteToFile(writer);
+                cars_++;
+                if (ms.ToArray().AsSpan().SequenceEqual(File.ReadAllBytes(tableFiles[0]))) same++;
+                else differing.Add(Path.GetFileNameWithoutExtension(archive));
+            }
+            Check("rebuilding a car's name table reproduces it byte for byte", cars_ > 50 && same == cars_,
+                $"{same} of {cars_}; differ: {string.Join(", ", differing.Take(8))}");
             Check("tables.sds packs", Packs(tables));
             Check("ingame.sds packs", Packs(ingame));
             // Packing recompiles every XML resource; what it compiles has to decompile back to the same text,

@@ -120,7 +120,12 @@ public static partial class CarCloner
             SdsWriter.PackResult made = SdsWriter.PackSds(table, createBackup: true, when);
             packed.Add((made.Archive, made.Backup));
         }
-        return new CarCloneOutcome(name, result.VehicleId, packed, result.TrafficRows, result.Notes);
+        // The game finds archives through its cached file list, and a new one is not in it.
+        var notes = new List<string>(result.Notes);
+        notes.Add(GameFileIndex.Reset()
+            ? "the game's file list (vfs.bin) was reset — the next start rebuilds it with the new archives"
+            : $"the game's file list was not reset — remove {GameFileIndex.Path} before starting the game, or it will not find the new archives");
+        return new CarCloneOutcome(name, result.VehicleId, packed, result.TrafficRows, notes);
     }
 
     /// <summary>
