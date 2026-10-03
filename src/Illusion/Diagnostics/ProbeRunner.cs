@@ -185,6 +185,11 @@ internal static class ProbeRunner
                 return true;
             // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
             // Output: %TEMP%\illusion_geometry_sweep.txt
+            // Which meshes of an archive carry no normals (foliage), and what the renderer is handed for them.
+            // Output: %TEMP%\illusion_vertex_normals.txt
+            case "--probe-vertex-normals":
+                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
+                return true;
             case "--probe-geometry-sweep":
                 GeometrySweepProbes.RunGeometrySweepProbe();
                 return true;
