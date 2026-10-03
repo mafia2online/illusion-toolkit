@@ -204,6 +204,26 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "car_substitute")]
+    [Description("Build one car under ANOTHER car's name: pc\\sds\\cars\\<target>.sds is replaced by the source car's model, with the root frame, name table, prefab entry, entity data and buffers keyed by the target's model name. No table is touched — the game lists the target as before and finds the source's shape and tuning in its archive. For trying a car where nothing can be registered (a multiplayer that spawns from a fixed list of names). A timestamped backup of each replaced archive is kept in cars\\backups; the winter _z twin is replaced only where both cars have one. This OVERWRITES game files and the target's working copy: the game must not be running.")]
+    public static async Task<string> CarSubstitute(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The car whose model is used, by archive or model name, e.g. 'shubert_38_custom'.")] string source,
+        [Description("The car whose archive is replaced, e.g. 'shubert_38_destr'.")] string target)
+    {
+        try
+        {
+            CarSubstituteInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.SubstituteCar(source, target, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, substitute = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "car_export_m2o")]
     [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships cars/** and vehicles.json), cars/<name>.sds with its winter _z twin, and vehicles.json — model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
     public static async Task<string> CarExportM2o(

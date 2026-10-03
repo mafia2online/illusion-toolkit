@@ -145,6 +145,10 @@ public interface IEditorSession
     /// (a clone made before they were kept takes them from the car it was cloned from). Null on success.</summary>
     string? BuildArchive(string archive, string? memoryFrom, out PackedArchive? result);
 
+    /// <summary>Builds one car under another car's name, replacing that car's archive (backup kept) and touching
+    /// no table. Null on success.</summary>
+    string? SubstituteCar(string source, string target, out CarSubstituteInfo? result);
+
     /// <summary>Exports a built car as a multiplayer resource folder (package.json, cars/, vehicles.json);
     /// nothing of the game is written. Null on success.</summary>
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);

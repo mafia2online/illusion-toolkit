@@ -41,6 +41,10 @@ public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, i
 /// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
 public sealed record PackedArchive(string Archive, string? Backup);
 
+/// <summary>One car built under another's name: the model name the replaced archives are keyed by, each archive
+/// with the backup of what it held, and what was left as it was.</summary>
+public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
+
 /// <summary>A car exported as a multiplayer resource: the folder and the resource's name, the model, its title
 /// and the car it was cloned from, how many cars the folder lists now, the files written and what the one
 /// shipping it should know.</summary>

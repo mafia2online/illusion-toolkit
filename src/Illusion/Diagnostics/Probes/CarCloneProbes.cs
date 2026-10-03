@@ -186,6 +186,31 @@ internal static class CarCloneProbes
             }
             Check("the toolkit reads the clone as a car", Car.ReadFrom(cars[0].To) != null);
 
+            // The clone built under another car's name: everything the clone's name keyed is the other name's now.
+            {
+                const string Other = "Shubert_38_destr";
+                string substitute = Path.Combine(scratch, "substitute");
+                foreach (string note in CarCloner.SubstituteExtracted(cars[0].To, substitute, Name, Other)) sb.AppendLine("    note: " + note);
+                ExtractedSds swapped = ExtractedSds.Load(substitute);
+                ExtractedSds clone = ExtractedSds.Load(cars[0].To);
+                var names = swapped.FrameResource!.FrameObjects.Values.OfType<FrameObjectBase>().Select(f => f.Name.String).ToList();
+                Check("substitute: the root frame carries the other car's name", names.Contains(Other) && !names.Contains(Name));
+                Check("substitute: the name table lists it first",
+                    swapped.FrameNameTable?.FrameData is { Length: > 0 } listed && listed[0].Name == Other);
+                PrefabFile prefab = PrefabFile.Load(swapped.Manifest.GetFiles("PREFAB")[0]);
+                Check("substitute: the prefab entry follows it", prefab.Contains(Fnv64.Hash(Other)) && !prefab.Contains(Fnv64.Hash(Name)));
+                Check("substitute: the entity data is filed under it in lower case",
+                    EntityDataStorageFile.Load(swapped.Manifest.GetFiles("EntityDataStorage")[0]).Hash == Fnv64.Hash(Other.ToLowerInvariant()));
+                var cloneBuffers = new HashSet<ulong>(clone.VertexBuffers.Buffers.Keys.Concat(clone.IndexBuffers.Buffers.Keys));
+                var lods = swapped.FrameResource.FrameGeometries.Values.SelectMany(g => g.LOD ?? []).ToList();
+                Check("substitute: the buffers are named for it and every level of detail finds them",
+                    !swapped.VertexBuffers.Buffers.Keys.Concat(swapped.IndexBuffers.Buffers.Keys).Any(cloneBuffers.Contains)
+                    && lods.Count > 0 && lods.All(l => swapped.VertexBuffers.GetBuffer(l.VertexBufferRef.Hash) != null
+                        && swapped.IndexBuffers.GetBuffer(l.IndexBufferRef.Hash) != null)
+                    && swapped.VertexBuffers.GetBuffer(Fnv64.Hash(Other + ".Root.L0.VB0")) != null);
+                Check("substitute: packs and reads as a car", Packs(substitute) && Car.ReadFrom(substitute) != null);
+            }
+
             // A rebuilt name table has to be the table the archive shipped with — order included.
             int cars_ = 0, same = 0;
             var differing = new List<string>();

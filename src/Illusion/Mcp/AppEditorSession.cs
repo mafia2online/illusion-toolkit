@@ -818,6 +818,24 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
+    public string? SubstituteCar(string source, string target, out CarSubstituteInfo? result)
+    {
+        result = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target)) return "name the car and the one it replaces";
+        try
+        {
+            if (Assets.Cars.CarCloner.Substitute(source, target, out string? refusal) is not { } outcome) return refusal;
+            result = new CarSubstituteInfo(outcome.Model,
+                [.. outcome.Packed.Select(p => new PackedArchive(p.Archive, p.Backup))], outcome.Notes);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
+        {
+            return "could not write the archives (is the game running?): " + ex.Message;
+        }
+    }
+
     public string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result)
     {
         result = null;
