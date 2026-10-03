@@ -788,6 +788,23 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result)
+    {
+        result = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        try
+        {
+            if (Assets.Cars.CarCloner.Clone(source, name, traffic, out string? refusal) is not { } outcome) return refusal;
+            result = new CarCloneInfo(outcome.Name, outcome.VehicleId, outcome.TrafficRows,
+                [.. outcome.Packed.Select(p => new PackedArchive(p.Archive, p.Backup))], outcome.Notes);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return "could not write the archives (is the game running?): " + ex.Message;
+        }
+    }
+
     public string? Undo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;

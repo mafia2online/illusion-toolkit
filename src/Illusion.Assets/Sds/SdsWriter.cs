@@ -45,13 +45,19 @@ public static class SdsWriter
         try { manifest = SdsManifest.Load(extracted); }
         catch (Exception ex) when (ex is IOException or SdsFormatException) { return dropped; }
 
-        foreach ((string _, string file) in manifest.Entries.ToArray())
+        foreach ((string type, string file) in manifest.Entries.ToArray())
         {
+            // Containers list their pieces under elements of their own; their File is not a file.
+            if (type is "Script" or "Table") continue;
             // Names out of the archive are often rooted ("/missions/city11_Little_Italy/SoundSectors_city11.bin"),
             // and Path.Combine treats a rooted second argument as absolute: the file was looked for at the
             // drive root, never found, and a perfectly present resource was unsaid on every Build — a
             // district lost its AudioSectors that way. Joined the way the handlers join it.
-            if (File.Exists(Path.Combine(extracted, file.TrimStart('/', '\\')))) continue;
+            string onDisk = Path.Combine(extracted, file.TrimStart('/', '\\'));
+            if (File.Exists(onDisk)) continue;
+            // An XML resource is named without its extension and extracts to that name plus ".xml" — the
+            // handler adds it on both sides. Missing that unsaid every XML of ingame.sds on its first Build.
+            if (type == "XML" && File.Exists(onDisk + ".xml")) continue;
             if (manifest.RemoveEntry(file)) dropped.Add(file);
         }
         return dropped;

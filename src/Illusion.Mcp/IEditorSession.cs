@@ -134,6 +134,11 @@ public interface IEditorSession
     /// wheel has the same fields). Null on success.</summary>
     string? SetTuning(int table, string field, string? band, string? element, string value, out TuningFieldInfo? result);
 
+    /// <summary>Clones a car under a new model name and registers it (vehicle table, paint, cover points and,
+    /// with <paramref name="traffic"/>, the traffic rows of the source car), then builds the archives. Null on
+    /// success.</summary>
+    string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result);
+
     string? Undo();
 
     string? Redo();

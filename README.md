@@ -260,7 +260,8 @@ and nothing reaches the game before `editor_build` (which keeps the usual timest
 `viewport_screenshot` is how a client checks what a push actually looks like.
 `editor_target resource` points the same tools at the resource editor's stage (one archive, such as
 a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
-entity-data tables the way the Tuning tab does.
+entity-data tables the way the Tuning tab does; \car_clone\ makes a new car out of an existing one
+(a renamed copy of its archive, registered in the vehicle, paint, cover-point and traffic tables).
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
 only one that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a

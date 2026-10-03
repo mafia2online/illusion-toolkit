@@ -32,6 +32,14 @@ public sealed record ResourceStatus(
 /// holds (Car, Character, CityCrash, …), its size, and whether it already has a working copy.</summary>
 public sealed record LibraryItem(string Name, string Path, string Kind, long Size, bool Extracted);
 
+/// <summary>A car cloned under a new name: the vehicle id the tables gave it, how many traffic rows pick it,
+/// each archive written with the backup taken of it (null for a new one), and what was left out.</summary>
+public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows,
+    IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
+
+/// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
+public sealed record PackedArchive(string Archive, string? Backup);
+
 /// <summary>One entity-data table of a car — a car ships several (the stock one and its tuned variants); the
 /// label names its mass and power, which is what tells them apart.</summary>
 public sealed record TuningTableInfo(int Table, string Label, string Type, int Fields);
