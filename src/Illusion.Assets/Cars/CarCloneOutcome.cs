@@ -10,4 +10,5 @@ public sealed record CarCloneOutcome(
     int VehicleId,
     IReadOnlyList<(string Archive, string? Backup)> Packed,
     int TrafficRows,
+    int? TextId,
     IReadOnlyList<string> Notes);

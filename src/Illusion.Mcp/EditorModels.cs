@@ -33,8 +33,9 @@ public sealed record ResourceStatus(
 public sealed record LibraryItem(string Name, string Path, string Kind, long Size, bool Extracted);
 
 /// <summary>A car cloned under a new name: the vehicle id the tables gave it, how many traffic rows pick it,
-/// each archive written with the backup taken of it (null for a new one), and what was left out.</summary>
-public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows,
+/// the id of the text holding its own title (null when it shares the source car's), each archive written with
+/// the backup taken of it (null for a new one), and what was left out.</summary>
+public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, int? TextId,
     IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
 
 /// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>

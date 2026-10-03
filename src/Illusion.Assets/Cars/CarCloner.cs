@@ -1,9 +1,12 @@
 using System.Text.RegularExpressions;
 using Illusion.Assets.Sds;
+using Illusion.Assets.Text;
 using Illusion.Formats.Archive;
 using Illusion.Formats.EntityData;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Frames.Resources;
+using Illusion.Formats.Geometry;
 using Illusion.Formats.Hashing;
 using Illusion.Formats.Prefab;
 using Illusion.Formats.ResourceFormats;
@@ -20,8 +23,13 @@ namespace Illusion.Assets.Cars;
 /// frame carries the model name, the PREFAB entry (seats, doors, wheels, deformation) is keyed by FNV64 of that
 /// name, and the entity-data storage (the tuning tables) by FNV64 of the name in lower case. Paint combinations
 /// (<c>PaintCombinations.tbl</c>) and the cover points around the car (<c>AiProps/&lt;name&gt;.xml</c>) live in
-/// ingame.sds under the id and the name; traffic (<c>CARM*.tbl</c>) picks cars by id. Everything else inside the
-/// archive — buffers, textures, sounds — is addressed archive-locally or shared, and stays as it is.
+/// ingame.sds under the id and the name; traffic (<c>CARM*.tbl</c>) picks cars by id.
+/// </para>
+/// <para>
+/// The vertex and index buffers get names of their own as well. The game keeps buffers by name across every
+/// archive it has loaded, so a clone that kept the source's names would draw whichever of the two shapes
+/// streamed first the moment its model is edited — and so would the car it was cloned from. Textures, materials
+/// and sounds stay shared with the source: the clone looks and sounds like it until those are changed too.
 /// </para>
 /// </summary>
 public static partial class CarCloner
@@ -31,6 +39,11 @@ public static partial class CarCloner
 
     private const int VehicleIdColumn = 0;
     private const int VehicleNameColumn = 2;
+    private const int VehicleTextColumn = 3;
+
+    /// <summary>Where the ids of clone names start: clear of the car names the game and its DLCs ship
+    /// (60000000–60000059).</summary>
+    private const int FirstTitleId = 60001000;
     private const int PaintIdColumn = 0;
     private const int PaintNameColumn = 1;
     private const int TrafficCountColumn = 1;
@@ -52,9 +65,10 @@ public static partial class CarCloner
     /// Clones a car of the game the toolkit has open, then builds the new archives and the two table archives
     /// (keeping a backup of each that existed). <paramref name="source"/> is the car's archive or model name
     /// (<c>shubert_38</c>). With <paramref name="traffic"/>, every traffic row that can pick the source car can
-    /// pick the clone as well.
+    /// pick the clone as well. With <paramref name="title"/>, the clone gets a name of its own in the text of
+    /// every installed language — without it, it is called what the source car is called.
     /// </summary>
-    public static CarCloneOutcome? Clone(string source, string name, bool traffic, out string? refusal)
+    public static CarCloneOutcome? Clone(string source, string name, bool traffic, string? title, out string? refusal)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(name);
@@ -97,15 +111,21 @@ public static partial class CarCloner
             return null;
         }
 
+        List<FileInfo> textSds = title == null
+            ? []
+            : [.. Directory.GetDirectories(MafiaEnvironment.PcFolder, "sds_*")
+                .Select(d => new FileInfo(Path.Combine(d, "text", "text_default.sds"))).Where(f => f.Exists)];
+
         var folders = new CarCloneFolders(
             SdsMeshLoader.EnsureExtracted(tablesSds),
             SdsMeshLoader.EnsureExtracted(ingameSds),
-            [.. cars.Select(c => (SdsMeshLoader.EnsureExtracted(c.From), MafiaEnvironment.ExtractedDir(c.To)))]);
+            [.. cars.Select(c => (SdsMeshLoader.EnsureExtracted(c.From), MafiaEnvironment.ExtractedDir(c.To)))],
+            [.. textSds.Select(SdsMeshLoader.EnsureExtracted)]);
 
         // A folder left behind by an attempt that never produced its archive is nobody's working copy.
         foreach ((string _, string to) in folders.Cars) SdsWriter.DeleteExtracted(to);
 
-        CarCloneResult? result = CloneExtracted(folders, stem, name, traffic, out refusal);
+        CarCloneResult? result = CloneExtracted(folders, stem, name, traffic, title, out refusal);
         if (result == null) return null;
 
         DateTime when = DateTime.Now;
@@ -115,7 +135,8 @@ public static partial class CarCloner
             SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: false, when);
             packed.Add((made.Archive, made.Backup));
         }
-        foreach (FileInfo table in new[] { tablesSds, ingameSds })
+        IEnumerable<FileInfo> changed = result.TextId == null ? [tablesSds, ingameSds] : [tablesSds, ingameSds, .. textSds];
+        foreach (FileInfo table in changed)
         {
             SdsWriter.PackResult made = SdsWriter.PackSds(table, createBackup: true, when);
             packed.Add((made.Archive, made.Backup));
@@ -125,7 +146,7 @@ public static partial class CarCloner
         notes.Add(GameFileIndex.Reset()
             ? "the game's file list (vfs.bin) was reset — the next start rebuilds it with the new archives"
             : $"the game's file list was not reset — remove {GameFileIndex.Path} before starting the game, or it will not find the new archives");
-        return new CarCloneOutcome(name, result.VehicleId, packed, result.TrafficRows, notes);
+        return new CarCloneOutcome(name, result.VehicleId, packed, result.TrafficRows, result.TextId, notes);
     }
 
     /// <summary>
@@ -135,11 +156,17 @@ public static partial class CarCloner
     /// car is not in the vehicle table or the name is already taken.
     /// </summary>
     public static CarCloneResult? CloneExtracted(
-        CarCloneFolders folders, string source, string name, bool traffic, out string? refusal)
+        CarCloneFolders folders, string source, string name, bool traffic, string? title, out string? refusal)
     {
         ArgumentNullException.ThrowIfNull(folders);
         refusal = Refuse(name);
         if (refusal != null) return null;
+        title = title?.Trim();
+        if (title != null && (title.Length == 0 || title.Length > 48 || title.Any(char.IsControl) || title.Contains(':')))
+        {
+            refusal = "a car's title is one line of at most 48 characters, without ':'";
+            return null;
+        }
 
         string vehiclesPath = Path.Combine(folders.Tables, "tables", "vehicles.tbl");
         if (!File.Exists(vehiclesPath))
@@ -190,6 +217,21 @@ public static partial class CarCloner
         vehicles.SetCell(added, VehicleIdColumn, id);
         vehicles.SetCell(added, VehicleNameColumn, name);
 
+        // A name of its own: one new string, under the same id in every language's text table.
+        int? textId = null;
+        List<string> textTables = [.. folders.Text.Select(t => Path.Combine(t, "tables", "TextDatabase.dat")).Where(File.Exists)];
+        if (title != null && textTables.Count > 0)
+        {
+            int free = FirstTitleId + id;
+            while (textTables.Any(t => GameText.Find(t, free) != null)) free++;
+            textId = free;
+            vehicles.SetCell(added, VehicleTextColumn, free);
+        }
+        else if (title != null)
+        {
+            notes.Add("no text archive (sds_<language>\\text\\text_default.sds) — the clone keeps the source car's name");
+        }
+
         string paintPath = Path.Combine(folders.Ingame, "tables", "PaintCombinations.tbl");
         GameTable? paint = File.Exists(paintPath) ? GameTable.Load(paintPath) : null;
         int paintRow = paint?.FindRow(PaintNameColumn, model) ?? -1;
@@ -219,6 +261,10 @@ public static partial class CarCloner
         }
 
         AtomicFile.WriteAllBytes(vehiclesPath, vehicles.ToBytes());
+        if (textId is { } titleId)
+        {
+            foreach (string table in textTables) GameText.Add(table, titleId, title!);
+        }
         if (paint != null && paintRow >= 0) AtomicFile.WriteAllBytes(paintPath, paint.ToBytes());
         foreach ((string path, GameTable table) in trafficTables) AtomicFile.WriteAllBytes(path, table.ToBytes());
         if (!CopyCoverPoints(folders.Ingame, model, name))
@@ -227,7 +273,7 @@ public static partial class CarCloner
         }
 
         refusal = null;
-        return new CarCloneResult(id, trafficRows, notes);
+        return new CarCloneResult(id, trafficRows, textId, notes);
     }
 
     // Every traffic row that can pick the source car can pick the clone too: a row is a weight, a count and
@@ -285,6 +331,9 @@ public static partial class CarCloner
         {
             FrameObjectBase? root = frame.FrameObjects.Values.OfType<FrameObjectBase>()
                 .FirstOrDefault(f => string.Equals(f.Name.String, model, StringComparison.OrdinalIgnoreCase));
+            int buffers = GiveOwnBuffers(manifest, frame, model, name);
+            if (buffers == 0) notes.Add($"{label}: no buffer was renamed — the clone draws from the source car's buffers");
+
             if (root != null)
             {
                 root.Name = new HashName(name);
@@ -294,20 +343,21 @@ public static partial class CarCloner
                 {
                     linked.ActorHash = new HashName(name);
                 }
-                AtomicFile.WriteAllBytes(frames[0], frame.WriteToStream());
-                IReadOnlyList<string> tables = manifest.GetFiles("FrameNameTable");
-                if (tables.Count > 0)
-                {
-                    var table = new FrameNameTable();
-                    table.BuildDataFromResource(frame);
-                    using var ms = new MemoryStream();
-                    using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true)) table.WriteToFile(writer);
-                    AtomicFile.WriteAllBytes(tables[0], ms.ToArray());
-                }
             }
             else
             {
                 notes.Add($"{label}: no frame is named {model} — the root keeps its name");
+            }
+
+            AtomicFile.WriteAllBytes(frames[0], frame.WriteToStream());
+            IReadOnlyList<string> tables = manifest.GetFiles("FrameNameTable");
+            if (tables.Count > 0)
+            {
+                var table = new FrameNameTable();
+                table.BuildDataFromResource(frame);
+                using var ms = new MemoryStream();
+                using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true)) table.WriteToFile(writer);
+                AtomicFile.WriteAllBytes(tables[0], ms.ToArray());
             }
         }
 
@@ -330,6 +380,63 @@ public static partial class CarCloner
             AtomicFile.WriteAllBytes(path, storage.ToBytes());
         }
         return notes;
+    }
+
+    // Renames every buffer the geometry draws from — in the geometry blocks and in the pool files, where a
+    // buffer keeps its place. "Shubert_38.Root.L0.VB0" becomes "<name>.Root.L0.VB0"; a name that does not start
+    // with the model's gets the new name in front.
+    private static int GiveOwnBuffers(SdsManifest manifest, FrameResource frame, string model, string name)
+    {
+        var renamed = new Dictionary<ulong, HashName>();
+        HashName Renamed(HashName old)
+        {
+            if (!renamed.TryGetValue(old.Hash, out HashName? fresh))
+            {
+                string text = old.String ?? "";
+                string given = text.StartsWith(model, StringComparison.OrdinalIgnoreCase)
+                    ? name + text[model.Length..]
+                    : $"{name}.{(text.Length > 0 ? text : old.Hash.ToString("x16"))}";
+                renamed[old.Hash] = fresh = new HashName(given);
+            }
+            return fresh;
+        }
+
+        foreach (FrameGeometry geometry in frame.FrameGeometries.Values)
+        {
+            foreach (FrameLOD lod in geometry.LOD ?? [])
+            {
+                lod.VertexBufferRef = Renamed(lod.VertexBufferRef);
+                lod.IndexBufferRef = Renamed(lod.IndexBufferRef);
+            }
+        }
+
+        foreach (string path in manifest.GetFiles("VertexBufferPool"))
+        {
+            var pool = new VertexBufferPool(new MemoryStream(File.ReadAllBytes(path), writable: false));
+            var rewritten = new VertexBufferPool();
+            foreach (VertexBuffer buffer in pool.Buffers.Values)
+            {
+                if (renamed.TryGetValue(buffer.Hash, out HashName? fresh)) buffer.Hash = fresh.Hash;
+                rewritten.Buffers[buffer.Hash] = buffer;
+            }
+            using var stream = new MemoryStream();
+            rewritten.WriteToFile(stream);
+            AtomicFile.WriteAllBytes(path, stream.ToArray());
+        }
+        foreach (string path in manifest.GetFiles("IndexBufferPool"))
+        {
+            var pool = new IndexBufferPool(new MemoryStream(File.ReadAllBytes(path), writable: false));
+            var rewritten = new IndexBufferPool();
+            foreach (IndexBuffer buffer in pool.Buffers.Values)
+            {
+                if (renamed.TryGetValue(buffer.Hash, out HashName? fresh)) buffer.Hash = fresh.Hash;
+                rewritten.Buffers[buffer.Hash] = buffer;
+            }
+            using var stream = new MemoryStream();
+            rewritten.WriteToFile(stream);
+            AtomicFile.WriteAllBytes(path, stream.ToArray());
+        }
+        return renamed.Count;
     }
 
     private static void CopyTree(string from, string to)

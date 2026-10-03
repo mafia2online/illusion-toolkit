@@ -812,14 +812,14 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
-    public string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result)
+    public string? CloneCar(string source, string name, bool traffic, string? title, out CarCloneInfo? result)
     {
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         try
         {
-            if (Assets.Cars.CarCloner.Clone(source, name, traffic, out string? refusal) is not { } outcome) return refusal;
-            result = new CarCloneInfo(outcome.Name, outcome.VehicleId, outcome.TrafficRows,
+            if (Assets.Cars.CarCloner.Clone(source, name, traffic, title, out string? refusal) is not { } outcome) return refusal;
+            result = new CarCloneInfo(outcome.Name, outcome.VehicleId, outcome.TrafficRows, outcome.TextId,
                 [.. outcome.Packed.Select(p => new PackedArchive(p.Archive, p.Backup))], outcome.Notes);
             return null;
         }

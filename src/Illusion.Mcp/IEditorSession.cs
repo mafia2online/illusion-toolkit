@@ -137,7 +137,7 @@ public interface IEditorSession
     /// <summary>Clones a car under a new model name and registers it (vehicle table, paint, cover points and,
     /// with <paramref name="traffic"/>, the traffic rows of the source car), then builds the archives. Null on
     /// success.</summary>
-    string? CloneCar(string source, string name, bool traffic, out CarCloneInfo? result);
+    string? CloneCar(string source, string name, bool traffic, string? title, out CarCloneInfo? result);
 
     /// <summary>Packs one archive's working copy back into its .sds, keeping a backup of what it replaces — for an
     /// edit made in the working copy itself (a script, a table) that no editor session tracks. Null on success.</summary>

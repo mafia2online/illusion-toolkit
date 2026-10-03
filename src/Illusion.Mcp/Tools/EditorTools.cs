@@ -163,18 +163,19 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_clone")]
-    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry and entity data renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
+    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
     public static async Task<string> CarClone(
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("The car to copy, by archive or model name, e.g. 'shubert_38'.")] string source,
         [Description("The new model name: a letter, then letters, digits and '_', at most 31 characters, e.g. 'Shubert_38_Sport'.")] string name,
-        [Description("Let traffic pick the clone wherever it picks the source. Default true.")] bool traffic = true)
+        [Description("Let traffic pick the clone wherever it picks the source. Default true.")] bool traffic = true,
+        [Description("The name the game shows for the car (garage, shop), e.g. 'Shubert 38 Custom'. Written into the text table of every installed language under a new text id. Omit to share the source car's name.")] string? title = null)
     {
         try
         {
             CarCloneInfo? result = null;
-            string? refused = await ui.RunAsync(() => editor.CloneCar(source, name, traffic, out result));
+            string? refused = await ui.RunAsync(() => editor.CloneCar(source, name, traffic, title, out result));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, clone = result });
         }
         catch (Exception ex)
