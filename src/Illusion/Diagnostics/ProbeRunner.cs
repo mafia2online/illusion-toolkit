@@ -178,6 +178,11 @@ internal static class ProbeRunner
             case "--probe-car-clone":
                 CarCloneProbes.RunCarCloneProbe();
                 return true;
+            // A car exported as a multiplayer resource folder, from a clone made and packed on scratch copies.
+            // Output: %TEMP%\illusion_car_m2o.txt
+            case "--probe-car-m2o":
+                CarM2oExportProbes.RunCarM2oExportProbe();
+                return true;
             // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
             // Output: %TEMP%\illusion_geometry_sweep.txt
             case "--probe-geometry-sweep":

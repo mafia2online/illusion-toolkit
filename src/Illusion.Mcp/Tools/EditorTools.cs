@@ -189,13 +189,35 @@ public sealed class EditorTools
     public static async Task<string> ArchiveBuild(
         IEditorSession editor,
         IUiThreadMarshal ui,
-        [Description("Full path of the .sds archive in the game folder (pc\\sds\\… or pc\\dlcs\\…).")] string archive)
+        [Description("Full path of the .sds archive in the game folder (pc\\sds\\… or pc\\dlcs\\…).")] string archive,
+        [Description("Full path of an archive to take the per-resource memory requirements from, for an archive that never shipped itself: a cloned car built before requirements were kept takes them from the stock car it was cloned from. Omit normally — a working copy keeps the requirements of the archive it was extracted from.")] string? memoryFrom = null)
     {
         try
         {
             PackedArchive? result = null;
-            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, out result));
+            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, memoryFrom, out result));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, packed = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "car_export_m2o")]
+    [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships cars/** and vehicles.json), cars/<name>.sds with its winter _z twin, and vehicles.json — model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
+    public static async Task<string> CarExportM2o(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The car, by archive or model name, e.g. 'shubert_38_custom'.")] string car,
+        [Description("Full path of the folder to write. Default: <game>\\_illusion_export\\m2o\\<resource>. Must be empty or an earlier export.")] string? output = null,
+        [Description("The resource's name (lower-case letters, digits, '-', '_', '.'). Default: 'car-' + the car's name with '-' for '_'.")] string? resource = null)
+    {
+        try
+        {
+            M2oExportInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.ExportCarForM2o(car, output, resource, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, export = result });
         }
         catch (Exception ex)
         {

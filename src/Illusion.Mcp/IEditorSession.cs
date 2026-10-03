@@ -140,8 +140,14 @@ public interface IEditorSession
     string? CloneCar(string source, string name, bool traffic, string? title, out CarCloneInfo? result);
 
     /// <summary>Packs one archive's working copy back into its .sds, keeping a backup of what it replaces — for an
-    /// edit made in the working copy itself (a script, a table) that no editor session tracks. Null on success.</summary>
-    string? BuildArchive(string archive, out PackedArchive? result);
+    /// edit made in the working copy itself (a script, a table) that no editor session tracks. With
+    /// <paramref name="memoryFrom"/>, the working copy first takes the memory requirements that archive states
+    /// (a clone made before they were kept takes them from the car it was cloned from). Null on success.</summary>
+    string? BuildArchive(string archive, string? memoryFrom, out PackedArchive? result);
+
+    /// <summary>Exports a built car as a multiplayer resource folder (package.json, cars/, vehicles.json);
+    /// nothing of the game is written. Null on success.</summary>
+    string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
     string? Undo();
 

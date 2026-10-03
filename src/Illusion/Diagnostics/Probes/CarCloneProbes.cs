@@ -241,6 +241,61 @@ internal static class CarCloneProbes
                 Check($"{Path.GetFileName(folder)}: every XML survives a pack unchanged", xmls > 0 && changed.Count == 0,
                     $"{changed.Count} of {xmls} differ: {string.Join(", ", changed.Take(5))}");
             }
+            // What a rebuilt archive asks the engine to budget: the figures of the archive that shipped, not the
+            // payload sizes a packing handler can measure.
+            foreach (string suffix in new[] { "", "_z" })
+            {
+                var shippedFile = new FileInfo(Path.Combine(sds, "cars", Source + suffix + ".sds"));
+                if (!shippedFile.Exists) continue;
+                string label = Source + suffix;
+                SdsArchive shipped = SdsArchive.Open(shippedFile.FullName);
+                string unpacked = Path.Combine(scratch, "memory" + suffix);
+                SdsMemoryRequirements stated = SdsMemoryRequirements.Extract(shipped, unpacked);
+                Check($"{label}: the shipped archive's figures read as shipped", stated.LooksShipped && stated.Count == shipped.Entries.Count,
+                    $"{stated.Count} resources");
+
+                SdsArchive plain = SdsArchive.Pack(unpacked, GameProfile.MafiaII);
+                Check($"{label}: a packer left to itself asks for less", plain.SlotRamRequired < shipped.SlotRamRequired
+                    && plain.OtherRamRequired == 0, $"slot RAM {plain.SlotRamRequired} against {shipped.SlotRamRequired}");
+
+                SdsArchive rebuilt = SdsArchive.Pack(unpacked, GameProfile.MafiaII, stated);
+                Check($"{label}: rebuilt with them it asks for what the shipped archive did",
+                    (rebuilt.SlotRamRequired, rebuilt.SlotVramRequired, rebuilt.OtherRamRequired, rebuilt.OtherVramRequired)
+                    == (shipped.SlotRamRequired, shipped.SlotVramRequired, shipped.OtherRamRequired, shipped.OtherVramRequired),
+                    $"{rebuilt.SlotRamRequired}/{rebuilt.SlotVramRequired}/{rebuilt.OtherRamRequired}/{rebuilt.OtherVramRequired}"
+                    + $" against {shipped.SlotRamRequired}/{shipped.SlotVramRequired}/{shipped.OtherRamRequired}/{shipped.OtherVramRequired}");
+                static (uint, uint, uint, uint) Figures(ResourceEntry e) =>
+                    (e.SlotRamRequired, e.SlotVramRequired, e.OtherRamRequired, e.OtherVramRequired);
+                string Describe(SdsArchive a, ResourceEntry e) =>
+                    $"{a.ResourceTypes[e.TypeId].Name} {e.Data?.Length} bytes {Figures(e)}";
+                Check($"{label}: resource for resource",
+                    rebuilt.Entries.Select(Figures).OrderBy(f => f).SequenceEqual(shipped.Entries.Select(Figures).OrderBy(f => f)),
+                    string.Join("; ", rebuilt.Entries.Select(e => Describe(rebuilt, e)).Except(shipped.Entries.Select(e => Describe(shipped, e))).Take(6))
+                    + " | shipped: " + string.Join("; ", shipped.Entries.Select(e => Describe(shipped, e)).Except(rebuilt.Entries.Select(e => Describe(rebuilt, e))).Take(6)));
+
+                // They survive the round trip through the working copy's side file, and the header of the saved archive.
+                stated.Save(unpacked);
+                SdsMemoryRequirements? kept = SdsMemoryRequirements.Load(unpacked);
+                string saved = Path.Combine(scratch, label + "_rebuilt.sds");
+                using (FileStream output = File.Create(saved))
+                {
+                    SdsArchive.Pack(unpacked, GameProfile.MafiaII, kept).Save(output, new SdsWriteOptions());
+                }
+                SdsArchive reopened = SdsArchive.Open(saved);
+                Check($"{label}: and says so again when saved and reopened", kept is { } again && again.Count == stated.Count
+                    && (reopened.SlotRamRequired, reopened.OtherRamRequired) == (shipped.SlotRamRequired, shipped.OtherRamRequired)
+                    && reopened.Entries.Select(Figures).OrderBy(f => f).SequenceEqual(shipped.Entries.Select(Figures).OrderBy(f => f)));
+            }
+            // The clone asks for what its source does: the resources are the same but for a longer name.
+            {
+                SdsMemoryRequirements stated = SdsMemoryRequirements.FromArchive(Path.Combine(sds, "cars", Source + ".sds"));
+                SdsArchive shipped = SdsArchive.Open(Path.Combine(sds, "cars", Source + ".sds"));
+                SdsArchive clone = SdsArchive.Pack(cars[0].To, GameProfile.MafiaII, stated);
+                Check("the clone, built with its source's requirements, asks for no less than the source",
+                    clone.SlotRamRequired >= shipped.SlotRamRequired && clone.OtherRamRequired >= shipped.OtherRamRequired
+                    && clone.SlotVramRequired >= shipped.SlotVramRequired,
+                    $"slot RAM {clone.SlotRamRequired} against {shipped.SlotRamRequired}, other {clone.OtherRamRequired} against {shipped.OtherRamRequired}");
+            }
             // A Build prunes manifest entries whose file is gone; an XML resource sits on disk as name + ".xml",
             // and every one of them used to be pruned that way.
             foreach (string folder in new[] { tables, ingame, cars[0].To }.Concat(text))

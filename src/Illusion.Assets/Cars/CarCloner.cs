@@ -122,6 +122,10 @@ public static partial class CarCloner
             [.. cars.Select(c => (SdsMeshLoader.EnsureExtracted(c.From), MafiaEnvironment.ExtractedDir(c.To)))],
             [.. textSds.Select(SdsMeshLoader.EnsureExtracted)]);
 
+        // The clone's resources bear the source's names, so what the source asks the engine to budget is what
+        // the clone asks too — written beside the source's working copy here, it is copied with the folder.
+        foreach ((FileInfo from, FileInfo _) in cars) SdsWriter.EnsureMemoryRequirements(from);
+
         // A folder left behind by an attempt that never produced its archive is nobody's working copy.
         foreach ((string _, string to) in folders.Cars) SdsWriter.DeleteExtracted(to);
 
@@ -317,11 +321,32 @@ public static partial class CarCloner
         return true;
     }
 
+    /// <summary>The note a clone's working copy keeps of the car it was made from.</summary>
+    public const string ProvenanceFile = "illusion_clone.json";
+
+    /// <summary>The model a cloned car's working copy says it was made from, or null.</summary>
+    public static string? SourceOf(string folder)
+    {
+        string path = Path.Combine(folder, ProvenanceFile);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+            return document.RootElement.TryGetProperty("source", out System.Text.Json.JsonElement source) ? source.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     // The root frame takes the new name (and with it the name table), the prefab entry and the entity-data
     // storage follow it under its new hash.
     private static List<string> RenameInside(string folder, string model, string name)
     {
         var notes = new List<string>();
+        File.WriteAllText(Path.Combine(folder, ProvenanceFile),
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["source"] = model, ["model"] = name }));
         SdsManifest manifest = SdsManifest.Load(folder);
         string label = Path.GetFileName(folder);
 

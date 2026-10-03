@@ -788,7 +788,7 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
-    public string? BuildArchive(string archive, out PackedArchive? result)
+    public string? BuildArchive(string archive, string? memoryFrom, out PackedArchive? result)
     {
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
@@ -802,6 +802,12 @@ internal sealed class AppEditorSession : IEditorSession
         }
         try
         {
+            if (!string.IsNullOrWhiteSpace(memoryFrom))
+            {
+                var reference = new FileInfo(memoryFrom);
+                if (!Path.IsPathRooted(memoryFrom) || !reference.Exists) return $"no such archive to take memory requirements from: {memoryFrom}";
+                Assets.Sds.SdsWriter.AdoptMemoryRequirements(sds, reference);
+            }
             Assets.Sds.SdsWriter.PackResult packed = Assets.Sds.SdsWriter.PackSds(sds, createBackup: true);
             result = new PackedArchive(packed.Archive, packed.Backup);
             return null;
@@ -809,6 +815,29 @@ internal sealed class AppEditorSession : IEditorSession
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
         {
             return "could not pack the archive (is the game running?): " + ex.Message;
+        }
+    }
+
+    public string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result)
+    {
+        result = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(car)) return "name the car to export";
+        if (!string.IsNullOrWhiteSpace(output) && !Path.IsPathRooted(output)) return "give the output folder's full path";
+        try
+        {
+            if (Assets.Cars.CarM2oExport.Export(car, string.IsNullOrWhiteSpace(output) ? null : output,
+                    string.IsNullOrWhiteSpace(resource) ? null : resource, out string? refusal) is not { } exported)
+            {
+                return refusal;
+            }
+            result = new M2oExportInfo(exported.Folder, exported.Resource, exported.Model, exported.Title, exported.BasedOn,
+                exported.Vehicles, exported.Files, exported.Notes);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
+        {
+            return "could not export the car: " + ex.Message;
         }
     }
 

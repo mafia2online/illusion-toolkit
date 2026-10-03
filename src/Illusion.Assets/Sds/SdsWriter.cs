@@ -125,6 +125,57 @@ public static class SdsWriter
         return files[0];
     }
 
+    /// <summary>
+    /// What the resources of <paramref name="sds"/> ask the engine to budget for them. Kept beside the working
+    /// copy once known; read the first time from the archive as it shipped — its oldest backup, or the archive
+    /// itself when it was never built. Figures that read like a packer's own (payload sizes, no "other" RAM)
+    /// are not kept, so an archive the toolkit made earlier does not pass its under-statement on.
+    /// </summary>
+    /// <returns>Null when nothing trustworthy is known — the packing handlers' own figures are used then.</returns>
+    internal static SdsMemoryRequirements? MemoryFor(FileInfo sds, string extracted)
+    {
+        if (SdsMemoryRequirements.Load(extracted) is { } known) return known;
+
+        IReadOnlyList<BackupInfo> backups = ListBackups(sds);
+        sds.Refresh();
+        FileInfo? shipped = backups.Count > 0 ? backups[^1].File : sds.Exists ? sds : null;
+        if (shipped == null) return null;
+        try
+        {
+            SdsMemoryRequirements read = SdsMemoryRequirements.FromArchive(shipped.FullName);
+            if (!read.LooksShipped) return null;
+            read.Save(extracted);
+            return read;
+        }
+        catch (Exception ex) when (ex is IOException or FileFormatException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Makes sure the working copy of <paramref name="sds"/> knows its memory requirements — what a
+    /// copy of that folder (a cloned car) then carries with it.</summary>
+    public static bool EnsureMemoryRequirements(FileInfo sds)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        return MemoryFor(sds, MafiaEnvironment.ExtractedDir(sds)) != null;
+    }
+
+    /// <summary>
+    /// Gives the working copy of <paramref name="sds"/> the memory requirements <paramref name="reference"/>
+    /// states — for an archive that never shipped itself: a clone made before requirements were kept takes
+    /// them from the car it was cloned from, whose resources bear the same names.
+    /// </summary>
+    /// <returns>How many resources the reference stated requirements for.</returns>
+    public static int AdoptMemoryRequirements(FileInfo sds, FileInfo reference)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        ArgumentNullException.ThrowIfNull(reference);
+        SdsMemoryRequirements read = SdsMemoryRequirements.FromArchive(reference.FullName);
+        read.Save(MafiaEnvironment.ExtractedDir(sds));
+        return read.Count;
+    }
+
     /// <summary>The folder timestamped backups of <paramref name="sds"/> are written to: a <c>backups</c> subfolder
     /// beside the archive (e.g. <c>…\sds\city\backups</c>).</summary>
     public static string BackupDir(FileInfo sds)
@@ -283,7 +334,7 @@ public static class SdsWriter
         // caller before the temp is ever moved over the live archive.
         var tmp = new FileInfo(sds.FullName + ".tmp");
         if (tmp.Exists) tmp.Delete();
-        SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII);
+        SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII, MemoryFor(sds, extracted));
         using (FileStream output = File.Create(tmp.FullName))
         {
             archive.Save(output, new SdsWriteOptions());

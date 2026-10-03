@@ -41,6 +41,12 @@ public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, i
 /// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
 public sealed record PackedArchive(string Archive, string? Backup);
 
+/// <summary>A car exported as a multiplayer resource: the folder and the resource's name, the model, its title
+/// and the car it was cloned from, how many cars the folder lists now, the files written and what the one
+/// shipping it should know.</summary>
+public sealed record M2oExportInfo(string Folder, string Resource, string Model, string? Title, string? BasedOn,
+    int Vehicles, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
+
 /// <summary>One entity-data table of a car — a car ships several (the stock one and its tuned variants); the
 /// label names its mass and power, which is what tells them apart.</summary>
 public sealed record TuningTableInfo(int Table, string Label, string Type, int Fields);
