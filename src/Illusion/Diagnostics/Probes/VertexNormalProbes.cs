@@ -14,7 +14,8 @@ namespace Illusion.Diagnostics.Probes;
 /// <summary>
 /// Which meshes of an archive carry no normals, and what the decode hands the renderer for them. A vertex
 /// declaration without <see cref="VertexFlags.Normals"/> (foliage, which the game lights by vertex colour)
-/// decodes to zero normals, and a zero normal is what a surface shader cannot light.
+/// decodes to zero normals, and a zero normal is what a surface shader cannot light. And the other way a
+/// surface came out black: an instanced copy (a crash prop) drawn with no tint.
 /// </summary>
 internal static class VertexNormalProbes
 {
@@ -107,6 +108,10 @@ internal static class VertexNormalProbes
             check($"{mode}: a quad with no normals is lit like one facing the sky",
                 Distance(bare, lit) < 0.02f && bare.r + bare.g + bare.b > 0.3f,
                 $"facing up ({lit.r:F2}, {lit.g:F2}, {lit.b:F2}), no normals ({bare.r:F2}, {bare.g:F2}, {bare.b:F2})");
+            (float r, float g, float b) copy = CentrePixel(mode, Vector3.UnitZ, instanced: true);
+            check($"{mode}: an instanced copy of it is drawn the colour the placed one is",
+                Distance(copy, lit) < 0.02f,
+                $"placed ({lit.r:F2}, {lit.g:F2}, {lit.b:F2}), instanced ({copy.r:F2}, {copy.g:F2}, {copy.b:F2})");
         }
     }
 
@@ -114,7 +119,7 @@ internal static class VertexNormalProbes
         MathF.Abs(a.r - b.r) + MathF.Abs(a.g - b.g) + MathF.Abs(a.b - b.b);
 
     // What the middle of the frame shows with a 2 m quad on the ground under an oblique camera.
-    private static (float r, float g, float b) CentrePixel(RenderMode mode, Vector3? normal)
+    private static (float r, float g, float b) CentrePixel(RenderMode mode, Vector3? normal, bool instanced = false)
     {
         GpuContext? gpu = null;
         SceneRenderer? renderer = null;
@@ -134,6 +139,7 @@ internal static class VertexNormalProbes
                     UVs = [new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1)],
                     Indices = [0, 1, 2, 0, 2, 3],
                     Parts = [new Illusion.Domain.MeshPart(0, 6, null)],
+                    Instances = instanced ? [Matrix4x4.Identity] : null,
                 });
             }
             const int S = 64;
