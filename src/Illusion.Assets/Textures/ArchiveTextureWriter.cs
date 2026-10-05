@@ -120,12 +120,7 @@ public static class ArchiveTextureWriter
         File.Delete(Path.Combine(extractedDir, mipName));
     }
 
-    private static void Replace(string path, byte[] bytes)
-    {
-        string temp = path + ".tmp";
-        File.WriteAllBytes(temp, bytes);
-        File.Move(temp, path, overwrite: true);
-    }
+    private static void Replace(string path, byte[] bytes) => AtomicFile.WriteAllBytes(path, bytes);
 
     // Texture names are hashed as written and travel through XML and file systems: keep them to the
     // plain characters stock names use.
