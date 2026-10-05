@@ -524,10 +524,14 @@ public static class FrameTransplant
     }
 
     // Whether a block of this scene draws exactly what the source block does, from the buffers it was copied to.
+    // "Exactly" is the whole block: a copy made earlier is the user's to edit, and one whose draw distance was
+    // set to 0 since — or whose level was rebuilt — is no longer the source's block. Sharing it gave the next
+    // import that edit too: an object that does not draw. The buffers are still shared; the block is copied.
     private static bool Draws(FrameGeometry candidate, FrameGeometry original, Dictionary<ulong, HashName> vertexNames,
         Dictionary<ulong, HashName> indexNames)
     {
         if (candidate.LOD is not { } lods || lods.Length != original.LOD.Length) return false;
+        if (candidate.NumLods != original.NumLods || candidate.Unk01 != original.Unk01) return false;
         if (candidate.DecompressionOffset != original.DecompressionOffset || candidate.DecompressionFactor != original.DecompressionFactor)
         {
             return false;
@@ -535,7 +539,8 @@ public static class FrameTransplant
         for (int i = 0; i < lods.Length; i++)
         {
             if (lods[i].VertexBufferRef.Hash != vertexNames[original.LOD[i].VertexBufferRef.Hash].Hash
-                || lods[i].IndexBufferRef.Hash != indexNames[original.LOD[i].IndexBufferRef.Hash].Hash)
+                || lods[i].IndexBufferRef.Hash != indexNames[original.LOD[i].IndexBufferRef.Hash].Hash
+                || !lods[i].DrawsLike(original.LOD[i]))
             {
                 return false;
             }

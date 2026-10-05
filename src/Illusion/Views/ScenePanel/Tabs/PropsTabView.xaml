@@ -60,6 +60,7 @@
         <ListBox x:Name="Tiles" Grid.Row="3" Background="Transparent" BorderThickness="0"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="False"
+                 ScrollViewer.ScrollChanged="Tiles_ScrollChanged"
                  MouseDoubleClick="Tiles_MouseDoubleClick"
                  PreviewMouseLeftButtonDown="Tiles_PreviewMouseLeftButtonDown"
                  PreviewMouseMove="Tiles_PreviewMouseMove">
