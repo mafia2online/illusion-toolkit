@@ -291,6 +291,91 @@ internal static class ObjectTransplantProbes
                 && prefab.ToBytes().AsSpan().SequenceEqual(prefabBytes),
                 $"{BitConverter.ToInt32(prefabBytes, 0)} + 4 against {prefabBytes.Length}");
 
+            // ── Carried textures and undo: what a save sweeps is parked, and comes back with its object ──
+            ArchiveCarry.Report sceneryCarry = ArchiveCarry.Carry(sourceDir, dir, carriedScenery.MaterialHashes, [], null);
+            string[] brought = [.. doorCarry.Textures.Concat(propCarry.Textures).Concat(sceneryCarry.Textures)
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
+            bool InUse(string texture) => SdsManifest.Load(dir).HasFile(texture) && File.Exists(Path.Combine(dir, texture));
+            bool Gone(string texture) => !SdsManifest.Load(dir).HasFile(texture) && !File.Exists(Path.Combine(dir, texture));
+            bool Parked(string texture) => ArchiveCarry.ParkedIn(dir).Contains(texture, StringComparer.OrdinalIgnoreCase);
+            void TakeOut()
+            {
+                carriedScenery.Detach();
+                carriedProp.Detach();
+                carriedDoor.Detach();
+            }
+            void PutBack()
+            {
+                carriedDoor.Reattach();
+                carriedProp.Reattach();
+                carriedScenery.Reattach();
+            }
+            Check("the three objects brought textures the district did not have", brought.Length > 0 && brought.All(InUse),
+                $"{brought.Length} texture(s)");
+            if (brought.Length > 0)
+            {
+                byte[][] bytesBefore = [.. brought.Select(t => File.ReadAllBytes(Path.Combine(dir, t)))];
+                (string, string)[][] entriesBefore = [.. brought.Select(t => SdsManifest.Load(dir).EntryFields(t)!.ToArray())];
+                bool[] withMip = [.. brought.Select(t => SdsManifest.Load(dir).HasFile(SdsImportTypes.MipNameFor(t)))];
+
+                ArchiveCarry.SweepUnused(dir, ours);
+                Check("a save with the objects in the scene sweeps none of them", brought.All(InUse) && !brought.Any(Parked));
+
+                TakeOut();
+                IReadOnlyList<string> sweptOut = ArchiveCarry.SweepUnused(dir, ours);
+                Check("the imports undone, a save takes their textures out of the manifest and the folder",
+                    brought.All(Gone) && brought.All(t => sweptOut.Contains(t, StringComparer.OrdinalIgnoreCase)),
+                    $"{sweptOut.Count} manifest entr(ies) out");
+                Check("parked, not deleted — and under a name no scan for textures answers to",
+                    brought.All(Parked)
+                    && !Directory.GetFiles(dir, "*.dds", SearchOption.AllDirectories)
+                        .Any(f => brought.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)));
+                ArchiveCarry.SweepUnused(dir, ours);
+                Check("a second save while they are undone leaves them parked", brought.All(Gone) && brought.All(Parked));
+
+                PutBack();
+                ArchiveCarry.SweepUnused(dir, ours);
+                bool sameBytes = true, sameEntries = true, mipBack = true;
+                for (int i = 0; i < brought.Length && brought.All(InUse); i++)
+                {
+                    sameBytes &= File.ReadAllBytes(Path.Combine(dir, brought[i])).AsSpan().SequenceEqual(bytesBefore[i]);
+                    sameEntries &= SdsManifest.Load(dir).EntryFields(brought[i])!.SequenceEqual(entriesBefore[i]);
+                    string mip = SdsImportTypes.MipNameFor(brought[i]);
+                    mipBack &= SdsManifest.Load(dir).HasFile(mip) == withMip[i] && File.Exists(Path.Combine(dir, mip)) == withMip[i];
+                }
+                Check("redone, the next save puts every one back — the same bytes, the same manifest entry, its MIP companion with it",
+                    brought.All(InUse) && sameBytes && sameEntries && mipBack && !brought.Any(Parked)
+                    && !Directory.Exists(Path.Combine(dir, ArchiveCarry.ParkedFolder)),
+                    $"bytes {sameBytes}, entries {sameEntries}, companions {mipBack} ({withMip.Count(m => m)} have one)");
+                Check("and the carried register knows them again, so a later undo sweeps them again",
+                    Sweeps(TakeOut, PutBack, dir, ours, brought, Gone, InUse));
+
+                // Brought a second time while parked — the same object imported again after the undo.
+                TakeOut();
+                ArchiveCarry.SweepUnused(dir, ours);
+                ArchiveCarry.Report second = ArchiveCarry.Carry(sourceDir, dir,
+                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null);
+                PutBack();
+                ArchiveCarry.SweepUnused(dir, ours);
+                Check("a texture carried again while it was parked is the one in use, and the parked copy is dropped",
+                    second.Textures.Count == brought.Length && brought.All(InUse) && !brought.Any(Parked)
+                    && !Directory.Exists(Path.Combine(dir, ArchiveCarry.ParkedFolder)),
+                    $"{second.Textures.Count} carried again");
+
+                // What an earlier run of the program parked has no undo stack to go back to.
+                TakeOut();
+                ArchiveCarry.SweepUnused(dir, ours);
+                bool parkedThen = brought.All(Parked);
+                ArchiveCarry.ForgetParkedHere();
+                ArchiveCarry.SweepUnused(dir, ours);
+                Check("parked textures left by a run that has ended are dropped at the first save of the next",
+                    parkedThen && brought.All(Gone) && !brought.Any(Parked)
+                    && !Directory.Exists(Path.Combine(dir, ArchiveCarry.ParkedFolder)));
+                PutBack();
+                ArchiveCarry.Carry(sourceDir, dir,
+                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null);
+            }
+
             // ── A destination that has neither a prefab nor an item description of its own ──
             string bare = Path.Combine(scratch, "bare");
             Directory.CreateDirectory(bare);
@@ -327,6 +412,40 @@ internal static class ObjectTransplantProbes
                 FrameTransplant.Standing.Prototype, Matrix4x4.Identity, ImportGeometry.Load(dir, sourceArchive), out reason);
             Check("what was shared is remembered on disk, for the next session", three is { VertexBuffers.Count: 0 });
             three?.Detach();
+
+            // ── Redo of a copy that draws from a block it does not own, once a save has pruned that block ──
+            // The first copy deleted (a delete keeps the blocks registered), the second import undone, a save
+            // (nothing draws from the shared block now, and the resource prunes it), then the import redone.
+            DetachedFrames? firstDeleted = DetachedFrames.Capture(document,
+                [.. one.Pairs.Values.Select(f => (Domain.IFrameNode)document.Node(f))], dir);
+            Check("the first copy can be deleted the way the editor deletes", firstDeleted != null);
+            if (firstDeleted != null)
+            {
+                firstDeleted.Detach();
+                two.Detach();
+                ours.WriteToStream();
+                bool pruned = Drawn(two).All(m => !ours.FrameGeometries.ContainsKey(m.Geometry.RefID));
+                two.Reattach();
+                bool registered = Drawn(two).All(m => ours.FrameGeometries.ContainsKey(m.Geometry.RefID)
+                    && (!m.Refs.ContainsKey(FrameEntryRefTypes.Material) || ours.FrameMaterials.ContainsKey(m.Material.RefID)));
+                byte[] redone = ours.WriteToStream();
+                var live = ours.FrameObjects.Values.ToList();
+                var readBack = new FrameResource();
+                using (var stream = new MemoryStream(redone)) readBack.ReadFromFile(stream);
+                var read = readBack.FrameObjects.Values.ToList();
+                int sound = Drawn(two).Count(m => live.IndexOf(m) is var at and >= 0 && at < read.Count
+                    && read[at] is FrameObjectSingleMesh r && r.Geometry?.LOD is { Length: > 0 } lods
+                    && lods.Length == m.Geometry.LOD.Length
+                    && lods[0].VertexBufferRef.Hash == m.Geometry.LOD[0].VertexBufferRef.Hash
+                    && lods[0].IndexBufferRef.Hash == m.Geometry.LOD[0].IndexBufferRef.Hash);
+                Check("redone after a save pruned the block it shares, the copy has its geometry block registered again",
+                    pruned && registered, $"pruned while undone: {pruned}, back on redo: {registered}");
+                Check("and saved and read back, each of its meshes still draws from the buffers it drew from",
+                    Drawn(two).Count > 0 && sound == Drawn(two).Count, $"{sound} of {Drawn(two).Count}");
+                two.Detach();
+                firstDeleted.Reattach();
+                two.Reattach();
+            }
             two.Detach();
             Check("taking the copies out leaves the first one's geometry in place",
                 one.VertexBuffers.All(b => ours.VertexBuffers.GetBuffer(b.Hash) != null)
@@ -503,6 +622,19 @@ internal static class ObjectTransplantProbes
             }
         }
         return true;
+    }
+
+    // Whether the textures leave again with their objects and come back again — that is, whether putting a
+    // parked texture back also put it back on the list of what a sweep may take.
+    private static bool Sweeps(Action takeOut, Action putBack, string dir, FrameResource scene, string[] textures,
+        Func<string, bool> gone, Func<string, bool> inUse)
+    {
+        takeOut();
+        ArchiveCarry.SweepUnused(dir, scene);
+        bool left = textures.All(gone);
+        putBack();
+        ArchiveCarry.SweepUnused(dir, scene);
+        return left && textures.All(inUse);
     }
 
     private static string CopyWithoutTextures(string from, string to)

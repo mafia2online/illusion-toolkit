@@ -126,24 +126,61 @@ public static partial class CarCloner
         // the clone asks too — written beside the source's working copy here, it is copied with the folder.
         foreach ((FileInfo from, FileInfo _) in cars) SdsWriter.EnsureMemoryRequirements(from);
 
-        // A folder left behind by an attempt that never produced its archive is nobody's working copy.
-        foreach ((string _, string to) in folders.Cars) SdsWriter.DeleteExtracted(to);
-
-        CarCloneResult? result = CloneExtracted(folders, stem, name, traffic, title, out refusal);
-        if (result == null) return null;
-
-        DateTime when = DateTime.Now;
-        var packed = new List<(string Archive, string? Backup)>();
-        foreach ((FileInfo _, FileInfo to) in cars)
+        // A working copy under the new name, with no archive beside it. It used to be deleted here as "a folder
+        // left behind by an attempt that never produced its archive" — before anything had been checked, so a
+        // clone refused a moment later for its title had already cost whatever that folder held. A failed
+        // clone now removes what it made (below), so a folder found here is somebody's: a parked car, work
+        // not yet built. It is left alone and said.
+        foreach ((string _, string to) in folders.Cars)
         {
-            SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: false, when);
-            packed.Add((made.Archive, made.Backup));
+            if (!Directory.Exists(to)) continue;
+            refusal = $"there is already a working copy at {to}, though {Path.GetFileName(to)} is not in pc\\sds\\cars — "
+                + "it may hold work that was never built. Remove or rename that folder, or pick another name";
+            return null;
         }
-        IEnumerable<FileInfo> changed = result.TextId == null ? [tablesSds, ingameSds] : [tablesSds, ingameSds, .. textSds];
-        foreach (FileInfo table in changed)
+
+        // From here on the clone writes: new folders, rows in shared tables, then five or more archives packed
+        // one after another. Whatever fails, all of it is taken back — a row with no archive behind it, or
+        // tables written and not packed, is a state no step of this intended, and one that used to make the
+        // retry impossible ("already exists").
+        var journal = new GameWriteJournal();
+        journal.Remember(Path.Combine(folders.Tables, "tables", "vehicles.tbl"));
+        foreach (string text in folders.Text) journal.Remember(Path.Combine(text, "tables", "TextDatabase.dat"));
+        string ingameTables = Path.Combine(folders.Ingame, "tables");
+        if (Directory.Exists(ingameTables))
         {
-            SdsWriter.PackResult made = SdsWriter.PackSds(table, createBackup: true, when);
-            packed.Add((made.Archive, made.Backup));
+            foreach (string table in Directory.GetFiles(ingameTables, "*.tbl")) journal.Remember(table);
+        }
+        journal.Remember(Path.Combine(folders.Ingame, "SDSContent.xml"));
+        journal.RememberContents(Path.Combine(ingameTables, "AiProps"));
+        foreach ((string _, string to) in folders.Cars) journal.WillCreateFolder(to);
+
+        CarCloneResult? result;
+        var packed = new List<(string Archive, string? Backup)>();
+        try
+        {
+            result = CloneExtracted(folders, stem, name, traffic, title, out refusal);
+            if (result == null) return null; // refused before writing anything
+
+            DateTime when = DateTime.Now;
+            foreach ((FileInfo _, FileInfo to) in cars)
+            {
+                journal.WillCreateFile(to.FullName);
+                SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: false, when);
+                packed.Add((made.Archive, made.Backup));
+            }
+            IEnumerable<FileInfo> changed = result.TextId == null ? [tablesSds, ingameSds] : [tablesSds, ingameSds, .. textSds];
+            foreach (FileInfo table in changed)
+            {
+                SdsWriter.PackResult made = SdsWriter.PackSds(table, createBackup: true, when);
+                journal.Replaced(made.Archive, made.Backup);
+                packed.Add((made.Archive, made.Backup));
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            refusal = TakenBack("the clone", ex, journal.Undo());
+            return null;
         }
         // The game finds archives through its cached file list, and a new one is not in it.
         var notes = new List<string>(result.Notes);
@@ -152,6 +189,14 @@ public static partial class CarCloner
             : $"the game's file list was not reset — remove {GameFileIndex.Path} before starting the game, or it will not find the new archives");
         return new CarCloneOutcome(name, result.VehicleId, packed, result.TrafficRows, result.TextId, notes);
     }
+
+    // What a failed multi-file operation tells its caller: that it failed, that it was undone, and — when the
+    // undo itself met a locked file — exactly what is still out of place.
+    private static string TakenBack(string what, Exception ex, List<string> problems) =>
+        $"{what} failed and was taken back: {ex.Message}"
+        + (problems.Count == 0
+            ? " — the game's files and the working copies are as they were"
+            : " — but NOT everything could be put back: " + string.Join("; ", problems));
 
     /// <summary>
     /// The clone itself, on working copies only: copies each car folder to its new place and renames what the

@@ -26,6 +26,140 @@ internal static class CarCloneProbes
     private const string Title = "Shubert 38 Clone";
 
     // Output: %TEMP%\illusion_car_clone.txt
+    /// <summary>
+    /// The real <see cref="CarCloner.Clone"/> against the install, made to fail — the one thing the scratch
+    /// probe above cannot do, since the clone finds its archives through the game folder.
+    /// <para>
+    /// UNLIKE EVERY OTHER PROBE THIS ONE WRITES TO THE INSTALL: it clones shubert_38 under a probe name with
+    /// the winter archive's pack blocked, so the clone fails after the summer archive is built and the shared
+    /// tables' working copies are written — and then checks that all of it was taken back. The files it may
+    /// touch are snapshotted first and put back by force at the end whatever happens. The game must not be
+    /// running. Output: %TEMP%\illusion_car_clone_rollback.txt
+    /// </para>
+    /// </summary>
+    internal static void RunCarCloneRollbackProbe()
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_car_clone_rollback.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        const string Kept = "illusion_probe_kept", Failing = "illusion_probe_fail";
+        var snapshot = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        var leftovers = new List<string>();
+        try
+        {
+            if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+            var tablesSds = new FileInfo(Path.Combine(sds, "tables", "tables.sds"));
+            var ingameSds = new FileInfo(Path.Combine(sds, "tables", "ingame.sds"));
+            string tables = SdsMeshLoader.EnsureExtracted(tablesSds), ingame = SdsMeshLoader.EnsureExtracted(ingameSds);
+            List<string> text = [.. Directory.GetDirectories(MafiaEnvironment.PcFolder, "sds_*")
+                .Select(d => new FileInfo(Path.Combine(d, "text", "text_default.sds"))).Where(f => f.Exists)
+                .Select(SdsMeshLoader.EnsureExtracted)];
+
+            // Everything a clone writes in the shared working copies, as it is now.
+            var watched = new List<string> { Path.Combine(tables, "tables", "vehicles.tbl"), Path.Combine(ingame, "SDSContent.xml") };
+            watched.AddRange(Directory.GetFiles(Path.Combine(ingame, "tables"), "*.tbl"));
+            watched.AddRange(text.Select(t => Path.Combine(t, "tables", "TextDatabase.dat")).Where(File.Exists));
+            foreach (string file in watched) snapshot[file] = File.ReadAllBytes(file);
+            string aiProps = Path.Combine(ingame, "tables", "AiProps");
+            HashSet<string> propsBefore = Directory.Exists(aiProps)
+                ? new HashSet<string>(Directory.GetFiles(aiProps), StringComparer.OrdinalIgnoreCase) : [];
+            (DateTime Tables, DateTime Ingame) packedAt = (tablesSds.LastWriteTimeUtc, ingameSds.LastWriteTimeUtc);
+            int backupsBefore = SdsWriter.ListBackups(tablesSds).Count + SdsWriter.ListBackups(ingameSds).Count;
+
+            bool Untouched() => snapshot.All(f => File.Exists(f.Key) && File.ReadAllBytes(f.Key).AsSpan().SequenceEqual(f.Value))
+                && (!Directory.Exists(aiProps) || Directory.GetFiles(aiProps).All(propsBefore.Contains));
+
+            // ── A working copy under the new name is somebody's: refused, and left as it is ──
+            string keptFolder = MafiaEnvironment.ExtractedDir(new FileInfo(Path.Combine(sds, "cars", Kept + ".sds")));
+            leftovers.Add(keptFolder);
+            Directory.CreateDirectory(keptFolder);
+            File.WriteAllText(Path.Combine(keptFolder, "SDSContent.xml"), "work that was never built");
+            // A title of 49 characters: the refusal that used to arrive AFTER the folder had been deleted.
+            CarCloneOutcome? refused = CarCloner.Clone("shubert_38", Kept, true, new string('a', 49), out string? why);
+            Check("a clone onto an existing working copy is refused", refused == null && why != null, why ?? "");
+            Check("…and the working copy is still there, with what it held",
+                File.Exists(Path.Combine(keptFolder, "SDSContent.xml"))
+                && File.ReadAllText(Path.Combine(keptFolder, "SDSContent.xml")) == "work that was never built");
+            Check("…and nothing else was written", Untouched());
+
+            // ── A clone that fails half-way takes itself back ──
+            // The winter archive cannot be packed: a FOLDER stands where its temporary file goes.
+            var summer = new FileInfo(Path.Combine(sds, "cars", Failing + ".sds"));
+            string blocker = Path.Combine(sds, "cars", Failing + "_z.sds.tmp");
+            if (!File.Exists(Path.Combine(sds, "cars", "shubert_38_z.sds")))
+            {
+                sb.AppendLine("    (shubert_38 has no winter archive here — the failure cannot be staged)");
+            }
+            else
+            {
+                leftovers.Add(blocker);
+                leftovers.Add(summer.FullName);
+                leftovers.Add(MafiaEnvironment.ExtractedDir(summer));
+                leftovers.Add(MafiaEnvironment.ExtractedDir(new FileInfo(Path.Combine(sds, "cars", Failing + "_z.sds"))));
+                Directory.CreateDirectory(blocker);
+                CarCloneOutcome? failed = CarCloner.Clone("shubert_38", Failing, true, "Probe car", out why);
+                Check("the clone fails when its winter archive cannot be packed, and says it was taken back",
+                    failed == null && why != null && why.Contains("taken back", StringComparison.Ordinal), why ?? "");
+                Check("it reports nothing left out of place",
+                    why != null && !why.Contains("NOT everything", StringComparison.Ordinal), why ?? "");
+                summer.Refresh();
+                Check("the summer archive it had already built is gone", !summer.Exists);
+                Check("both clone folders are gone",
+                    !Directory.Exists(MafiaEnvironment.ExtractedDir(summer))
+                    && !Directory.Exists(MafiaEnvironment.ExtractedDir(new FileInfo(Path.Combine(sds, "cars", Failing + "_z.sds")))));
+                Check("vehicles.tbl, the paint and traffic tables, the cover points, the manifest and the text are as they were",
+                    Untouched());
+                tablesSds.Refresh();
+                ingameSds.Refresh();
+                Check("tables.sds and ingame.sds were never packed, and no backup of them was left",
+                    tablesSds.LastWriteTimeUtc == packedAt.Tables && ingameSds.LastWriteTimeUtc == packedAt.Ingame
+                    && SdsWriter.ListBackups(tablesSds).Count + SdsWriter.ListBackups(ingameSds).Count == backupsBefore);
+
+                // The point of taking it back: the same clone can be tried again (and is refused only by
+                // the block that is still standing, not by "already exists").
+                CarCloneOutcome? again = CarCloner.Clone("shubert_38", Failing, true, "Probe car", out why);
+                Check("the same clone can be tried again — it is not refused as already existing",
+                    again == null && why != null && !why.Contains("already", StringComparison.Ordinal), why ?? "");
+                Check("…and the second failure leaves nothing behind either", Untouched());
+            }
+        }
+        catch (Exception ex)
+        {
+            fail++;
+            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+        }
+        finally
+        {
+            // Whatever the checks said, the install is put back by force.
+            int forced = 0;
+            foreach ((string file, byte[] bytes) in snapshot)
+            {
+                if (File.Exists(file) && File.ReadAllBytes(file).AsSpan().SequenceEqual(bytes)) continue;
+                File.WriteAllBytes(file, bytes);
+                forced++;
+            }
+            foreach (string path in leftovers)
+            {
+                try
+                {
+                    if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                    else if (File.Exists(path)) File.Delete(path);
+                }
+                catch (IOException) { sb.AppendLine("    could not remove " + path); }
+            }
+            if (forced > 0) sb.AppendLine($"    {forced} shared file(s) had to be put back by the probe itself");
+            sb.Insert(0, $"CAR CLONE ROLLBACK PROBE: {pass} passed, {fail} failed\n\n");
+            File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
     internal static void RunCarCloneProbe()
     {
         string outFile = Path.Combine(Path.GetTempPath(), "illusion_car_clone.txt");
@@ -328,6 +462,68 @@ internal static class CarCloneProbes
                 List<string> pruned = SdsWriter.PruneMissingEntries(folder);
                 Check($"{Path.GetFileName(folder)}: a Build drops no manifest entry", pruned.Count == 0,
                     string.Join(", ", pruned.Take(5)));
+            }
+
+            // ════ An operation that writes several files takes itself back ════
+            // The journal on scratch files: each kind of write a clone or a substitution makes, then undone.
+            {
+                string lab = Path.Combine(scratch, "journal");
+                string props = Path.Combine(lab, "AiProps"), work = Path.Combine(lab, "target.sds"), made = Path.Combine(lab, "clone.sds");
+                Directory.CreateDirectory(props);
+                Directory.CreateDirectory(work);
+                string kept = Path.Combine(lab, "vehicles.tbl"), absent = Path.Combine(lab, "new.tbl");
+                string archive = Path.Combine(lab, "tables.sds"), backup = archive + ".backup", madeFile = Path.Combine(lab, "clone_archive.sds");
+                File.WriteAllBytes(kept, [1, 2, 3]);
+                File.WriteAllText(Path.Combine(props, "old.xml"), "old");
+                File.WriteAllBytes(archive, [9, 9, 9]);
+                File.WriteAllText(Path.Combine(work, "SDSContent.xml"), "work that was never built");
+
+                var journal = new GameWriteJournal();
+                journal.Remember(kept);
+                journal.Remember(absent);
+                journal.RememberContents(props);
+                journal.WillCreateFolder(made);
+                journal.WillCreateFile(madeFile);
+                journal.MoveAside(work);
+                journal.WillCreateFolder(work);
+                Check("a folder moved aside is out of the way, not gone",
+                    !Directory.Exists(work) && Directory.GetDirectories(lab, "target.sds.aside-*").Length == 1);
+
+                // …what the operation then does, up to the step that fails.
+                File.WriteAllBytes(kept, [7]);
+                File.WriteAllBytes(absent, [7]);
+                File.WriteAllText(Path.Combine(props, "new.xml"), "new");
+                Directory.CreateDirectory(made);
+                File.WriteAllText(Path.Combine(made, "SDSContent.xml"), "clone");
+                File.WriteAllBytes(madeFile, [5]);
+                File.WriteAllBytes(madeFile + ".tmp", [5]);
+                Directory.CreateDirectory(work);
+                File.WriteAllText(Path.Combine(work, "SDSContent.xml"), "substituted");
+                File.Copy(archive, backup);
+                File.WriteAllBytes(archive, [4, 4]);
+                journal.Replaced(archive, backup);
+
+                List<string> problems = journal.Undo();
+                Check("taking it back reports nothing left out of place", problems.Count == 0, string.Join("; ", problems));
+                Check("a rewritten file has its bytes back, and one that did not exist is gone",
+                    File.ReadAllBytes(kept).AsSpan().SequenceEqual(new byte[] { 1, 2, 3 }) && !File.Exists(absent));
+                Check("a file added to a remembered folder is removed, the ones it had are kept",
+                    !File.Exists(Path.Combine(props, "new.xml")) && File.Exists(Path.Combine(props, "old.xml")));
+                Check("a created folder and a created archive are removed, the half-written .tmp with it",
+                    !Directory.Exists(made) && !File.Exists(madeFile) && !File.Exists(madeFile + ".tmp"));
+                Check("a replaced archive is restored from its backup, and the backup does not stay behind",
+                    File.ReadAllBytes(archive).AsSpan().SequenceEqual(new byte[] { 9, 9, 9 }) && !File.Exists(backup));
+                Check("the folder moved aside is back with what it held",
+                    File.Exists(Path.Combine(work, "SDSContent.xml"))
+                    && File.ReadAllText(Path.Combine(work, "SDSContent.xml")) == "work that was never built"
+                    && Directory.GetDirectories(lab, "target.sds.aside-*").Length == 0);
+
+                var kept2 = new GameWriteJournal();
+                kept2.MoveAside(work);
+                Directory.CreateDirectory(work);
+                kept2.Commit();
+                Check("on success the folder moved aside is dropped",
+                    Directory.Exists(work) && Directory.GetDirectories(lab, "target.sds.aside-*").Length == 0);
             }
         }
         catch (Exception ex)

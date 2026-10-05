@@ -34,6 +34,12 @@ namespace Illusion.Assets.Sds;
 /// what this class brought is ever swept: an archive's own textures may be named by things a scene does not
 /// show (effects, decals, scripts) and are never touched.
 /// </para>
+/// <para>
+/// Swept is not deleted. The import that brought a texture can still be redone, and a deleted object's
+/// delete undone — neither carries anything a second time — so a swept texture is taken out of the manifest
+/// and parked in <see cref="ParkedFolder"/>, and the next sweep that finds the scene naming it again puts it
+/// back. What an earlier run of the program parked has no undo stack left to return to and is dropped then.
+/// </para>
 /// </summary>
 public static class ArchiveCarry
 {
@@ -248,17 +254,139 @@ public static class ArchiveCarry
         if (names.Add(texture)) WriteRegister(dir, names);
     }
 
+    // Inside the working copy and outside its manifest, under a name no texture scan answers to (they look
+    // for *.dds): what is parked is on nobody's list until it is put back.
+    internal const string ParkedFolder = "illusion_parked";
+    private const string ParkedIndex = "parked.json";
+    private const string ParkedSuffix = ".parked";
+
+    /// <summary>One file of a parked texture — the texture itself or its MIP companion — with the manifest
+    /// entry it had, field for field, so that it can be announced again exactly as it was.</summary>
+    public sealed class ParkedFile
+    {
+        public string File { get; set; } = "";
+        public List<string[]> Fields { get; set; } = [];
+    }
+
+    // What THIS run of the program parked, as "folder|texture". Only these can still be asked for by an undo
+    // stack; anything else found parked is left from a session that has ended.
+    private static readonly HashSet<string> ParkedHere = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string ParkedKey(string dir, string texture) => Path.GetFullPath(dir) + "|" + texture;
+
+    private static string ParkedPath(string dir, string file) => Path.Combine(dir, ParkedFolder, file + ParkedSuffix);
+
+    /// <summary>The textures parked beside <paramref name="extracted"/>, by name (for the probes).</summary>
+    public static IReadOnlyCollection<string> ParkedIn(string extracted) => ReadParked(extracted).Keys;
+
+    /// <summary>Forgets which textures this run parked, as a restart of the program would (for the probes).</summary>
+    internal static void ForgetParkedHere()
+    {
+        lock (ParkedHere) ParkedHere.Clear();
+    }
+
+    private static Dictionary<string, List<ParkedFile>> ReadParked(string dir)
+    {
+        string path = Path.Combine(dir, ParkedFolder, ParkedIndex);
+        var empty = new Dictionary<string, List<ParkedFile>>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            if (!File.Exists(path)) return empty;
+            Dictionary<string, List<ParkedFile>>? read =
+                System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, List<ParkedFile>>>(File.ReadAllText(path));
+            return read == null ? empty : new Dictionary<string, List<ParkedFile>>(read, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            return empty;
+        }
+    }
+
+    private static void WriteParked(string dir, Dictionary<string, List<ParkedFile>> parked)
+    {
+        string folder = Path.Combine(dir, ParkedFolder);
+        if (parked.Count == 0)
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+            return;
+        }
+        Directory.CreateDirectory(folder);
+        AtomicFile.WriteAllBytes(Path.Combine(folder, ParkedIndex), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(parked));
+    }
+
+    // Out of the manifest and into the parked folder. The copy is made BEFORE the entry is dropped and the
+    // original removed after it: whichever step fails, the manifest never names a file that is not there
+    // (which fails a Build), and the texture is never in neither place.
+    private static List<ParkedFile> Park(SdsManifest manifest, string dir, string texture, List<string> dropped)
+    {
+        var files = new List<ParkedFile>();
+        foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
+        {
+            string path = Path.Combine(dir, file);
+            IReadOnlyList<(string Name, string Value)>? fields = manifest.EntryFields(file);
+            if (fields != null && File.Exists(path))
+            {
+                string parkedPath = ParkedPath(dir, file);
+                Directory.CreateDirectory(Path.GetDirectoryName(parkedPath)!);
+                File.Copy(path, parkedPath, overwrite: true);
+                files.Add(new ParkedFile { File = file, Fields = [.. fields.Select(f => new[] { f.Name, f.Value })] });
+            }
+            if (manifest.RemoveEntry(file)) dropped.Add(file);
+            File.Delete(path);
+        }
+        return files;
+    }
+
+    // Back where it was, announced as it was. False when a file of it could not be put back — it stays
+    // parked and the next sweep tries again.
+    private static bool Unpark(SdsManifest manifest, string dir, List<ParkedFile> files)
+    {
+        bool whole = true;
+        foreach (ParkedFile parked in files)
+        {
+            string parkedPath = ParkedPath(dir, parked.File);
+            // Brought again since by another import: that copy is the one in use.
+            if (!manifest.HasFile(parked.File))
+            {
+                List<string[]> fields = parked.Fields;
+                if (!File.Exists(parkedPath) || fields.Count < 3 || fields.Any(f => f.Length != 2)
+                    || fields[^1][0] != "Version" || !int.TryParse(fields[^1][1], out int version))
+                {
+                    whole = false;
+                    continue;
+                }
+                File.Copy(parkedPath, Path.Combine(dir, parked.File), overwrite: true);
+                if (!manifest.AddEntry(fields[0][1], parked.File, version,
+                        [.. fields.Skip(2).Take(fields.Count - 3).Select(f => (f[0], f[1]))]))
+                {
+                    whole = false;
+                    continue;
+                }
+            }
+            File.Delete(parkedPath);
+        }
+        return whole;
+    }
+
+    private static void DropParked(string dir, List<ParkedFile> files)
+    {
+        foreach (ParkedFile parked in files) File.Delete(ParkedPath(dir, parked.File));
+    }
+
     /// <summary>
-    /// Drops the textures this class carried into <paramref name="extracted"/> that no material of
-    /// <paramref name="scene"/> names — left behind by an import that was undone, or by a scene closed without
-    /// saving it. Their MIP companions go with them. Returns what was dropped.
+    /// Takes the textures this class carried into <paramref name="extracted"/> that no material of
+    /// <paramref name="scene"/> names out of the working copy — left behind by an import that was undone, or by
+    /// a scene closed without saving it — and puts back the ones taken out earlier that the scene names again:
+    /// an import redone, a delete undone. Their MIP companions go and come with them. A texture taken out is
+    /// parked, not deleted, for as long as this run of the program lasts. Returns the manifest entries taken out.
     /// </summary>
     public static IReadOnlyList<string> SweepUnused(string extracted, Formats.Frames.FrameResource scene)
     {
         ArgumentException.ThrowIfNullOrEmpty(extracted);
         ArgumentNullException.ThrowIfNull(scene);
         HashSet<string> carried = ReadRegister(extracted);
-        if (carried.Count == 0) return [];
+        Dictionary<string, List<ParkedFile>> parked = ReadParked(extracted);
+        if (carried.Count == 0 && parked.Count == 0) return [];
 
         MafiaMaterials.EnsureLoaded();
         var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -278,15 +406,57 @@ public static class ArchiveCarry
 
         SdsManifest manifest = SdsManifest.Load(extracted);
         var dropped = new List<string>();
-        foreach (string texture in carried.ToList())
+        lock (ParkedHere)
         {
-            if (named.Contains(texture)) continue;
-            foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
+            // Back first: what the scene names again. A file that cannot be moved this time (the viewport, or
+            // the game, holding it) leaves the texture where it is, to be tried at the next save — a sweep is
+            // housekeeping and must not fail the save it runs in.
+            foreach ((string texture, List<ParkedFile> files) in parked.ToList())
             {
-                if (manifest.RemoveEntry(file)) dropped.Add(file);
-                File.Delete(Path.Combine(extracted, file));
+                try
+                {
+                    if (named.Contains(texture))
+                    {
+                        if (!Unpark(manifest, extracted, files)) continue;
+                        carried.Add(texture);
+                        TextureSearchIndex.Register(Path.Combine(extracted, texture));
+                    }
+                    else if (ParkedHere.Contains(ParkedKey(extracted, texture)))
+                    {
+                        continue; // an undo stack of this run can still bring its object back
+                    }
+                    else
+                    {
+                        DropParked(extracted, files);
+                    }
+                    parked.Remove(texture);
+                    ParkedHere.Remove(ParkedKey(extracted, texture));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // stays parked
+                }
             }
-            carried.Remove(texture);
+
+            foreach (string texture in carried.ToList())
+            {
+                if (named.Contains(texture)) continue;
+                try
+                {
+                    List<ParkedFile> files = Park(manifest, extracted, texture, dropped);
+                    if (files.Count > 0)
+                    {
+                        parked[texture] = files;
+                        ParkedHere.Add(ParkedKey(extracted, texture));
+                    }
+                    carried.Remove(texture);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // stays carried
+                }
+            }
+            WriteParked(extracted, parked);
         }
         WriteRegister(extracted, carried);
         return dropped;
