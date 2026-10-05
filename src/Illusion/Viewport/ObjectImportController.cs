@@ -34,10 +34,37 @@ internal sealed class ObjectImportController
     public SceneNode ImportScenery(SceneNode frameRow, TransplantedObject carried, IReadOnlyList<Domain.IEditAction> also)
     {
         var edit = new ImportObjectEdit(this, frameRow, carried, BuildRows(frameRow, carried), actor: null);
-        edit.Redo();
-        foreach (Domain.IEditAction extra in also) extra.Redo();
+        Apply([edit, .. also]);
         _host.History.Push(also.Count == 0 ? edit : new CompositeEdit([edit, .. also]));
         return edit.RootRow;
+    }
+
+    // Applies the edits of one import. If one of them throws, the ones before it are undone again: the
+    // import is not on the undo stack yet, so nothing else could ever take half of it back out of the scene.
+    // (What the failing edit itself got done is the caller's to clear — Import takes the copied frames out.)
+    private static void Apply(IReadOnlyList<Domain.IEditAction> edits)
+    {
+        int done = 0;
+        try
+        {
+            for (; done < edits.Count; done++) edits[done].Redo();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            for (int i = done - 1; i >= 0; i--)
+            {
+                try
+                {
+                    edits[i].Undo();
+                    edits[i].Discard();
+                }
+                catch (Exception undoing) when (undoing is not OutOfMemoryException)
+                {
+                    // the first failure is the one worth reporting
+                }
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -58,10 +85,14 @@ internal sealed class ObjectImportController
             return null;
         }
         ActorsFile pack = document.Placements.Packs[0].Pack;
+        // The rows and their GPU meshes first: the one step here that can fail for reasons outside the data,
+        // taken while the pack is still untouched.
+        Rows rows = BuildRows(frameRow, carried);
         ActorEntry? copy = pack.Import(sourcePack, source, name, position, rotation,
             new ActorPlacedFrame(carried.Root.Name.String, carried.FrameIndex), out reason);
         if (copy == null)
         {
+            foreach ((SceneNode _, GpuMesh mesh) in rows.Meshes) mesh.Dispose();
             carried.Detach();
             return null;
         }
@@ -75,8 +106,17 @@ internal sealed class ObjectImportController
         section ??= new SceneNode(adapter.TypeName, "Actors", true);
 
         var placed = new PlacedActor(copy, node, section, newSection ? actorsRow : null, document, pack);
-        var edit = new ImportObjectEdit(this, frameRow, carried, BuildRows(frameRow, carried), placed);
-        edit.Redo();
+        var edit = new ImportObjectEdit(this, frameRow, carried, rows, placed);
+        try
+        {
+            edit.Redo();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Not on the undo stack, so nothing else would ever take the actor back out of the pack.
+            if (pack.Actors.Contains(copy)) pack.Remove(copy);
+            throw;
+        }
         _host.History.Push(edit);
         return node;
     }
@@ -113,6 +153,12 @@ internal sealed class ObjectImportController
             return "that is the loaded archive itself — duplicate the object instead (scene_duplicate_selected)";
         }
 
+        // The copied frames, from the moment they are in the scene until the import is on the undo stack. A
+        // failure in that window — a file of the source that cannot be read, the working copy refusing a
+        // write — used to answer "the import failed" and leave them there: in the scene and in the next save,
+        // with no row in the tree to delete them by and no undo entry to take them back.
+        Assets.Frames.FrameTransplant.TransplantedObject? carried = null;
+        bool registered = false;
         try
         {
             string sourceDir = Assets.Sds.SdsMeshLoader.EnsureExtracted(sds);
@@ -126,7 +172,6 @@ internal sealed class ObjectImportController
 
             Formats.Actors.ActorEntry? actor = theirPlacements.All.FirstOrDefault(
                 a => string.Equals(a.EntityName, name, StringComparison.OrdinalIgnoreCase));
-            Assets.Frames.FrameTransplant.TransplantedObject? carried;
             Assets.Sds.ArchiveCarry.Report carry;
             string kind;
             string? reason;
@@ -162,6 +207,7 @@ internal sealed class ObjectImportController
                 {
                     return reason ?? "the pack refused the actor";
                 }
+                registered = true;
                 // A door is often opened by its own building's script rather than by the player — a shop's front
                 // door has its actions switched off and the shop turns them on in opening hours. Carried out of
                 // that building nothing turns them on, so the copy's own row lets the player open it.
@@ -199,10 +245,20 @@ internal sealed class ObjectImportController
                 carry = Carry(carried);
                 ImportScenery(frameRow, carried,
                     SceneryCollision(destination, source, frame, sourceWorld, carried, hulls, out collision));
+                registered = true;
                 kind = "scenery";
             }
 
-            shared.Save();
+            try
+            {
+                shared.Save();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Only the note that lets the next import of this object draw from this one's geometry. Without
+                // it that import copies the geometry again — not a reason to call this one failed, which by
+                // now it is not.
+            }
             _host.MarkArchiveModified(destination);
 
             outcome = new ObjectImportOutcome(kind, newName, carried.Pairs.Count, carried.Renderables.Count,
@@ -218,10 +274,16 @@ internal sealed class ObjectImportController
                 isError: carry.Unresolved.Count > 0);
             return null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
-                                       or InvalidOperationException or Formats.SdsFormatException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return "the import failed: " + ex.Message;
+            if (registered)
+            {
+                // Everything that makes the import an import is done and on the undo stack; what failed is
+                // what follows it. Saying "failed" here would have the caller import it a second time.
+                return $"'{newName}' was imported and is in the scene (undo takes it out), but finishing up failed: {ex.Message}";
+            }
+            if (carried is { IsAttached: true }) carried.Detach();
+            return "the import failed and nothing of it was left in the scene: " + ex.Message;
         }
     }
 
@@ -353,7 +415,16 @@ internal sealed class ObjectImportController
 
         var all = new List<(FrameObjectBase, SceneNode)>();
         var meshes = new List<(SceneNode, GpuMesh)>();
-        SceneNode root = BuildRow(carried.Root, document, meshByFrame, all, meshes, new HashSet<FrameObjectBase>());
+        SceneNode root;
+        try
+        {
+            root = BuildRow(carried.Root, document, meshByFrame, all, meshes, new HashSet<FrameObjectBase>());
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            foreach ((SceneNode _, GpuMesh mesh) in meshes) mesh.Dispose(); // made, and never to be shown
+            throw;
+        }
 
         // A scenery object hangs under its scene's row, as the loader would put it; a prototype is a true
         // top-level frame and hangs under the FrameResource row itself.
