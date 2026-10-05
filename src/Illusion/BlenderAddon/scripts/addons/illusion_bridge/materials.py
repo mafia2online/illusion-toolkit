@@ -153,16 +153,31 @@ def normal_map_image(material):
     """The image behind the Normal Map node feeding the Principled BSDF's Normal, or None.
 
     Only a tangent-space Normal Map node counts: a Bump node's height map is a different thing, and
-    sending it as a normal map would light the surface from nowhere.
+    sending it as a normal map would light the surface from nowhere. So is a Normal Map node set to
+    Object or World space — its channels are directions in the object or the world, and the packer
+    would read them as tangent-space X and Y (and flip the green). `normal_map_space` says which it is,
+    so the push can refuse the material in words instead of exporting wrong lighting.
     """
+    node = _normal_map_node(material)
+    if node is None or node.space != 'TANGENT':
+        return None
+    return _image_behind(node.inputs.get("Color"))
+
+
+def normal_map_space(material):
+    """The Space of the Normal Map node feeding the Principled BSDF's Normal ('TANGENT', 'OBJECT',
+    'WORLD', ...), or None when there is no such node."""
+    node = _normal_map_node(material)
+    return None if node is None else node.space
+
+
+def _normal_map_node(material):
     principled = _principled(material)
     socket = None if principled is None else principled.inputs.get("Normal")
     if socket is None or not socket.is_linked:
         return None
     node = socket.links[0].from_node
-    if node.type != 'NORMAL_MAP':
-        return None
-    return _image_behind(node.inputs.get("Color"))
+    return node if node.type == 'NORMAL_MAP' else None
 
 
 def specular_image(material):
@@ -232,19 +247,41 @@ def with_alpha(pixels, width, height, diffuse, alpha):
         return out
     if image == diffuse and channel == "A":
         return pixels
-    packed = image_rgba8(image)
-    if packed is None:
+    # The mask is read the way the SHADER reads it — linear — and not through image_rgba8, which turns a
+    # picture into what an albedo texture stores (sRGB bytes). Coverage is a plain number: a float mask at
+    # linear 0.25 means a quarter, and taken through the albedo path it came out as 137/255 instead of 64 —
+    # enough to carry a cut-out across the 0.5 it is tested against.
+    mask = _shader_pixels(image)
+    if mask is None:
         return pixels
-    mask, mask_width, mask_height = packed
-    mask = mask.reshape(mask_height, mask_width, 4).astype(np.float32)
     mask = _resample(_resample(mask, width, axis=1), height, axis=0)
     if channel == "A":
         coverage = mask[..., 3]
     else:
         coverage = mask[..., 0] * 0.2126 + mask[..., 1] * 0.7152 + mask[..., 2] * 0.0722
     out = pixels.copy()
-    out[:, 3] = np.clip(coverage + 0.5, 0.0, 255.0).astype(np.uint8).reshape(-1)
+    out[:, 3] = np.clip(coverage * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8).reshape(-1)
     return out
+
+
+def _shader_pixels(image):
+    """An image as float RGBA in the values a material's shader works with, rows top-down; None when it
+    has no pixels.
+
+    A float buffer is scene-linear already. A byte image tagged sRGB holds encoded values, which the
+    Image Texture node linearizes on the way out of its Color socket — so they are linearized here. Data
+    tagged Non-Color, and the alpha channel of anything, is used as stored.
+    """
+    width, height = image.size
+    if width == 0 or height == 0:
+        return None
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    image.pixels.foreach_get(pixels)
+    pixels = pixels.reshape(height, width, 4)[::-1].copy()
+    if not image.is_float and image.colorspace_settings.name == 'sRGB':
+        rgb = np.clip(pixels[..., :3], 0.0, 1.0)
+        pixels[..., :3] = np.where(rgb <= 0.04045, rgb / 12.92, np.power((rgb + 0.055) / 1.055, 2.4))
+    return pixels
 
 
 def _principled(material):
@@ -325,8 +362,12 @@ def _resample(pixels, size, axis):
     position = (np.arange(size) + 0.5) * current / size - 0.5
     low = np.floor(position)
     weight = (position - low).astype(np.float32)
+    # Each neighbour is clamped on its own. When a size is rounded UP, the first new texel's centre lies
+    # before source texel 0, so `low` is -1: the pair is meant to be (0, 0). Deriving the second index from
+    # the already-clamped first made it (0, 1) with nearly all the weight on texel 1 — the first row and
+    # column of every upsampled image came out as their neighbour.
     first = np.clip(low.astype(np.int64), 0, current - 1)
-    second = np.clip(first + 1, 0, current - 1)
+    second = np.clip(low.astype(np.int64) + 1, 0, current - 1)
     shape = [1, 1, 1]
     shape[axis] = size
     weight = weight.reshape(shape)

@@ -88,17 +88,20 @@ public sealed record ObjectProperty(string Group, string Id, string Label, strin
 public sealed record EditorNotice(DateTime Time, bool Error, string Text);
 
 /// <summary>What a Build wrote: each packed archive with the backup taken of what it replaced, and each
-/// archive that failed with the reason.</summary>
+/// archive that failed with the reason. <paramref name="NotSaved"/> is what the save a build starts with
+/// could not write; when it is not empty the build stopped there and packed nothing.</summary>
 public sealed record BuildOutcome(
     IReadOnlyList<(string Archive, string? Backup)> Packed,
-    IReadOnlyList<(string Archive, string Error)> Failed);
+    IReadOnlyList<(string Archive, string Error)> Failed,
+    IReadOnlyList<string> NotSaved);
 
-/// <summary>What mirroring a district into its winter archive did: how many winter meshes kept their own
-/// materials on the summer object of the same name, how many objects winter gained and lost, how many no
-/// longer lined up slot for slot (they keep summer's materials), and the files and textures written into
-/// the winter working copy.</summary>
+/// <summary>What mirroring a district into its winter archive did: how many objects had every material
+/// settled (winter's own where the season changes it), how many objects winter gained and lost, how many
+/// material slots were re-pointed in summer and carried over as they are, how many objects could not be told
+/// from a namesake and kept summer's materials, and the files and textures written into the winter working
+/// copy.</summary>
 public sealed record SeasonMirrorOutcome(
-    string WinterArchive, int Matched, int Added, int Dropped, int Reshaped,
+    string WinterArchive, int Matched, int Added, int Dropped, int Reassigned, int Ambiguous,
     IReadOnlyList<string> Files, IReadOnlyList<string> Textures);
 
 /// <summary>What bringing an object in from another archive did: what it came as ("actor" — an actor and the

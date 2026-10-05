@@ -82,8 +82,10 @@ public sealed class MaterialPreviewViewport : ViewportControl
     {
         // The tint is part of the material's look, not a decoration: a car body has no albedo at all and
         // shows nothing but its colour, so a preview without it is a white ball whatever the paint says.
-        _part = new MeshPart(0, 0, diffuse, normal, specular, hash,
-            Assets.MafiaMaterials.GetMaterialTextures(hash).Tint);
+        // …and so is how its alpha is read. A translucent material previewed as a cut-out is tested against
+        // one half and a pane of glass at 0.3 simply vanishes from the ball, while the scene draws it blended.
+        Assets.MafiaMaterials.MaterialTextures look = Assets.MafiaMaterials.GetMaterialTextures(hash);
+        _part = new MeshPart(0, 0, diffuse, normal, specular, hash, look.Tint, look.Blended);
         _materialLighting = lighting;
         Lighting = lighting;
         Rebuild();
@@ -191,8 +193,11 @@ public sealed class MaterialPreviewViewport : ViewportControl
             Indices = outIdx,
             Parts = new[]
             {
+                // The tint with the rest: a material that paints itself has no albedo, and without its
+                // colour the mesh preview showed it white while the sphere showed it painted.
                 new MeshPart(0, outIdx.Length,
-                    part.DiffuseTexture, part.NormalTexture, part.SpecularTexture, part.MaterialHash),
+                    part.DiffuseTexture, part.NormalTexture, part.SpecularTexture, part.MaterialHash, part.Tint,
+                    part.Blended),
             },
         };
     }
