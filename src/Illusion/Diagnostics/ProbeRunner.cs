@@ -630,6 +630,11 @@ internal static class ProbeRunner
             case "--probe-mcp":
                 McpProbes.RunMcpProbe();
                 return true;
+            // The same tools against the editor itself: a real window with a district loaded. Nothing is saved.
+            // Output: %TEMP%\illusion_editor_tools_live.txt
+            case "--probe-editor-tools-live":
+                EditorToolLiveProbes.Run(args.Length >= 2 ? args[1] : "hill");
+                return true;
             // The MCP editor tools against a scripted editor: what a save, a build and an area load tell
             // the caller when the editor could not do it, and which property values are refused. No game
             // install needed. Output: %TEMP%\illusion_editor_tools.txt
