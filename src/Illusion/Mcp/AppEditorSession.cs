@@ -532,9 +532,11 @@ internal sealed class AppEditorSession : IEditorSession
     }
 
     public string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        string? collision, out ObjectImportOutcome? outcome)
+        string? collision, int occurrence, out ObjectImportOutcome? outcome)
     {
         outcome = null;
+        if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
+        if (yawDegrees is { } yaw && !float.IsFinite(yaw)) return "yawDegrees is not a finite number";
         if (Window is not { } window) return NotOpen;
         D3DImageHost host = window.Viewport;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
@@ -550,7 +552,7 @@ internal sealed class AppEditorSession : IEditorSession
             return $"collision '{collision}' is none of auto, convex, box, mesh, none";
         }
         return host.ObjectImporting.Import(destination, sourceArchive, name, newName,
-            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls);
+            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls, occurrence);
     }
 
     public string? DuplicateSelected(out IReadOnlyList<string> copies)

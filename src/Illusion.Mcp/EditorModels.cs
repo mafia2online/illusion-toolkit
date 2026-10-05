@@ -63,9 +63,12 @@ public sealed record SeasonMirrorOutcome(
 /// copied, and what was carried into the working copy beside the scene — textures, item descriptions, a
 /// prefab entry. <paramref name="TexturesElsewhere"/> are textures neither archive carries: they live in an
 /// archive the game loads beside the source, and may not be loaded where the object now stands.</summary>
+/// <paramref name="NamedSo"/> is how many things in the source answer to the name asked for, and
+/// <paramref name="Occurrence"/> which of them this was.
 public sealed record ObjectImportOutcome(
     string Kind, string Name, int Frames, int Meshes, IReadOnlyList<string> Textures, int ItemDescriptions,
-    bool Prefab, IReadOnlyList<string> TexturesElsewhere, int UnresolvedCollisions, string Collision);
+    bool Prefab, IReadOnlyList<string> TexturesElsewhere, int UnresolvedCollisions, string Collision,
+    int NamedSo = 1, int Occurrence = 1);
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
