@@ -77,13 +77,46 @@ internal sealed class TransformEditController
         // An object carried in from another archive drags the collision it was given along with it: nothing in
         // the file ties the two, so without this the hull would stay where the object used to stand.
         var dragged = new HashSet<SceneNode>(_dragGroup.Select(g => g.Node));
-        foreach (List<SceneNode> hulls in _host.LinkedCollision(dragged.ToList()).Values)
+        _dragLinks = _host.LinkedSlots(dragged.ToList());
+        foreach (List<(int Slot, SceneNode Hull)> hulls in _dragLinks.Values)
         {
-            foreach (SceneNode hull in hulls)
+            foreach ((_, SceneNode hull) in hulls)
             {
                 if (hull.Source is IFrameNode h && dragged.Add(hull)) _dragGroup.Add((hull, h.WorldTransform, h.LocalTransform));
             }
         }
+    }
+
+    // Which linked placements the drag took along, and for which entry of each object's record.
+    private Dictionary<SceneNode, List<(int Slot, SceneNode Hull)>> _dragLinks = new();
+
+    // A resize ends with the dragged placements re-pointed at freshly cooked hulls — under new hashes. The
+    // record of what an object was given names the old ones, and unless it is rewritten here the object has
+    // lost its collision by the next operation: nothing answers to the old hash any more. Rewritten as an
+    // edit, so that undoing the resize puts the record back with the hulls.
+    private List<IEditAction> RelinkAfterMint(Dictionary<SceneNode, List<(int Slot, SceneNode Hull)>> links)
+    {
+        var edits = new List<IEditAction>();
+        foreach ((SceneNode node, List<(int Slot, SceneNode Hull)> slots) in links)
+        {
+            if (node.Source is not FrameNodeAdapter frame) continue;
+            string dir = Assets.MafiaEnvironment.ExtractedDir(frame.Document.SourceArchive);
+            string name = frame.Frame.Name.String;
+            List<Assets.Sds.ImportLinks.Link> record = [.. Assets.Sds.ImportLinks.HullsOf(dir, name)];
+            bool changed = false;
+            foreach ((int slot, SceneNode hull) in slots)
+            {
+                if (slot >= record.Count || hull.Source is not CollisionInstanceAdapter placed) continue;
+                if (record[slot].Hull == placed.Instance.Hash) continue;
+                record[slot] = record[slot] with { Hull = placed.Instance.Hash };
+                changed = true;
+            }
+            if (!changed) continue;
+            var edit = new ImportLinkEdit(dir, name, record);
+            edit.Redo();
+            edits.Add(edit);
+        }
+        return edits;
     }
 
     // True if any frame-graph ancestor of fn is itself selected (its cascade will move fn).
@@ -134,7 +167,11 @@ internal sealed class TransformEditController
     /// <summary>Abandons the drag: drops the snapshots without recording anything. The caller has already put
     /// the objects back by applying an identity delta — which also unwinds a collision placement's previewed
     /// scale, so there is nothing left to mint either.</summary>
-    public void GizmoCancelDrag() => _dragGroup.Clear();
+    public void GizmoCancelDrag()
+    {
+        _dragGroup.Clear();
+        _dragLinks = new();
+    }
 
     /// <summary>Ends the drag: pushes the whole group move as ONE undoable edit.</summary>
     public void GizmoEndDrag()
@@ -146,7 +183,11 @@ internal sealed class TransformEditController
         // has and the hull would grow on every cycle.
         var nodes = new List<SceneNode>(_dragGroup.Count);
         foreach ((SceneNode node, _, _) in _dragGroup) nodes.Add(node);
-        IReadOnlyList<IEditAction> mints = _host.CollisionEditing.MintPreviewedScales(nodes);
+        List<IEditAction> mints = [.. _host.CollisionEditing.MintPreviewedScales(nodes)];
+        // After the mints in the composite, so before them on undo: the record goes back to the old hashes
+        // while the placements still carry the new ones, and then the placements follow.
+        if (mints.Count > 0) mints.AddRange(RelinkAfterMint(_dragLinks));
+        _dragLinks = new();
 
         var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)>(_dragGroup.Count);
         foreach ((SceneNode node, _, Matrix4x4 beforeLocal) in _dragGroup)
@@ -162,7 +203,7 @@ internal sealed class TransformEditController
     {
         if (before == after) return;
         var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> { (node, before, after) };
-        IReadOnlyList<IEditAction> mints = [];
+        List<IEditAction> mints = [];
 
         // A number typed into the Transform panel comes through here, not through a drag — and the collision
         // an imported object was given has to follow it all the same. It used to stay where the object had
@@ -177,7 +218,9 @@ internal sealed class TransformEditController
             {
                 Matrix4x4 delta = back * (after * parent);
                 var hulls = new List<(SceneNode Node, Matrix4x4 Before)>();
-                foreach (SceneNode hull in _host.LinkedCollisionNodes(node, worldBefore))
+                Dictionary<SceneNode, List<(int Slot, SceneNode Hull)>> links =
+                    _host.LinkedSlots([node], new Dictionary<SceneNode, Matrix4x4> { [node] = worldBefore });
+                foreach ((_, SceneNode hull) in links.TryGetValue(node, out List<(int Slot, SceneNode Hull)>? mine) ? mine : [])
                 {
                     if (hull.Source is not IFrameNode h) continue;
                     hulls.Add((hull, h.LocalTransform));
@@ -187,7 +230,8 @@ internal sealed class TransformEditController
                 if (hulls.Count > 0)
                 {
                     // A placement cannot store a scale: a resize becomes a rescaled hull, as at the end of a drag.
-                    mints = _host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList());
+                    mints = [.. _host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList())];
+                    if (mints.Count > 0) mints.AddRange(RelinkAfterMint(links));
                     foreach ((SceneNode hull, Matrix4x4 hullBefore) in hulls)
                     {
                         items.Add((hull, hullBefore, ((IFrameNode)hull.Source!).LocalTransform));

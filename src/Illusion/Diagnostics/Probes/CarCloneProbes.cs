@@ -211,6 +211,31 @@ internal static class CarCloneProbes
             Check("refuses a title that is not one short line",
                 CarCloner.CloneExtracted(folders, Source, Name, traffic: true, "two\nlines", out string? badTitle) == null && badTitle != null, badTitle ?? "");
             string[] textBefore = [.. text.Select(t => File.ReadAllText(Path.Combine(t, "tables", "TextDatabase.dat")))];
+
+            // A clone that fails half-way: the text table held open, so the title cannot be written — after
+            // the vehicle row has been. Nothing of it may stay, and the same clone has to be possible again.
+            if (text.Count > 0)
+            {
+                byte[] vehiclesBefore = File.ReadAllBytes(vehiclesPath);
+                string[] ingameBefore = [.. Directory.GetFiles(Path.Combine(ingame, "tables"), "*.tbl").Order()
+                    .Select(f => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(f))))];
+                string? halfWay;
+                using (new FileStream(Path.Combine(text[0], "tables", "TextDatabase.dat"), FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    Check("a clone whose title cannot be written is refused",
+                        CarCloner.CloneExtracted(folders, Source, Name, traffic: true, Title, out halfWay) == null && halfWay != null,
+                        halfWay ?? "cloned");
+                }
+                string[] ingameAfter = [.. Directory.GetFiles(Path.Combine(ingame, "tables"), "*.tbl").Order()
+                    .Select(f => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(f))))];
+                Check("and leaves nothing: the vehicle table, the ingame tables and the text as they were, no folder for the car",
+                    File.ReadAllBytes(vehiclesPath).AsSpan().SequenceEqual(vehiclesBefore) && ingameAfter.SequenceEqual(ingameBefore)
+                    && text.Select(t => File.ReadAllText(Path.Combine(t, "tables", "TextDatabase.dat"))).SequenceEqual(textBefore)
+                    && cars.All(c => !Directory.Exists(c.To)),
+                    $"vehicles.tbl {(File.ReadAllBytes(vehiclesPath).AsSpan().SequenceEqual(vehiclesBefore) ? "same" : "CHANGED")}, "
+                    + $"car folder {(cars.Any(c => Directory.Exists(c.To)) ? "LEFT" : "gone")}");
+            }
+
             CarCloneResult? result = CarCloner.CloneExtracted(folders, Source, Name, traffic: true, Title, out string? refused);
             Check("clones shubert_38", result != null, refused ?? "");
             if (result == null) return;

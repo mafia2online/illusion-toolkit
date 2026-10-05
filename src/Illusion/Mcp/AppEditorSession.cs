@@ -966,7 +966,7 @@ internal sealed class AppEditorSession : IEditorSession
         // The same bookkeeping the Tuning tab does: an undo entry, the archive on the build list, the panel re-read.
         D3DImageHost stage = window.TargetStage;
         void Reload() => window.Scene.Selection.ReloadTuning();
-        stage.History.Push(new TuningValueEdit(change, Reload));
+        stage.History.Push(new WorkingCopyEdit(new TuningValueEdit(change, Reload), () => stage.MarkArchiveModified(archive)));
         stage.MarkArchiveModified(archive);
         Reload();
         stage.RaiseNotice($"{target.Name} set. Build to write it into the archive.", isError: false);

@@ -144,10 +144,28 @@ internal sealed class GameWriteJournal
             Try($"restoring {Path.GetFileName(path)}", () =>
             {
                 if (bytes == null) File.Delete(path);
-                else AtomicFile.WriteAllBytes(path, bytes);
+                // A file that was noted and never got written — often the very one whose write failed, still
+                // held by whatever made it fail — is as it was already: nothing to put back, nothing to report.
+                else if (!Unchanged(path, bytes)) AtomicFile.WriteAllBytes(path, bytes);
             });
         }
         return problems;
+    }
+
+    private static bool Unchanged(string path, byte[] bytes)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length != bytes.Length) return false;
+            var now = new byte[bytes.Length];
+            stream.ReadExactly(now);
+            return now.AsSpan().SequenceEqual(bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // Only a FILE of that name is the pack's leftover. Whatever else stands there — the very thing that made

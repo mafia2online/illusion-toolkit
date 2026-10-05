@@ -513,6 +513,21 @@ internal static class ObjectTransplantProbes
                 firstDeleted.Reattach();
                 two.Reattach();
             }
+
+            // ── A block edited since it was copied is not the source's block any more ──
+            // The first copy's draw distance is changed, as a user would to hide a level; the next import of
+            // the same object must not inherit that — it draws from the same buffers through a block of its own.
+            Formats.Frames.Resources.FrameGeometry edited = Drawn(one)[0].Geometry;
+            float distanceWas = edited.LOD[0].Distance;
+            edited.LOD[0].Distance = distanceWas + 123f;
+            TransplantedObject? afterEdit = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_share_edited",
+                FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
+            Check("a copy whose draw distance was changed does not lend its block: the next import gets the source's, on the same buffers",
+                afterEdit != null && afterEdit.VertexBuffers.Count == 0 && afterEdit.Geometries.Count > 0
+                && Drawn(afterEdit).All(m => !ReferenceEquals(m.Geometry, edited) && m.Geometry.LOD[0].Distance != distanceWas + 123f),
+                afterEdit == null ? reason ?? "" : $"{afterEdit.Geometries.Count} block(s) of its own, {afterEdit.VertexBuffers.Count} buffers copied");
+            afterEdit?.Detach();
+            edited.LOD[0].Distance = distanceWas;
             two.Detach();
             Check("taking the copies out leaves the first one's geometry in place",
                 one.VertexBuffers.All(b => ours.VertexBuffers.GetBuffer(b.Hash) != null)

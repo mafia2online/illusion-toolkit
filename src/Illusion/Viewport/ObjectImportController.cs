@@ -445,7 +445,7 @@ internal sealed class ObjectImportController
         if (hulls.Count > 0)
         {
             edits.Add(new ImportLinkEdit(Assets.MafiaEnvironment.ExtractedDir(destination), carried.Root.Name.String,
-                [.. hulls.Select(h => h.Placement.Hash)]));
+                [.. hulls.Select(h => D3DImageHost.LinkFor(carried.Root, h.Placement))]));
         }
         // "Its own" is a guess by position: nothing in an archive ties a static object to its collision, so
         // what is taken is every hull standing inside the object's box. For a shelf that includes what stood

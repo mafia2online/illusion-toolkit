@@ -106,6 +106,23 @@ internal static class CarM2oExportProbes
                 CarM2oExport.ExportFrom(sources with { Archive = misnamed, WinterArchive = null }, output, "car-test", out string? alien) == null
                 && alien != null && !Directory.Exists(output), alien ?? "");
 
+            // A folder whose manifests are there and do not read: left as it is, not replaced with this one car.
+            string broken = Path.Combine(scratch, "broken");
+            Directory.CreateDirectory(broken);
+            const string BadList = "{ \"vehicles\": [ { \"model\": \"Earlier_Car\" }, ", BadPackage = "{ \"name\": \"mine\", \"custom\": tru";
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), BadList);
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), "{ \"name\": \"mine\" }");
+            Check("refuses a folder whose vehicles.json does not read, and leaves it and everything else as it was",
+                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? unreadList) == null && unreadList != null
+                && File.ReadAllText(Path.Combine(broken, CarM2oExport.VehiclesFile)) == BadList
+                && Directory.GetFileSystemEntries(broken).Length == 2, unreadList ?? "exported");
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), "{ \"vehicles\": [] }");
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), BadPackage);
+            Check("refuses a folder whose package.json does not read, the same way",
+                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? unreadPackage) == null && unreadPackage != null
+                && File.ReadAllText(Path.Combine(broken, CarM2oExport.PackageFile)) == BadPackage
+                && Directory.GetFileSystemEntries(broken).Length == 2, unreadPackage ?? "exported");
+
             CarM2oExportResult? result = CarM2oExport.ExportFrom(sources, output, CarM2oExport.DefaultResource(Name), out refused);
             Check("exports the clone", result != null, refused ?? "");
             if (result == null) return;

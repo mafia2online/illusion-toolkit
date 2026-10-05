@@ -55,6 +55,19 @@ public class FrameLOD
         SplitCapsule = (byte[])other.SplitCapsule.Clone();
     }
 
+    /// <summary>
+    /// Whether this level draws the way <paramref name="other"/> does, the buffers aside: the distance it is
+    /// drawn to, the vertex layout and count, and the two capsules byte for byte. Two levels on the same
+    /// buffers are not the same level for that alone — one of them may have been edited since.
+    /// </summary>
+    public bool DrawsLike(FrameLOD other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return Distance.Equals(other.Distance) && VertexDeclaration == other.VertexDeclaration && NumVerts == other.NumVerts
+            && NZero1 == other.NZero1 && OpcodeCapsule.AsSpan().SequenceEqual(other.OpcodeCapsule)
+            && SplitCapsule.AsSpan().SequenceEqual(other.SplitCapsule);
+    }
+
     /// <summary>Fills this LOD from the wire fields and the two capsules handed over by the native
     /// boundary.</summary>
     internal void LoadFromWireParts(float distance, HashName indexBuffer, uint declaration,
