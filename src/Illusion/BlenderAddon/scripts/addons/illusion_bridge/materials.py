@@ -247,19 +247,41 @@ def with_alpha(pixels, width, height, diffuse, alpha):
         return out
     if image == diffuse and channel == "A":
         return pixels
-    packed = image_rgba8(image)
-    if packed is None:
+    # The mask is read the way the SHADER reads it — linear — and not through image_rgba8, which turns a
+    # picture into what an albedo texture stores (sRGB bytes). Coverage is a plain number: a float mask at
+    # linear 0.25 means a quarter, and taken through the albedo path it came out as 137/255 instead of 64 —
+    # enough to carry a cut-out across the 0.5 it is tested against.
+    mask = _shader_pixels(image)
+    if mask is None:
         return pixels
-    mask, mask_width, mask_height = packed
-    mask = mask.reshape(mask_height, mask_width, 4).astype(np.float32)
     mask = _resample(_resample(mask, width, axis=1), height, axis=0)
     if channel == "A":
         coverage = mask[..., 3]
     else:
         coverage = mask[..., 0] * 0.2126 + mask[..., 1] * 0.7152 + mask[..., 2] * 0.0722
     out = pixels.copy()
-    out[:, 3] = np.clip(coverage + 0.5, 0.0, 255.0).astype(np.uint8).reshape(-1)
+    out[:, 3] = np.clip(coverage * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8).reshape(-1)
     return out
+
+
+def _shader_pixels(image):
+    """An image as float RGBA in the values a material's shader works with, rows top-down; None when it
+    has no pixels.
+
+    A float buffer is scene-linear already. A byte image tagged sRGB holds encoded values, which the
+    Image Texture node linearizes on the way out of its Color socket — so they are linearized here. Data
+    tagged Non-Color, and the alpha channel of anything, is used as stored.
+    """
+    width, height = image.size
+    if width == 0 or height == 0:
+        return None
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    image.pixels.foreach_get(pixels)
+    pixels = pixels.reshape(height, width, 4)[::-1].copy()
+    if not image.is_float and image.colorspace_settings.name == 'sRGB':
+        rgb = np.clip(pixels[..., :3], 0.0, 1.0)
+        pixels[..., :3] = np.where(rgb <= 0.04045, rgb / 12.92, np.power((rgb + 0.055) / 1.055, 2.4))
+    return pixels
 
 
 def _principled(material):
