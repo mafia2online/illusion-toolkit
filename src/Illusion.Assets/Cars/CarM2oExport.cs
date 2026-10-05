@@ -137,8 +137,9 @@ public static partial class CarM2oExport
         // file cut short — used to be taken for "no list yet" and written over with this one car: every
         // earlier registration, or the package's own settings, gone, after the archives had already been
         // replaced. It is a refusal, and the folder is left as it was.
-        if (Unreadable(vehiclesFile, node => node?["vehicles"] is JsonArray listed && listed.All(v => v is JsonObject),
-                "a list of vehicles") is { } badList)
+        if (Unreadable(vehiclesFile, node => node?["vehicles"] is JsonArray listed && listed.All(v =>
+                    v is JsonObject car && car["model"] is JsonValue model && model.TryGetValue<string>(out _)),
+                "a list of vehicles, each with its model name") is { } badList)
         {
             refusal = badList;
             return null;

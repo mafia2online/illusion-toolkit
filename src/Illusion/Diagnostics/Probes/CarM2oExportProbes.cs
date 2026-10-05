@@ -130,6 +130,10 @@ internal static class CarM2oExportProbes
                 CarM2oExport.ExportFrom(sources, broken, "car-test", out string? oddList) == null && oddList != null
                 && File.ReadAllText(Path.Combine(broken, CarM2oExport.VehiclesFile)) == OddList
                 && Directory.GetFileSystemEntries(broken).Length == 2, oddList ?? "exported");
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), "{ \"vehicles\": [ { \"model\": 5 } ] }");
+            Check("…and one whose car has no model name",
+                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? noModel) == null && noModel != null
+                && Directory.GetFileSystemEntries(broken).Length == 2, noModel ?? "exported");
 
             CarM2oExportResult? result = CarM2oExport.ExportFrom(sources, output, CarM2oExport.DefaultResource(Name), out refused);
             Check("exports the clone", result != null, refused ?? "");
