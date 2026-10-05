@@ -381,7 +381,7 @@ public sealed class EditorTools
         [Description("Show the city_crash prop layer.")] bool? crash = null,
         [Description("Show district load zones.")] bool? zones = null,
         [Description("Show AI navigation overlays.")] bool? navigation = null,
-        [Description("Switch a layer off even though the scene has unsaved edits — those made in that layer are lost with their undo entries. Default false.")] bool discardUnsavedEdits = false)
+        [Description("Switch the crash layer off even though the scene has unsaved edits — those made in it are lost with their undo entries. Default false.")] bool discardUnsavedEdits = false)
     {
         try
         {

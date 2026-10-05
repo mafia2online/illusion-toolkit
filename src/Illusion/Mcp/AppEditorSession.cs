@@ -397,14 +397,15 @@ internal sealed class AppEditorSession : IEditorSession
             return $"unknown shading mode '{renderMode}' — one of {string.Join(", ", Enum.GetNames<RenderMode>())}";
         if ((collision != null || crash != null) && host.BridgeEditedCount > 0)
             return "the collision and crash layers reload part of the scene — blender_end first";
-        // Switching a layer OFF unloads what it shows, and with it the unsaved edits made there and their
-        // undo entries — a crash copy moved and never saved is simply gone. The same loss editor_open_area
+        // Switching the CRASH layer off unloads it, and with it the unsaved edits made there and their undo
+        // entries — a crash copy moved and never saved is simply gone. The same loss editor_open_area
         // refuses, by the same rule: not while edits are unsaved, unless the caller says they may go.
-        bool unloads = (crash == false && window.CrashToggle.IsChecked == true)
-            || (collision == false && window.CollisionToggle.IsChecked == true);
+        // (The collision layer is only hidden when it is switched off: its placements, their edits and
+        // their undo entries stay, so there is nothing to guard there.)
+        bool unloads = crash == false && window.CrashToggle.IsChecked == true;
         if (unloads && host.HasUnsavedEdits && !discardUnsavedEdits)
         {
-            return "switching that layer off unloads it, and unsaved edits made in it are dropped together with "
+            return "switching the crash layer off unloads it, and unsaved edits made in it are dropped together with "
                 + "their undo entries — editor_save first, or pass discardUnsavedEdits=true to give them up";
         }
 
@@ -460,6 +461,7 @@ internal sealed class AppEditorSession : IEditorSession
         Vector3 delta = Vector3.Zero;
         if (position != null) delta = new Vector3(position[0], position[1], position[2]) - frame.WorldTransform.Translation;
         if (offset != null) delta += new Vector3(offset[0], offset[1], offset[2]);
+        if (!float.IsFinite(delta.X) || !float.IsFinite(delta.Y) || !float.IsFinite(delta.Z)) return "that is further than a position can be";
         if (delta == Vector3.Zero) return null;
 
         // The gizmo's own path, start to finish: it is what knows how each kind of object moves (a frame,
