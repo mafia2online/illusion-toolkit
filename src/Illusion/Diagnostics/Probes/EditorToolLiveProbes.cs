@@ -75,6 +75,11 @@ internal static class EditorToolLiveProbes
                     guarded != null && session.Status().UnsavedEdits && window.CrashToggle.IsChecked == true, guarded ?? "switched off");
                 Check("switching another layer ON is not what the guard is about",
                     session.SetView(null, null, null, zones: true, null) == null);
+                Check("nor is the collision layer, which is only hidden: it switches on and off with the edit unsaved",
+                    session.SetView(null, collision: true, null, null, null) == null
+                    && session.SetView(null, collision: false, null, null, null) == null && session.Status().UnsavedEdits);
+                Check("a move further than a position can be is refused, though each number is finite",
+                    mesh != null && session.Move(mesh.Name, [3e38f, 0f, 0f], [3e38f, 0f, 0f]) != null);
                 Check("and with the edits given up it is switched off",
                     session.SetView(null, null, crash: false, null, null, discardUnsavedEdits: true) == null
                     && window.CrashToggle.IsChecked != true);
