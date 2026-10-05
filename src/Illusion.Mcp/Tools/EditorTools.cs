@@ -299,7 +299,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "editor_mirror_winter")]
-    [Description("Carry the loaded district's edits into its winter archive (<name>_z.sds). The two archives are one scene shipped twice, differing only in which materials are swapped for their snow-covered counterparts and in their textures - so this saves, writes the summer scene over the winter one with each object's winter materials kept, copies the buffers, collisions, actors and name table across, and adds the textures winter lacks. It writes the winter WORKING COPY and queues the archive; editor_build then packs it. Load the summer variant first.")]
+    [Description("Carry the loaded district's edits into its winter archive (<name>_z.sds). The two archives are one scene shipped twice, differing only in which materials are swapped for their snow-covered counterparts and in their textures - so this saves, writes the summer scene over the winter one with the materials the seasons differ in put back (a slot re-pointed at another material in summer keeps the new one: slotsReassigned), copies the buffers, collisions, actors and name table across, and adds the textures winter lacks or refreshes the ones an earlier mirror brought. objectsAmbiguous counts objects that could not be told from a namesake and kept summer's materials - look at those. Refused for a district whose winter archive is a scene of its own. It writes the winter WORKING COPY and queues the archive; editor_build then packs it. Load the summer variant first.")]
     public static async Task<string> MirrorWinter(IEditorSession editor, IUiThreadMarshal ui)
     {
         try
@@ -314,9 +314,10 @@ public sealed class EditorTools
                 objectsMatched = outcome.Matched,
                 objectsAdded = outcome.Added,
                 objectsDropped = outcome.Dropped,
-                objectsReshaped = outcome.Reshaped,
+                slotsReassigned = outcome.Reassigned,
+                objectsAmbiguous = outcome.Ambiguous,
                 filesWritten = outcome.Files,
-                texturesAdded = outcome.Textures,
+                texturesWritten = outcome.Textures,
                 status = await ui.RunAsync(editor.Status),
             });
         }

@@ -374,19 +374,24 @@ internal sealed class AppEditorSession : IEditorSession
 
         try
         {
-            // The mirror reads the working copy on disk, so what is only in memory has to be written first.
-            host.SaveEdits();
+            // The mirror reads the working copy on disk, so what is only in memory has to be written first —
+            // and when that could not be written, the mirror would carry yesterday's scene into winter.
+            D3DImageHost.SaveReport saved = host.SaveEditsReport();
+            if (!saved.Complete) return "the save a mirror starts with did not complete: " + string.Join("; ", saved.NotSaved);
             Assets.Sds.SeasonMirror.Report? report =
                 Assets.Sds.SeasonMirror.ToWinter(area.Summer, area.Winter, out string? reason);
             if (report == null) return reason ?? "the winter archive could not be written";
 
             host.MarkArchiveModified(area.Winter);
             outcome = new SeasonMirrorOutcome(area.Winter.FullName, report.Matched, report.Added, report.Dropped,
-                report.Reshaped, report.Files, report.Textures);
+                report.Reassigned, report.Ambiguous, report.Files, report.Textures);
             host.RaiseNotice(
-                $"Mirrored {area.BaseName} into {area.Winter.Name}: {report.Matched} object(s) kept their winter "
-                + $"materials, {report.Added} added, {report.Dropped} dropped, {report.Files.Count} file(s) and "
-                + $"{report.Textures.Count} texture(s) written — Build packs it", isError: false);
+                $"Mirrored {area.BaseName} into {area.Winter.Name}: {report.Matched} object(s) settled, "
+                + $"{report.Added} added, {report.Dropped} dropped, {report.Reassigned} re-pointed slot(s) carried over, "
+                + $"{report.Files.Count} file(s) and {report.Textures.Count} texture(s) written — Build packs it"
+                + (report.Ambiguous == 0 ? "" : $". {report.Ambiguous} object(s) could not be told from a namesake "
+                    + "and kept their summer materials — check them in winter"),
+                isError: report.Ambiguous > 0);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
