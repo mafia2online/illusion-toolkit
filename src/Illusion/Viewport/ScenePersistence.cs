@@ -99,7 +99,8 @@ internal sealed class ScenePersistence
 
     /// <summary>Writes every edited-but-unsaved scene document back into its extracted folder. Frames that leave
     /// the scene mid-session are skipped defensively. Returns the number of archives written; clears the '*'.</summary>
-    public int SaveEdits()
+    /// <param name="notSaved">Takes one line per document that was refused and so is still unsaved.</param>
+    public int SaveEdits(List<string>? notSaved = null)
     {
         int saved = 0;
         foreach (SceneNode fr in _unsavedFrames.ToList())
@@ -124,6 +125,7 @@ internal sealed class ScenePersistence
             {
                 _host.RaiseNotice(
                     "this car's working copy was not written: " + why, isError: true);
+                notSaved?.Add($"{document.SourceArchive.Name}: {why}");
                 continue;
             }
             _unsavedFrames.Remove(fr);        // written; the archive stays on the build list until packed

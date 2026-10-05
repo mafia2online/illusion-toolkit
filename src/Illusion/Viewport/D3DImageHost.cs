@@ -718,15 +718,33 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>Raised when the unsaved/edited state may have changed, so the title '*' and menus can refresh.</summary>
     public event Action? DirtyChanged;
 
+    /// <summary>What a save did: how many files it wrote, and what it could NOT write. A save does not
+    /// throw for a material library that would not write or a working copy that was refused — it says so
+    /// and carries on with the rest — so "it returned" is not "everything is on disk".</summary>
+    public readonly record struct SaveReport(int Written, IReadOnlyList<string> NotSaved)
+    {
+        /// <summary>Everything that was unsaved is now on disk.</summary>
+        public bool Complete => NotSaved.Count == 0;
+    }
+
     /// <summary>Writes the edited frame documents AND every dirty MTL library (each .mtl gets a timestamped
     /// backup + atomic replace, like an .sds build). An MTL failure is reported through the notice surface —
     /// not thrown — so the frame save always completes.</summary>
-    public int SaveEdits()
+    public int SaveEdits() => SaveEditsReport().Written;
+
+    /// <summary><see cref="SaveEdits"/>, with what was left unsaved handed back as well as shown: a caller
+    /// that goes on to pack archives, or reports to something that cannot see the notice bar, has to know.</summary>
+    public SaveReport SaveEditsReport()
     {
+        var notSaved = new List<string>();
         string? materialError = MaterialEditing.SaveDirtyMaterials(out int savedLibraries);
-        int saved = Persistence.SaveEdits();
-        if (materialError != null) RaiseNotice("Materials not saved: " + materialError, isError: true);
-        return saved + savedLibraries;
+        int saved = Persistence.SaveEdits(notSaved);
+        if (materialError != null)
+        {
+            RaiseNotice("Materials not saved: " + materialError, isError: true);
+            notSaved.Insert(0, "material libraries: " + materialError);
+        }
+        return new SaveReport(saved + savedLibraries, notSaved);
     }
 
     /// <inheritdoc cref="ScenePersistence.PendingBuildArchives"/>

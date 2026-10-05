@@ -47,13 +47,14 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "editor_open_area")]
-    [Description("Open the map editor if it is still on the launcher, load an area and wait until it has finished streaming in. Returns the editor status. Refuses while a Blender edit session is open.")]
+    [Description("Open the map editor if it is still on the launcher, load an area and wait until it has finished streaming in. Returns the editor status. Refuses while a Blender edit session is open, and refuses to replace a scene that has unsaved edits (editor_save first, or pass discardUnsavedEdits=true); asking for the area and season already shown is always a no-op.")]
     public static async Task<string> OpenArea(
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("Area name as editor_list_areas spells it, e.g. 'uppertown'.")] string area,
         [Description("Load the winter variant (_z archives). Default false.")] bool winter = false,
-        [Description("How long to wait for the area to load, in seconds. Default 180.")] int timeoutSeconds = 180)
+        [Description("How long to wait for the area to load, in seconds. Default 180.")] int timeoutSeconds = 180,
+        [Description("Load even though the scene has unsaved edits — they and the undo history are lost. Default false.")] bool discardUnsavedEdits = false)
     {
         try
         {
@@ -67,7 +68,8 @@ public sealed class EditorTools
                 await Task.Delay(Poll);
             }
 
-            if (await ui.RunAsync(() => editor.LoadArea(area, winter)) is { } refused) return ToolResult.Invalid(refused);
+            if (await ui.RunAsync(() => editor.LoadArea(area, winter, discardUnsavedEdits)) is { } refused)
+                return ToolResult.Invalid(refused);
 
             deadline = DateTime.UtcNow.AddSeconds(Math.Max(5, timeoutSeconds));
             DateTime quietSince = DateTime.UtcNow;
@@ -95,7 +97,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "scene_find")]
-    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Use it also to learn exact names before scene_select.")]
+    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Crash-layer copies (kind CrashInstance: trees, lamps, bins) are searched from the placement table whether or not their rows are expanded in the tree; a copy matches a name by its own label or by its prop's name, and a box by its prop's triangles at the copy's placement. Use it also to learn exact names before scene_select.")]
     public static async Task<string> Find(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -238,16 +240,26 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "editor_save")]
-    [Description("Save every unsaved edit into the working copies (the editor's Ctrl+S): scene documents, collisions and material libraries. Does not touch the game's archives — editor_build does that.")]
+    [Description("Save every unsaved edit into the working copies (the editor's Ctrl+S): scene documents, collisions and material libraries. Does not touch the game's archives — editor_build does that. success is false, with notSaved naming each one, when something could not be written (a material library, a refused working copy); what could be written still was.")]
     public static async Task<string> Save(IEditorSession editor, IUiThreadMarshal ui)
     {
         try
         {
             int files = 0;
-            string? failed = await ui.RunAsync(() => editor.Save(out files));
-            return failed != null
-                ? ToolResult.Invalid(failed)
-                : ToolResult.Json(new { success = true, filesWritten = files, status = await ui.RunAsync(editor.Status) });
+            IReadOnlyList<string> notSaved = [];
+            string? failed = await ui.RunAsync(() => editor.Save(out files, out notSaved));
+            if (failed != null) return ToolResult.Invalid(failed);
+            EditorStatus status = await ui.RunAsync(editor.Status);
+            return notSaved.Count == 0
+                ? ToolResult.Json(new { success = true, filesWritten = files, status })
+                : ToolResult.Json(new
+                {
+                    success = false,
+                    error = "the save did not complete — see notSaved",
+                    filesWritten = files,
+                    notSaved,
+                    status,
+                });
         }
         catch (Exception ex)
         {
@@ -262,6 +274,15 @@ public sealed class EditorTools
         try
         {
             BuildOutcome outcome = await ui.RunAsync(editor.Build);
+            if (outcome.NotSaved.Count > 0)
+            {
+                return ToolResult.Json(new
+                {
+                    success = false,
+                    error = "the save a build starts with did not complete, so no archive was packed — see notSaved",
+                    notSaved = outcome.NotSaved,
+                });
+            }
             if (outcome.Packed.Count == 0 && outcome.Failed.Count == 0)
                 return ToolResult.Invalid("no edits to build — nothing has been edited in this editor session");
             return ToolResult.Json(new

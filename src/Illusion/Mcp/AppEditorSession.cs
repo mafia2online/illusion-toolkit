@@ -71,7 +71,7 @@ internal sealed class AppEditorSession : IEditorSession
             : "neither the launcher nor the map editor is open";
     }
 
-    public string? LoadArea(string area, bool winter)
+    public string? LoadArea(string area, bool winter, bool discardUnsavedEdits)
     {
         if (Window is not { } window) return NotOpen;
         D3DImageHost host = window.Viewport;
@@ -81,6 +81,18 @@ internal sealed class AppEditorSession : IEditorSession
             a => string.Equals(a.BaseName, area, StringComparison.OrdinalIgnoreCase));
         if (target == null) return $"no area named '{area}' — editor_list_areas has the names";
         if (winter && target.Winter == null) return $"'{target.BaseName}' has no winter variant";
+
+        // A reload resets the scene: the edited frames, the list of what is unsaved and the undo history all
+        // go with it, and nothing says so. Asking for the area already on screen reloads nothing and is
+        // always allowed; anything else has to be told that the edits may go.
+        bool reloads = window.WholeMapCheck.IsChecked == true
+            || (window.WinterToggle.IsChecked == true) != winter
+            || !ReferenceEquals(window.AreaCombo.SelectedItem, target);
+        if (reloads && host.HasUnsavedEdits && !discardUnsavedEdits)
+        {
+            return "the scene holds unsaved edits, and loading another area or season drops them together "
+                + "with the undo history — editor_save first, or pass discardUnsavedEdits=true to give them up";
+        }
 
         // Each control reloads the scene when it changes and only then, so an area that is already the one
         // shown costs nothing here. The season goes first: the area selector's reload then reads it.
@@ -101,6 +113,9 @@ internal sealed class AppEditorSession : IEditorSession
         foreach (SceneNode node in AllNodes(host))
         {
             if (found.Count >= limit) break;
+            // A crash copy only has a tree node once it has been clicked or its row expanded, so the tree
+            // cannot answer for the copies — they are searched from the placement data below.
+            if (node.Kind == CrashCopyKind) continue;
             if (nameContains != null && !node.Name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
             if (kind != null && !string.Equals(node.Kind, kind, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -135,7 +150,106 @@ internal sealed class AppEditorSession : IEditorSession
                 node.Mesh?.PickPositions?.Length,
                 node.Mesh?.PickIndices?.Length / 3));
         }
+
+        if (kind == null || string.Equals(kind, CrashCopyKind, StringComparison.OrdinalIgnoreCase))
+            FindCrashCopies(host, nameContains, lo, hi, limit, found);
         return found;
+    }
+
+    private const string CrashCopyKind = "CrashInstance";
+
+    /// <summary>
+    /// The crash layer's copies — trees, lamps, bins: 57 000 of them in the shipped city — found from the
+    /// placement table itself. A copy matches a name by its own label ("copy #id") or by the prop it is a
+    /// copy of, and a box by its prototype's TRIANGLES stood at the copy's matrix, the same test a mesh gets:
+    /// "is this volume free" is asked of what is drawn, and a lamp post is drawn well away from its origin.
+    /// Only the copies that are returned are given a tree node (which is what a later select names).
+    /// </summary>
+    private static void FindCrashCopies(
+        D3DImageHost host, string? nameContains, Vector3? lo, Vector3? hi, int limit, List<SceneObjectInfo> found)
+    {
+        foreach ((Formats.Translokator.Object row, IReadOnlyList<(Rendering.Gpu.GpuMesh Mesh, Matrix4x4 Local)> prototypes)
+                 in host.Streamer.CrashRows())
+        {
+            bool propNamed = nameContains == null
+                || row.Name.String.Contains(nameContains, StringComparison.OrdinalIgnoreCase);
+            foreach (Formats.Translokator.Instance copy in row.Instances)
+            {
+                if (found.Count >= limit) return;
+                if (!propNamed && !$"copy #{copy.ID}".Contains(nameContains!, StringComparison.OrdinalIgnoreCase)) continue;
+
+                int? triangles = null;
+                Vector3 insideMin = default, insideMax = default;
+                if (lo is { } min && hi is { } max)
+                {
+                    if (prototypes.Count == 0)
+                    {
+                        // Nothing to test but where it stands (its prototype keeps no CPU geometry).
+                        if (!Overlaps(copy.Position, copy.Position, min, max)) continue;
+                    }
+                    else
+                    {
+                        Matrix4x4 placed = DistrictStreamer.CrashWorld(copy);
+                        int count = 0;
+                        insideMin = new Vector3(float.MaxValue);
+                        insideMax = new Vector3(float.MinValue);
+                        foreach ((Rendering.Gpu.GpuMesh mesh, Matrix4x4 local) in prototypes)
+                        {
+                            count += TrianglesInBox(mesh, local * placed, min, max, ref insideMin, ref insideMax);
+                        }
+                        if (count == 0) continue;
+                        triangles = count;
+                    }
+                }
+
+                if (host.Streamer.CrashNodeFor(copy, row) is not { } node) continue;
+                found.Add(new SceneObjectInfo(
+                    node.Name, node.Kind, PathOf(node),
+                    [copy.Position.X, copy.Position.Y, copy.Position.Z],
+                    null, null,
+                    node.IsSelected,
+                    triangles,
+                    triangles > 0 ? [insideMin.X, insideMin.Y, insideMin.Z] : null,
+                    triangles > 0 ? [insideMax.X, insideMax.Y, insideMax.Z] : null));
+            }
+        }
+    }
+
+    // A prototype's triangles at one copy's matrix against a box, the copy's own box asked first: a query
+    // walks every copy in the city, and all but a handful are nowhere near.
+    private static int TrianglesInBox(
+        Rendering.Gpu.GpuMesh mesh, Matrix4x4 world, Vector3 boxMin, Vector3 boxMax,
+        ref Vector3 insideMin, ref Vector3 insideMax)
+    {
+        if (mesh.PickPositions is not { } positions || mesh.PickIndices is not { } indices) return 0;
+
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        for (int k = 0; k < 8; k++)
+        {
+            Vector3 corner = Vector3.Transform(
+                new Vector3(
+                    (k & 1) == 0 ? mesh.LocalMin.X : mesh.LocalMax.X,
+                    (k & 2) == 0 ? mesh.LocalMin.Y : mesh.LocalMax.Y,
+                    (k & 4) == 0 ? mesh.LocalMin.Z : mesh.LocalMax.Z),
+                world);
+            min = Vector3.Min(min, corner);
+            max = Vector3.Max(max, corner);
+        }
+        if (!Overlaps(min, max, boxMin, boxMax)) return 0;
+
+        int count = 0;
+        for (int i = 0; i + 2 < indices.Length; i += 3)
+        {
+            Vector3 a = Vector3.Transform(positions[indices[i]], world);
+            Vector3 b = Vector3.Transform(positions[indices[i + 1]], world);
+            Vector3 c = Vector3.Transform(positions[indices[i + 2]], world);
+            if (!TriangleBoxTest.Overlaps(a, b, c, boxMin, boxMax)) continue;
+            count++;
+            insideMin = Vector3.Min(insideMin, Vector3.Max(boxMin, Vector3.Min(a, Vector3.Min(b, c))));
+            insideMax = Vector3.Max(insideMax, Vector3.Min(boxMax, Vector3.Max(a, Vector3.Max(b, c))));
+        }
+        return count;
     }
 
     /// <summary>How many of a mesh's triangles reach into a world-space box, and the extent of those
@@ -206,13 +320,16 @@ internal sealed class AppEditorSession : IEditorSession
 
     public IReadOnlyList<EditorNotice> Notices(int last) => EditorNoticeLog.Last(last);
 
-    public string? Save(out int filesWritten)
+    public string? Save(out int filesWritten, out IReadOnlyList<string> notSaved)
     {
         filesWritten = 0;
+        notSaved = [];
         if (Window is not { } window) return NotOpen;
         try
         {
-            filesWritten = window.Viewport.SaveEdits();
+            D3DImageHost.SaveReport report = window.Viewport.SaveEditsReport();
+            filesWritten = report.Written;
+            notSaved = report.NotSaved;
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -226,11 +343,17 @@ internal sealed class AppEditorSession : IEditorSession
         D3DImageHost host = Host;
         // The viewport's own save, not only the frame documents the build re-saves: a material library
         // edited in this session has to be on disk before the archive that names it is packed.
-        host.SaveEdits();
+        //
+        // And when that save does not complete, nothing is packed: an archive packed now would ship meshes
+        // naming materials that are not in the library on disk, with a backup taken and "built" reported.
+        D3DImageHost.SaveReport saved = host.SaveEditsReport();
+        if (!saved.Complete) return new BuildOutcome([], [], saved.NotSaved);
+
         D3DImageHost.BuildReport report = host.BuildEdits(createBackup: true);
         return new BuildOutcome(
             report.Packed.Select(p => (p.Archive, p.Backup)).ToList(),
-            report.Failed.Select(f => (f.Archive, f.Error)).ToList());
+            report.Failed.Select(f => (f.Archive, f.Error)).ToList(),
+            []);
     }
 
     public CameraInfo Camera()
@@ -408,6 +531,15 @@ internal sealed class AppEditorSession : IEditorSession
         if (property == null) return $"'{name}' has no property '{propertyId}' — object_properties lists them";
         if (property.IsReadOnly || property.Set == null) return $"'{property.Label}' is read-only";
         if (!TryParse(property, value, out object? parsed)) return $"'{value}' is not a {property.Kind} value";
+        // A name is boxed with a zero hash on the way in (the adapter derives the real one), so the generic
+        // "did it change" comparison cannot see an unchanged name — and renaming a frame to its own name
+        // would still land on the undo stack as an edit.
+        if (parsed is Domain.Properties.HashNameValue renamed
+            && property.Get() is Domain.Properties.HashNameValue current
+            && string.Equals(current.Name, renamed.Name, StringComparison.Ordinal))
+        {
+            return null;
+        }
         host.CommitPropertyEdit(node, property, property.Get(), parsed);
         return null;
     }
@@ -429,7 +561,9 @@ internal sealed class AppEditorSession : IEditorSession
         };
     }
 
-    private static bool TryParse(Domain.Properties.PropertyDescriptor p, string text, out object? value)
+    /// <summary>Turns the text a tool was handed into the boxed value a property takes — or refuses it.
+    /// Internal so the refusals can be checked without an editor on screen (<c>--probe-editor-tools</c>).</summary>
+    internal static bool TryParse(Domain.Properties.PropertyDescriptor p, string text, out object? value)
     {
         IFormatProvider inv = System.Globalization.CultureInfo.InvariantCulture;
         const System.Globalization.NumberStyles Num = System.Globalization.NumberStyles.Float;
@@ -441,7 +575,9 @@ internal sealed class AppEditorSession : IEditorSession
                 value = n;
                 return true;
             case Domain.Properties.PropertyKind.Float:
-                if (!float.TryParse(text, Num, inv, out float f)) return false;
+                // "NaN" and "Infinity" parse, and so does "1e100" — as infinity. None of them is a draw
+                // distance or a light's range, and a setter would write them into the file as given.
+                if (!float.TryParse(text, Num, inv, out float f) || !float.IsFinite(f)) return false;
                 value = f;
                 return true;
             case Domain.Properties.PropertyKind.Bool:
@@ -451,6 +587,12 @@ internal sealed class AppEditorSession : IEditorSession
             case Domain.Properties.PropertyKind.Text:
                 value = text;
                 return true;
+            case Domain.Properties.PropertyKind.HashName:
+                // The same rule as the property panel: an empty name would keep the hash of the old one.
+                // The hash is the adapter's to derive, so it travels as zero.
+                if (string.IsNullOrWhiteSpace(text)) return false;
+                value = new Domain.Properties.HashNameValue(0, text);
+                return true;
             case Domain.Properties.PropertyKind.UInt64Hex:
                 string hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? text[2..] : text;
                 if (!ulong.TryParse(hex, System.Globalization.NumberStyles.HexNumber, inv, out ulong h)) return false;
@@ -459,7 +601,8 @@ internal sealed class AppEditorSession : IEditorSession
             case Domain.Properties.PropertyKind.Vector3:
                 string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
                 if (parts.Length != 3 || !float.TryParse(parts[0], Num, inv, out float x)
-                    || !float.TryParse(parts[1], Num, inv, out float y) || !float.TryParse(parts[2], Num, inv, out float z))
+                    || !float.TryParse(parts[1], Num, inv, out float y) || !float.TryParse(parts[2], Num, inv, out float z)
+                    || !float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
                 {
                     return false;
                 }

@@ -42,10 +42,12 @@ public sealed record ObjectProperty(string Group, string Id, string Label, strin
 public sealed record EditorNotice(DateTime Time, bool Error, string Text);
 
 /// <summary>What a Build wrote: each packed archive with the backup taken of what it replaced, and each
-/// archive that failed with the reason.</summary>
+/// archive that failed with the reason. <paramref name="NotSaved"/> is what the save a build starts with
+/// could not write; when it is not empty the build stopped there and packed nothing.</summary>
 public sealed record BuildOutcome(
     IReadOnlyList<(string Archive, string? Backup)> Packed,
-    IReadOnlyList<(string Archive, string Error)> Failed);
+    IReadOnlyList<(string Archive, string Error)> Failed,
+    IReadOnlyList<string> NotSaved);
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
