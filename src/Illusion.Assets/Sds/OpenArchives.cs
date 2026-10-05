@@ -56,6 +56,15 @@ public static class OpenArchives
         }
     }
 
+    /// <summary>The editors that have this archive loaded right now.</summary>
+    public static IReadOnlyList<object> HoldersOf(FileInfo sds)
+    {
+        lock (Sync)
+        {
+            return Holders.TryGetValue(sds.FullName, out List<object>? list) ? list.ToList() : [];
+        }
+    }
+
     /// <summary>Whether anyone OTHER than <paramref name="owner"/> already has this archive loaded — the one
     /// question worth asking before opening it a second time.</summary>
     public static bool IsHeldByAnyoneElse(FileInfo sds, object owner)

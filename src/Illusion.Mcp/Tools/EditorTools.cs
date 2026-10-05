@@ -183,7 +183,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_clone")]
-    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
+    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every CARM* traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). Only the main game's tables are edited: the story DLCs ship an ingame.sds of their own and the clone is not in those (the result's notes say which). A source that is not keyed by its model name the way a stock car is, or anything failing on the way, is refused and everything written is taken back. A source open in an editor with unsaved edits is refused — save it first. The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
     public static async Task<string> CarClone(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -210,12 +210,13 @@ public sealed class EditorTools
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("Full path of the .sds archive in the game folder (pc\\sds\\… or pc\\dlcs\\…).")] string archive,
+        [Description("Build although the manifest names files that are not in the working copy. Default false: such a build is refused and the files are listed — put them back first. With true they are left out of the archive AND their manifest entries are removed for good; restoring a file later does not bring its entry back.")] bool dropMissing = false,
         [Description("Full path of an archive to take the per-resource memory requirements from, for an archive that never shipped itself: a cloned car built before requirements were kept takes them from the stock car it was cloned from. Omit normally — a working copy keeps the requirements of the archive it was extracted from.")] string? memoryFrom = null)
     {
         try
         {
             PackedArchive? result = null;
-            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, memoryFrom, out result));
+            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, memoryFrom, dropMissing, out result));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, packed = result });
         }
         catch (Exception ex)
@@ -388,10 +389,16 @@ public sealed class EditorTools
             while (true)
             {
                 await Task.Delay(Poll);
-                EditorStatus status = await ui.RunAsync(editor.Status);
+                // Of the editor the session was opened in: with the resource editor as the target, the map's
+                // count stays at zero for good and this used to run out its whole timeout on a session that
+                // had opened in the first second.
+                ResourceStatus resource = await ui.RunAsync(editor.ResourceStatus);
+                int inBlender = resource.Target == "resource"
+                    ? resource.BlenderObjects
+                    : (await ui.RunAsync(editor.Status)).BlenderObjects;
                 var said = (await ui.RunAsync(() => editor.Notices(8))).Where(n => n.Time >= started).ToList();
-                if (status.BlenderObjects > 0)
-                    return ToolResult.Json(new { success = true, blenderObjects = status.BlenderObjects, notices = said });
+                if (inBlender > 0)
+                    return ToolResult.Json(new { success = true, blenderObjects = inBlender, notices = said });
                 if (said.Any(n => n.Error))
                     return ToolResult.Json(new { success = false, error = "the editor refused", notices = said });
                 if (DateTime.UtcNow > deadline)

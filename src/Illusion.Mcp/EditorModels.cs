@@ -11,7 +11,10 @@ public sealed record EditorStatus(
     bool UnsavedEdits,
     IReadOnlyList<string> PendingBuild,
     int BlenderObjects,
-    string RenderMode);
+    string RenderMode,
+    // Which editor the scene tools drive right now: "map" or "resource". A tool that only works on one of
+    // them switches to it, and this is where that shows.
+    string Target = "map");
 
 /// <summary>What the resource editor is doing: whether it is open, which editor the scene tools drive
 /// (<c>map</c> or <c>resource</c>), and the archive on its stage.</summary>
@@ -39,7 +42,9 @@ public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, i
     IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
 
 /// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
-public sealed record PackedArchive(string Archive, string? Backup);
+/// <paramref name="Dropped"/> are manifest entries that named a file missing from the working copy: they are
+/// not in the archive, and no longer in the manifest.
+public sealed record PackedArchive(string Archive, string? Backup, IReadOnlyList<string>? Dropped = null);
 
 /// <summary>One car built under another's name: the model name the replaced archives are keyed by, each archive
 /// with the backup of what it held, and what was left as it was.</summary>
@@ -90,10 +95,13 @@ public sealed record EditorNotice(DateTime Time, bool Error, string Text);
 /// <summary>What a Build wrote: each packed archive with the backup taken of what it replaced, and each
 /// archive that failed with the reason. <paramref name="NotSaved"/> is what the save a build starts with
 /// could not write; when it is not empty the build stopped there and packed nothing.</summary>
+/// <paramref name="Dropped"/> are manifest entries ("archive: file") that named a file missing from the
+/// working copy and were left out of the archive packed.
 public sealed record BuildOutcome(
     IReadOnlyList<(string Archive, string? Backup)> Packed,
     IReadOnlyList<(string Archive, string Error)> Failed,
-    IReadOnlyList<string> NotSaved);
+    IReadOnlyList<string> NotSaved,
+    IReadOnlyList<string>? Dropped = null);
 
 /// <summary>What mirroring a district into its winter archive did: how many objects had every material
 /// settled (winter's own where the season changes it), how many objects winter gained and lost, how many

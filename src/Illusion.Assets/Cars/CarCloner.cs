@@ -157,6 +157,7 @@ public static partial class CarCloner
 
         CarCloneResult? result;
         var packed = new List<(string Archive, string? Backup)>();
+        var droppedByArchive = new List<(string Archive, IReadOnlyList<string> Dropped)>();
         try
         {
             result = CloneExtracted(folders, stem, name, traffic, title, out refusal);
@@ -168,6 +169,7 @@ public static partial class CarCloner
                 journal.WillCreateFile(to.FullName);
                 SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: false, when);
                 packed.Add((made.Archive, made.Backup));
+                if (made.Dropped.Count > 0) droppedByArchive.Add((made.Archive, made.Dropped));
             }
             IEnumerable<FileInfo> changed = result.TextId == null ? [tablesSds, ingameSds] : [tablesSds, ingameSds, .. textSds];
             foreach (FileInfo table in changed)
@@ -175,6 +177,7 @@ public static partial class CarCloner
                 SdsWriter.PackResult made = SdsWriter.PackSds(table, createBackup: true, when);
                 journal.Replaced(made.Archive, made.Backup);
                 packed.Add((made.Archive, made.Backup));
+                if (made.Dropped.Count > 0) droppedByArchive.Add((made.Archive, made.Dropped));
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -184,6 +187,28 @@ public static partial class CarCloner
         }
         // The game finds archives through its cached file list, and a new one is not in it.
         var notes = new List<string>(result.Notes);
+        foreach ((string archive, IReadOnlyList<string> dropped) in droppedByArchive)
+        {
+            notes.Add($"{Path.GetFileName(archive)}: {dropped.Count} manifest entr(ies) named a file missing from the working "
+                + $"copy and were left out — {string.Join(", ", dropped.Take(8))}");
+        }
+        // What "registered" does not cover. Each story DLC ships an ingame.sds of its own — paint rows, cover
+        // points, traffic — and only the main game's is edited here.
+        string dlcs = Path.Combine(MafiaEnvironment.PcFolder, "dlcs");
+        if (Directory.Exists(dlcs))
+        {
+            List<string> own = [.. Directory.GetDirectories(dlcs)
+                .Where(d => File.Exists(Path.Combine(d, "sds", "tables", "ingame.sds"))).Select(d => Path.GetFileName(d) ?? d)];
+            if (own.Count > 0)
+            {
+                notes.Add($"not registered in the tables of {string.Join(", ", own)}: each ships its own ingame.sds, and there "
+                    + "the clone has no paint row, no cover points and no traffic");
+            }
+        }
+        if (traffic)
+        {
+            notes.Add("traffic: added to the CARM* tables only — SEASONS_CARS_* and CAR_DEMO_* are left as they are");
+        }
         notes.Add(GameFileIndex.Reset()
             ? "the game's file list (vfs.bin) was reset — the next start rebuilds it with the new archives"
             : $"the game's file list was not reset — remove {GameFileIndex.Path} before starting the game, or it will not find the new archives");
@@ -401,8 +426,12 @@ public static partial class CarCloner
         {
             FrameObjectBase? root = frame.FrameObjects.Values.OfType<FrameObjectBase>()
                 .FirstOrDefault(f => string.Equals(f.Name.String, model, StringComparison.OrdinalIgnoreCase));
+            // Each of the four keys below is how the game finds a part of the car under its model name. A
+            // source that is not keyed the expected way used to become a NOTE while the archive was packed
+            // and the car registered all the same — "success" for a car the game cannot put together. It is
+            // a failure now, and the caller takes back what was written.
             int buffers = GiveOwnBuffers(manifest, frame, model, name);
-            if (buffers == 0) notes.Add($"{label}: no buffer was renamed — the clone draws from the source car's buffers");
+            if (buffers == 0) throw new InvalidDataException($"{label} has no geometry buffers to give the new name to");
 
             if (root != null)
             {
@@ -416,7 +445,7 @@ public static partial class CarCloner
             }
             else
             {
-                notes.Add($"{label}: no frame is named {model} — the root keeps its name");
+                throw new InvalidDataException($"{label} has no frame named {model} — its root cannot be given the new name");
             }
 
             AtomicFile.WriteAllBytes(frames[0], frame.WriteToStream());
@@ -434,8 +463,11 @@ public static partial class CarCloner
         foreach (string path in manifest.GetFiles("PREFAB"))
         {
             PrefabFile prefab = PrefabFile.Load(path);
-            if (prefab.Rekey(Fnv64.Hash(model), Fnv64.Hash(name))) AtomicFile.WriteAllBytes(path, prefab.ToBytes());
-            else notes.Add($"{label}: the prefab has no entry for {model}");
+            if (!prefab.Rekey(Fnv64.Hash(model), Fnv64.Hash(name)))
+            {
+                throw new InvalidDataException($"{label}: its prefab has no entry for {model} to file under the new name");
+            }
+            AtomicFile.WriteAllBytes(path, prefab.ToBytes());
         }
 
         foreach (string path in manifest.GetFiles("EntityDataStorage"))
@@ -443,8 +475,8 @@ public static partial class CarCloner
             EntityDataStorageFile storage = EntityDataStorageFile.Load(path);
             if (storage.Hash != Fnv64.Hash(model.ToLowerInvariant()))
             {
-                notes.Add($"{label}: the entity data is not filed under {model.ToLowerInvariant()}");
-                continue;
+                throw new InvalidDataException(
+                    $"{label}: its entity data is not filed under {model.ToLowerInvariant()}, so it cannot be filed under the new name");
             }
             storage.Hash = Fnv64.Hash(name.ToLowerInvariant());
             AtomicFile.WriteAllBytes(path, storage.ToBytes());

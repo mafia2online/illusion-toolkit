@@ -149,7 +149,7 @@ public interface IEditorSession
     /// edit made in the working copy itself (a script, a table) that no editor session tracks. With
     /// <paramref name="memoryFrom"/>, the working copy first takes the memory requirements that archive states
     /// (a clone made before they were kept takes them from the car it was cloned from). Null on success.</summary>
-    string? BuildArchive(string archive, string? memoryFrom, out PackedArchive? result);
+    string? BuildArchive(string archive, string? memoryFrom, bool dropMissing, out PackedArchive? result);
 
     /// <summary>Builds one car under another car's name, replacing that car's archive (backup kept) and touching
     /// no table. Null on success.</summary>
