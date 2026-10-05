@@ -379,6 +379,19 @@ internal static class BridgeMaterialProbes
                     !both && File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
                     && twoSlots.TextureChanges.Count == 0 && MafiaMaterials.FindHashByName(bad.Name) == null, reason ?? "resolved");
 
+                // The same with a second slot that is new and has no picture at all.
+                var pictureless = new ExchangeContainer();
+                MeshMaterialInfo repaintFirst = NewSlot(pictureless, Gradient(w, h, 152), w, h);
+                repaintFirst.Hash = slot.Hash;
+                var noPicture = new MeshMaterialInfo { Hash = "", Name = ProbeMaterial + "_no_picture", Authored = true };
+                var bareSecond = new AuthoredMaterialResolver(pictureless, catalogHost);
+                bool bareTaken = bareSecond.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { repaintFirst, noPicture } }, document, out reason);
+                Check("…and so is one whose second material is new and has no image, with the first left as it was",
+                    !bareTaken && reason != null && reason.Contains("no image", StringComparison.Ordinal)
+                    && File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && bareSecond.TextureChanges.Count == 0, reason ?? "resolved");
+
                 // A write that fails — the texture held open by something — is not remembered as done: the
                 // next object of the same push sharing the image is refused too, not handed a file that was
                 // never written.
