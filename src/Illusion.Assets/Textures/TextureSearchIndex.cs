@@ -105,6 +105,35 @@ public static class TextureSearchIndex
         }
     }
 
+    /// <summary>Every copy of a texture name in the mirror that is on disk now, the first found first. For a
+    /// caller that cannot use just any copy — one that needs it in an archive that lists it, and not in the
+    /// folder it is carrying into: the first copy failing that test is not proof that no copy passes it.</summary>
+    public static IReadOnlyList<string> FindAll(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return [];
+        EnsureBuilt();
+        lock (Sync)
+        {
+            if (_byName == null || !_byName.TryGetValue(name, out List<int>? holders)) return [];
+            var paths = new List<string>(holders.Count);
+            for (int i = 0; i < holders.Count;)
+            {
+                string path = Path.Combine(Folders[holders[i]], name);
+                if (File.Exists(path))
+                {
+                    paths.Add(path);
+                    i++;
+                }
+                else
+                {
+                    holders.RemoveAt(i);
+                }
+            }
+            if (holders.Count == 0) _byName.Remove(name);
+            return paths;
+        }
+    }
+
     /// <summary>Full path of a texture name anywhere in the mirror, or null — a file that is there now: a
     /// copy that has been removed since it was indexed is forgotten and the next one answers. Blocks on the
     /// first call if the background build has not finished yet (WarmUp makes that rare).</summary>

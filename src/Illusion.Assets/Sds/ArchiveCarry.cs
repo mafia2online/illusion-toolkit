@@ -82,8 +82,12 @@ public static class ArchiveCarry
         var textures = new List<string>();
         var elsewhere = new List<string>();
         var borrowed = new List<(string Texture, string Archive)>();
-        CarryTextures(from, to, fromDir, toDir, materialHashes, directTextures, textures, elsewhere, borrowed,
-            findElsewhere ?? TextureSearchIndex.FindPath);
+        // Every copy the index knows, not the first: a copy in the destination itself, or one its own archive
+        // does not list, is no donor — and it used to be taken as proof that there was none.
+        Func<string, IEnumerable<string>> candidates = findElsewhere == null
+            ? TextureSearchIndex.FindAll
+            : name => findElsewhere(name) is { } path ? [path] : [];
+        CarryTextures(from, to, fromDir, toDir, materialHashes, directTextures, textures, elsewhere, borrowed, candidates);
 
         var descriptions = new List<ulong>();
         var unresolved = new List<ulong>();
@@ -95,7 +99,8 @@ public static class ArchiveCarry
 
     private static void CarryTextures(SdsManifest from, SdsManifest to, string fromDir, string toDir,
         IReadOnlyCollection<ulong> materialHashes, IReadOnlyCollection<string> directTextures, List<string> added,
-        List<string> elsewhere, List<(string Texture, string Archive)> borrowed, Func<string, string?> findElsewhere)
+        List<string> elsewhere, List<(string Texture, string Archive)> borrowed,
+        Func<string, IEnumerable<string>> findElsewhere)
     {
         MafiaMaterials.EnsureLoaded();
         var wanted = new HashSet<string>(directTextures.Where(t => !string.IsNullOrWhiteSpace(t)),
@@ -149,15 +154,30 @@ public static class ArchiveCarry
         }
     }
 
-    // The extracted archive, other than the destination, whose manifest lists the texture.
-    private static (SdsManifest Manifest, string Dir)? HolderOf(string texture, string toDir, Func<string, string?> find)
+    // The extracted archive, other than the destination, whose manifest lists the texture: the first of the
+    // copies on offer that is one. A copy that is not — gone from disk, in the destination, in a folder that
+    // is no working copy, or not on its archive's list — is passed over for the next.
+    private static (SdsManifest Manifest, string Dir)? HolderOf(string texture, string toDir,
+        Func<string, IEnumerable<string>> find)
     {
-        string? path = find(texture);
-        string? dir = path == null ? null : Path.GetDirectoryName(path);
-        if (dir == null || !File.Exists(path) || !File.Exists(Path.Combine(dir, "SDSContent.xml"))) return null;
-        if (string.Equals(Path.GetFullPath(dir), Path.GetFullPath(toDir), StringComparison.OrdinalIgnoreCase)) return null;
-        SdsManifest manifest = SdsManifest.Load(dir);
-        return manifest.HasFile(texture) ? (manifest, dir) : null;
+        string destination = Path.GetFullPath(toDir);
+        foreach (string path in find(texture))
+        {
+            string? dir = Path.GetDirectoryName(path);
+            if (dir == null || !File.Exists(path) || !File.Exists(Path.Combine(dir, "SDSContent.xml"))) continue;
+            if (string.Equals(Path.GetFullPath(dir), destination, StringComparison.OrdinalIgnoreCase)) continue;
+            SdsManifest manifest;
+            try
+            {
+                manifest = SdsManifest.Load(dir);
+            }
+            catch (Exception ex) when (ex is IOException or Formats.SdsFormatException or System.Xml.XmlException)
+            {
+                continue; // a working copy whose manifest does not read lends nothing
+            }
+            if (manifest.HasFile(texture)) return (manifest, dir);
+        }
+        return null;
     }
 
     /// <summary>What a working copy's lists held before a carry, so that a carry whose import then fails can

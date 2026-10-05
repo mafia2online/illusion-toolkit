@@ -443,6 +443,58 @@ internal static class ObjectTransplantProbes
                     $"first {firstWins}, second {fallsThrough}");
             }
 
+            // ── The carry through the index itself: donors that appear late, and a first copy that is no donor ──
+            if (Illusion.Assets.Textures.TextureSearchIndex.IsBuilt)
+            {
+                const string Lent = "illusion_probe_lent.dds";
+                string Working(string folder)
+                {
+                    string made = Path.Combine(scratch, folder);
+                    Directory.CreateDirectory(made);
+                    File.WriteAllText(Path.Combine(made, "SDSContent.xml"), "<SDSResource>\n</SDSResource>");
+                    return made;
+                }
+                string Donor(string folder, byte mark, bool listed = true)
+                {
+                    string made = Working(folder);
+                    File.WriteAllBytes(Path.Combine(made, Lent), [mark, 2, 3]);
+                    if (listed) SdsManifest.Load(made).AddEntry("Texture", Lent, 2, [("HasMIP", "0")]);
+                    return made;
+                }
+                string nothing = Working("lend_from"), into = Working("lend_into");
+                ArchiveCarry.Report Bring() => ArchiveCarry.Carry(nothing, into, [], [], null, directTextures: [Lent]);
+
+                ArchiveCarry.Report beforeDonors = Bring();
+                string unlisted = Donor("lend_unlisted", 7, listed: false), good = Donor("lend_good", 9);
+                // As the extractor announces a folder it has just made — in this order, so the copy its own
+                // archive does not list is the one the index offers first.
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(unlisted);
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(good);
+                ArchiveCarry.Report afterDonors = Bring();
+                Check("a texture in an archive extracted after the index was built is found by the carry's own lookup",
+                    beforeDonors.Elsewhere.Contains(Lent) && afterDonors.Textures.Contains(Lent)
+                    && afterDonors.Borrowed.Any(b => b.Texture == Lent && b.Archive == "lend_good"),
+                    $"before: {(beforeDonors.Elsewhere.Contains(Lent) ? "held nowhere" : "found")}; after: from "
+                    + string.Join(", ", afterDonors.Borrowed.Select(b => b.Archive)));
+                Check("the first copy the index offers not being on its archive's list does not end the search",
+                    File.Exists(Path.Combine(into, Lent)) && File.ReadAllBytes(Path.Combine(into, Lent))[0] == 9);
+
+                // Now a donor has gone, and the destination's own copy stands before the one that is left.
+                if (SdsManifest.Load(into).RemoveEntry(Lent)) File.Delete(Path.Combine(into, Lent));
+                File.Delete(Path.Combine(unlisted, Lent));
+                File.Delete(Path.Combine(good, Lent));
+                string own = Path.Combine(into, Lent);
+                File.WriteAllBytes(own, [5]);                              // on disk in the destination, not on its list
+                Illusion.Assets.Textures.TextureSearchIndex.Register(own);
+                string third = Donor("lend_third", 11);
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(third);
+                ArchiveCarry.Report onceMore = Bring();
+                Check("a donor that has gone, and a copy that is the destination's own, are passed over for the next donor",
+                    onceMore.Textures.Contains(Lent) && onceMore.Borrowed.Any(b => b.Archive == "lend_third")
+                    && File.ReadAllBytes(own)[0] == 11,
+                    onceMore.Elsewhere.Contains(Lent) ? "reported as held nowhere" : "from " + string.Join(", ", onceMore.Borrowed.Select(b => b.Archive)));
+            }
+
             // ── A destination that has neither a prefab nor an item description of its own ──
             string bare = Path.Combine(scratch, "bare");
             Directory.CreateDirectory(bare);
