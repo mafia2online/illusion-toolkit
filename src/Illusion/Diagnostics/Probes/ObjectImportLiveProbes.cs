@@ -160,26 +160,79 @@ internal static class ObjectImportLiveProbes
             Check("a drag still takes the hull along",
                 ProbeAssert.Approx(hull.WorldTransform.Translation - dragFrom, new Vector3(0f, 12f, 0f), 0.01f));
 
+            // ── a resize re-cooks the hull under a new hash: the record follows it, and comes back on undo ──
+            var placed = (CollisionInstanceAdapter)hulls[0].Source!;
+            ulong hashBefore = placed.Instance.Hash;
+            Vector3 about = moved.WorldTransform.Translation;
+            host.Selection.SetSelection([node], node);
+            host.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Scale);
+            host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(-about) * Matrix4x4.CreateScale(1.5f) * Matrix4x4.CreateTranslation(about));
+            host.GizmoEndDrag();
+            Check("a resize gives the linked hull a new hash", placed.Instance.Hash != hashBefore,
+                $"{hashBefore:x16} → {placed.Instance.Hash:x16}");
+            Check("and the object's record names the new one, so the hull is still the object's",
+                ImportLinks.HullsOf(dir, "probe_live") is [{ } now] && now.Hull == placed.Instance.Hash
+                && host.LinkedCollisionNodes(node).Count == 1);
+            host.Undo();
+            Check("undoing the resize puts the hull and the record back",
+                placed.Instance.Hash == hashBefore && ImportLinks.HullsOf(dir, "probe_live") is [{ } then] && then.Hull == hashBefore
+                && host.LinkedCollisionNodes(node).Count == 1);
+
+            // ── the same hull given twice, the second placement nine metres from the object's pivot ──
+            int given = 1;
+            host.Selection.SetSelection([hulls[0]], hulls[0]);
+            host.DuplicateSelected();
+            SceneNode? twin = host.Selection.Selected.FirstOrDefault(
+                n => n.Source is CollisionInstanceAdapter && !ReferenceEquals(n, hulls[0]));
+            Check("a second placement of the same hull can be made", twin != null);
+            if (twin?.Source is CollisionInstanceAdapter farPlaced)
+            {
+                host.Selection.SetSelection([twin], twin);
+                host.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Move);
+                host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(9f, 0f, 0f));
+                host.GizmoEndDrag();
+                var owner = ((FrameNodeAdapter)node.Source!).Frame;
+                // As an import records them: one entry per placement, each with its place in the object's space.
+                ImportLinks.Set(dir, "probe_live", [D3DImageHost.LinkFor(owner, placed.Instance), D3DImageHost.LinkFor(owner, farPlaced.Instance)]);
+                float away = Vector3.Distance(farPlaced.Instance.Position, moved.WorldTransform.Translation);
+                IReadOnlyList<SceneNode> both = host.LinkedCollisionNodes(node);
+                Check("two placements of one hull are both the object's — one of them well past five metres from its pivot",
+                    both.Count == 2 && both.Contains(twin) && both.Contains(hulls[0]) && away > 5f,
+                    $"{both.Count} linked; the far one is {away:0.#} m from the pivot");
+                given = 2;
+                Vector3 nearAt = placed.Instance.Position, farAt = farPlaced.Instance.Position;
+                before = moved.LocalTransform;
+                after = before;
+                after.Translation += new Vector3(0f, 0f, 20f);
+                moved.LocalTransform = after;
+                host.RecordTransform(node, before, after);
+                Check("and both go with the object when it is moved",
+                    ProbeAssert.Approx(placed.Instance.Position - nearAt, new Vector3(0f, 0f, 20f), 0.01f)
+                    && ProbeAssert.Approx(farPlaced.Instance.Position - farAt, new Vector3(0f, 0f, 20f), 0.01f)
+                    && host.LinkedCollisionNodes(node).Count == 2);
+            }
+
             // ── a rename takes the record along ──
             string? renamed = session.SetProperty("probe_live", "Base.Name", "probe_live_renamed");
             Check("renaming the object moves its record to the new name",
-                renamed == null && ImportLinks.HullsOf(dir, "probe_live").Count == 0 && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 1,
+                renamed == null && ImportLinks.HullsOf(dir, "probe_live").Count == 0 && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == given,
                 renamed ?? "");
-            Check("and the hull is found under the new name", host.LinkedCollisionNodes(node).Count == 1);
+            Check("and the hull is found under the new name", host.LinkedCollisionNodes(node).Count == given);
             host.Undo();
             Check("undoing the rename moves the record back",
-                ImportLinks.HullsOf(dir, "probe_live").Count == 1 && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 0);
+                ImportLinks.HullsOf(dir, "probe_live").Count == given && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 0);
             host.Redo();
 
             // ── delete takes the hull; undo brings both back ──
             host.Selection.SetSelection([node], node);
             host.DeleteSelected();
-            Check("deleting the object deletes its hull",
+            Check("deleting the object deletes every hull it was given",
                 Nodes(host).Count(n => n.Source is CollisionInstanceAdapter) == hullsAtStart
                 && !Nodes(host).Any(n => ReferenceEquals(n, node)));
             host.Undo();
-            Check("and undo brings both back",
-                Nodes(host).Count(n => n.Source is CollisionInstanceAdapter) == hullsAtStart + 1 && host.LinkedCollisionNodes(node).Count == 1);
+            Check("and undo brings them all back",
+                Nodes(host).Count(n => n.Source is CollisionInstanceAdapter) == hullsAtStart + given
+                && host.LinkedCollisionNodes(node).Count == given);
 
             // ── everything undone: no object, no hull, no record ──
             for (int guard = 0; host.History.CanUndo && guard < 50; guard++) host.Undo();

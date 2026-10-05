@@ -27,6 +27,15 @@ public partial class PropsTabView : UserControl
     private const string AllShelves = "All";
 
     private readonly List<PropTileViewModel> _all = [];
+
+    // A wrapping panel cannot virtualize, and the catalog is some 2,700 objects: every one of them given a
+    // card took the UI thread two seconds each time the tab opened or the filter changed, for a pane that
+    // shows a dozen. So the list the cards are made from is a PAGE of what the filter lets through, and grows
+    // by another page when the end of it is scrolled into reach.
+    private const int PageSize = 120;
+    private List<PropTileViewModel> _filtered = [];
+    private readonly System.Collections.ObjectModel.ObservableCollection<PropTileViewModel> _paged = [];
+    private int _firstInView;
     private readonly PropThumbnailRenderer _thumbnails = new();
     private readonly DispatcherTimer _pictures;
     // The one prop whose archive is being read, on a pool thread, and the tile it is for.
@@ -59,10 +68,19 @@ public partial class PropsTabView : UserControl
                 _pictures.Stop();
             }
         };
+        Tiles.ItemsSource = _paged;
         IsVisibleChanged += (_, _) =>
         {
-            if (IsVisible) LoadCatalog(force: false);
-            else _pictures.Stop();
+            if (!IsVisible)
+            {
+                _pictures.Stop();
+                return;
+            }
+            LoadCatalog(force: false);
+            // The timer was stopped when the tab was hidden, and a catalog that is already loaded has nothing
+            // to restart it: cards whose pictures were still to come kept their placeholders until a filter
+            // was touched.
+            if (_loaded && _paged.Count > 0) _pictures.Start();
         };
         Unloaded += (_, _) => _thumbnails.Dispose();
     }
@@ -116,13 +134,43 @@ public partial class PropsTabView : UserControl
                     || t.Entry.Archive.Contains(query, StringComparison.OrdinalIgnoreCase)
                     || t.Entry.Category.Contains(query, StringComparison.OrdinalIgnoreCase)))
             .ToList();
-        Tiles.ItemsSource = shown;
+        _filtered = shown;
+        _paged.Clear();
+        _firstInView = 0;
+        ShowAnotherPage();
         if (_loaded)
         {
             Status.Text = $"{shown.Count} of {_all.Count} objects · drag one onto the viewport, or double-click it";
         }
         if (shown.Count > 0) _pictures.Start();
     }
+
+    private void ShowAnotherPage()
+    {
+        int upTo = Math.Min(_filtered.Count, _paged.Count + PageSize);
+        for (int i = _paged.Count; i < upTo; i++) _paged.Add(_filtered[i]);
+    }
+
+    // The end of what is shown has come within a screen of the viewport (or everything shown fits in it): the
+    // next page. Each page changes the extent, which raises this again, so a tall pane fills in a few steps.
+    private void Tiles_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_paged.Count > 0 && e.ExtentHeight > 0)
+        {
+            _firstInView = Math.Clamp((int)(e.VerticalOffset / e.ExtentHeight * _paged.Count), 0, _paged.Count - 1);
+        }
+        if (_paged.Count >= _filtered.Count || e.VerticalOffset + (2 * e.ViewportHeight) < e.ExtentHeight) return;
+        // A jump to the very end (the End key) keeps the view pinned there while the list grows under it, and
+        // would walk through every page in one go — the two seconds this paging exists to avoid. One page per
+        // gesture, unless what is shown does not even fill the pane.
+        bool fills = e.ExtentHeight > e.ViewportHeight;
+        if (fills && (DateTime.UtcNow - _lastPage).TotalMilliseconds < 200) return;
+        _lastPage = DateTime.UtcNow;
+        ShowAnotherPage();
+        _pictures.Start();
+    }
+
+    private DateTime _lastPage;
 
     // One picture per tick: a kept one if any tile shown still lacks it, otherwise one drawn — taking the
     // archive the renderer already holds first, so archives are read once rather than once per tile. The
@@ -136,13 +184,16 @@ public partial class PropsTabView : UserControl
             readFor.Thumbnail = read.IsCompletedSuccessfully ? _thumbnails.Draw(read.Result) : null;
             return;
         }
-        if (Tiles.ItemsSource is not List<PropTileViewModel> shown || !IsVisible)
+        if (!IsVisible)
         {
             _pictures.Stop();
             return;
         }
         if (_reading != null) return;
-        List<PropTileViewModel> missing = shown.Where(t => t.Thumbnail == null && !t.ThumbnailTried).ToList();
+        // From the cards in view onward first, then the ones above them: what is looked at is drawn before
+        // what was scrolled past.
+        List<PropTileViewModel> missing = [.. _paged.Skip(_firstInView).Concat(_paged.Take(_firstInView))
+            .Where(t => t.Thumbnail == null && !t.ThumbnailTried)];
         if (missing.Count == 0)
         {
             _thumbnails.Rest();
@@ -160,7 +211,8 @@ public partial class PropsTabView : UserControl
             }
         }
 
-        PropTileViewModel next = missing.OrderBy(t => t.Entry.Archive, StringComparer.OrdinalIgnoreCase).First();
+        // Among the first couple of screens of those, by archive — an archive is read once for all its props.
+        PropTileViewModel next = missing.Take(48).OrderBy(t => t.Entry.Archive, StringComparer.OrdinalIgnoreCase).First();
         next.ThumbnailTried = true;
         _readingFor = next;
         _reading = Task.Run(() => _thumbnails.Stage(next.Entry));

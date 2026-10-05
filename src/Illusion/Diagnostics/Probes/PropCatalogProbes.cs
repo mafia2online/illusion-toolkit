@@ -79,6 +79,38 @@ internal static class PropCatalogProbes
             try { quiet = renderer.Draw(renderer.Stage(gone)) == null; }
             catch (Exception) { quiet = false; }
             Check("a prop whose archive cannot be read gets no picture and throws nothing", quiet);
+
+            // The tab itself, at the size it has in the editor: cards are made a page at a time, not for the
+            // whole catalog at once (a wrapping panel cannot virtualize, and 2,700 cards took two seconds).
+            var tab = new global::Illusion.Views.PropsTabView();
+            var window = new System.Windows.Window
+            {
+                Width = 330, Height = 700, Left = -4000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                WindowStyle = System.Windows.WindowStyle.None, Content = tab,
+            };
+            window.Show();
+            DateTime until = DateTime.UtcNow.AddSeconds(120);
+            while (tab.Tiles.Items.Count == 0 && DateTime.UtcNow < until) Pump(200);
+            Pump(1500);
+            int firstPage = tab.Tiles.Items.Count;
+            Check("the tab makes cards for a page of the catalog, not for all of it",
+                firstPage > 0 && firstPage < entries.Count && firstPage <= 400, $"{firstPage} cards for {entries.Count} objects");
+            var scroller = Descendant<System.Windows.Controls.ScrollViewer>(tab.Tiles);
+            scroller?.ScrollToVerticalOffset(scroller.ExtentHeight);    // the thumb dragged to the bottom
+            Pump(1500);
+            int afterScroll = tab.Tiles.Items.Count;
+            Check("scrolling to the end of what is shown brings the next page, and only that",
+                scroller != null && afterScroll > firstPage && afterScroll <= firstPage * 3, $"{firstPage} → {afterScroll}");
+            int withPicture = tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().Count(t => t.Thumbnail != null);
+            window.Hide();
+            Pump(400);
+            window.Show();
+            Pump(6000);
+            int afterReopen = tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().Count(t => t.Thumbnail != null);
+            Check("hidden and shown again, the tab goes on filling in pictures",
+                afterReopen > withPicture || tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().All(t => t.Thumbnail != null || t.ThumbnailTried),
+                $"{withPicture} → {afterReopen} of {afterScroll}");
+            window.Close();
         }
         catch (Exception ex)
         {
@@ -90,6 +122,28 @@ internal static class PropCatalogProbes
             sb.Insert(0, $"PROP CATALOG PROBE: {pass} passed, {fail} failed\n\n");
             File.WriteAllText(outFile, sb.ToString());
         }
+    }
+
+    private static void Pump(int ms)
+    {
+        DateTime end = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < end)
+        {
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+            Thread.Sleep(10);
+        }
+    }
+
+    private static T? Descendant<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
+    {
+        int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            System.Windows.DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) return hit;
+            if (Descendant<T>(child) is { } deeper) return deeper;
+        }
+        return null;
     }
 
     // A tile with nothing drawn on it is one flat colour.
