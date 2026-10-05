@@ -175,6 +175,12 @@ internal static class ProbeRunner
                 return true;
             // A car cloned under a new name, on scratch copies of the working copies.
             // Output: %TEMP%\illusion_car_clone.txt
+            // The real clone against the install with a pack made to fail, and everything it wrote taken
+            // back. WRITES TO THE INSTALL (and restores it); the game must not be running.
+            // Output: %TEMP%\illusion_car_clone_rollback.txt
+            case "--probe-car-clone-rollback":
+                CarCloneProbes.RunCarCloneRollbackProbe();
+                return true;
             case "--probe-car-clone":
                 CarCloneProbes.RunCarCloneProbe();
                 return true;

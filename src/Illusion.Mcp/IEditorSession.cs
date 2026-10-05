@@ -125,7 +125,7 @@ public interface IEditorSession
 
     /// <summary>Opens the resource editor (if it is not open) on an archive — a path, a path under <c>pc\sds</c>
     /// such as <c>cars/shubert_38.sds</c>, or a bare name — and makes it the target. Null when the load started.</summary>
-    string? OpenResource(string archive);
+    string? OpenResource(string archive, out string? archivePath);
 
     /// <summary>Archives of the game's library, by name fragment and/or folder fragment.</summary>
     IReadOnlyList<LibraryItem> Library(string? query, string? folder, int limit);

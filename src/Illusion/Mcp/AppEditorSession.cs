@@ -96,8 +96,9 @@ internal sealed class AppEditorSession : IEditorSession
             : "the game folder is not set yet — open the toolkit's launcher first";
     }
 
-    public string? OpenResource(string archive)
+    public string? OpenResource(string archive, out string? archivePath)
     {
+        archivePath = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         var sds = new FileInfo(Path.IsPathRooted(archive)
             ? archive
@@ -132,6 +133,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (window.TargetStage is { } stage && stage.BridgeEditedCount > 0) return "a Blender edit session is open there — blender_end first";
         window.Reveal(sds);
         _resourceTarget = true;
+        archivePath = sds.FullName;
         return null;
     }
 

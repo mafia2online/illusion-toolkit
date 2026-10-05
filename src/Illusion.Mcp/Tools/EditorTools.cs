@@ -79,15 +79,35 @@ public sealed class EditorTools
     {
         try
         {
-            if (await ui.RunAsync(() => editor.OpenResource(archive)) is { } refused) return ToolResult.Invalid(refused);
+            string? wanted = null;
+            if (await ui.RunAsync(() => editor.OpenResource(archive, out wanted)) is { } refused) return ToolResult.Invalid(refused);
             DateTime until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 1, 600));
             ResourceStatus status;
+            DateTime? emptySince = null;
+            bool staged;
             do
             {
                 await Task.Delay(400);
                 status = await ui.RunAsync(editor.ResourceStatus);
+                // "Something is loaded" is not "what was asked for is loaded": the stage keeps showing the
+                // previous archive until the new one takes its place, and that one passes every other test.
+                staged = string.Equals(status.ArchivePath, wanted, StringComparison.OrdinalIgnoreCase);
+                // An archive with nothing to draw (a texture pack) is on the stage with no meshes for good.
+                if (staged && !status.Loading && status.Meshes == 0) emptySince ??= DateTime.UtcNow;
+                else emptySince = null;
             }
-            while ((status.Loading || status.Meshes == 0) && DateTime.UtcNow < until);
+            while ((!staged || status.Loading || (status.Meshes == 0 && DateTime.UtcNow - emptySince < TimeSpan.FromSeconds(4)))
+                   && DateTime.UtcNow < until);
+            if (!staged)
+            {
+                return ToolResult.Json(new
+                {
+                    success = false,
+                    error = $"the resource editor did not put {Path.GetFileName(wanted)} on its stage — it shows "
+                        + (status.Archive ?? "nothing") + ". The tools still act on what it shows",
+                    resource = status,
+                });
+            }
             return ToolResult.Json(new { success = true, loaded = !status.Loading && status.Meshes > 0, resource = status });
         }
         catch (Exception ex)

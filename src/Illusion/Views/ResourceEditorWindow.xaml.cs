@@ -123,14 +123,32 @@ public partial class ResourceEditorWindow : Window
     {
         if (_catalog?.Find(archive) is { } entry)
         {
+            _rebuiltFor = null;
             Browser.Reveal(entry);
             StageEntry(entry);
             return;
         }
         _pendingReveal = archive;
+
+        // The catalog is a walk of the game's folders made when the window opened. An archive made since — a
+        // car cloned a moment ago — is not in it, and the request used to wait here for good while the stage
+        // went on showing the previous car. Walk again, once per archive: one that is still not found after
+        // that is simply not in the library, and asking again would only loop.
+        if (_catalog != null && archive.Exists
+            && !string.Equals(_rebuiltFor, archive.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            _rebuiltFor = archive.FullName;
+            _catalog = null;
+            BuildCatalog();
+        }
+        else if (_catalog != null)
+        {
+            _pendingReveal = null;
+        }
     }
 
     private FileInfo? _pendingReveal;
+    private string? _rebuiltFor;
 
     // ── Library ──
 

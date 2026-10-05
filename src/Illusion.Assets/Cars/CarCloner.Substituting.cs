@@ -76,18 +76,34 @@ public static partial class CarCloner
             cars.Add((from, to));
         }
 
+        // Both seasons or neither. The winter archive failing to pack used to leave the summer one substituted
+        // and the winter one stock — and the target's working copy already deleted. The copy is moved aside
+        // instead and only dropped once every archive is in; on a failure the replaced archives come back from
+        // the backups taken a moment earlier.
         DateTime when = DateTime.Now;
         var packed = new List<(string Archive, string? Backup)>();
-        foreach ((FileInfo from, FileInfo to) in cars)
+        var journal = new GameWriteJournal();
+        try
         {
-            string fromFolder = SdsMeshLoader.EnsureExtracted(from);
-            SdsWriter.EnsureMemoryRequirements(from);
-            string toFolder = MafiaEnvironment.ExtractedDir(to);
-            SdsWriter.DeleteExtracted(toFolder);
-            notes.AddRange(SubstituteExtracted(fromFolder, toFolder, sourceModel, targetModel));
-            SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: true, when);
-            packed.Add((made.Archive, made.Backup));
+            foreach ((FileInfo from, FileInfo to) in cars)
+            {
+                string fromFolder = SdsMeshLoader.EnsureExtracted(from);
+                SdsWriter.EnsureMemoryRequirements(from);
+                string toFolder = MafiaEnvironment.ExtractedDir(to);
+                journal.MoveAside(toFolder);
+                journal.WillCreateFolder(toFolder);
+                notes.AddRange(SubstituteExtracted(fromFolder, toFolder, sourceModel, targetModel));
+                SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: true, when);
+                journal.Replaced(made.Archive, made.Backup);
+                packed.Add((made.Archive, made.Backup));
+            }
         }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            refusal = TakenBack("the substitution", ex, journal.Undo());
+            return null;
+        }
+        journal.Commit();
         notes.Add(GameFileIndex.Reset()
             ? "the game's file list (vfs.bin) was reset — the next start rebuilds it"
             : $"the game's file list was not reset — remove {GameFileIndex.Path} before starting the game");
