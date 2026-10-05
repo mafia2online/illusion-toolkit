@@ -397,6 +397,35 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         return found;
     }
 
+    /// <summary>
+    /// Whether the record of given collision kept under this object's name is THIS object's — for a rename,
+    /// which has to take the record along when it is, and leave it where it is when it is a namesake's.
+    /// With one object of the name it is that object's; with several, the one the record fits (the same
+    /// answer every move, delete and duplicate goes by).
+    /// </summary>
+    /// <param name="dir">The archive's working copy, where the record is kept.</param>
+    internal bool OwnsImportLinks(SceneNode node, out string dir)
+    {
+        dir = "";
+        if (node.Source is not FrameNodeAdapter frame || node.Source is CollisionInstanceAdapter
+            || node.OwningDocumentNode() is not { Source: SceneDocumentAdapter scene } documentNode)
+        {
+            return false;
+        }
+        try
+        {
+            dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
+            Assignments(scene, documentNode, _ => null, null, out var owners);
+            return owners.TryGetValue(frame.Frame.Name.String, out Formats.Frames.ObjectTypes.FrameObjectBase? owner)
+                && ReferenceEquals(owner, frame.Frame);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or InvalidOperationException or NullReferenceException)
+        {
+            return false;   // no game environment (a loose file): there is no link file to keep in step
+        }
+    }
+
     private static bool IsSelfOrUnder(Formats.Frames.ObjectTypes.FrameObjectBase frame, Formats.Frames.ObjectTypes.FrameObjectBase root)
     {
         int guard = 0;
@@ -410,14 +439,23 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     // Every placement of an archive that some imported object's record claims, worked out once: each recorded
     // entry bids for the placements of its hull, nearest first, and a placement goes to the first bid only.
     private List<LinkedPlacement> Assignments(SceneDocumentAdapter scene, SceneNode documentNode,
-        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt)
+        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt) =>
+        Assignments(scene, documentNode, lookFrom, stoodAt, out _);
+
+    /// <param name="owners">The object each recorded name belongs to — for every name that has a record and
+    /// an object bearing it, whether or not any of its placements was found.</param>
+    private List<LinkedPlacement> Assignments(SceneDocumentAdapter scene, SceneNode documentNode,
+        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt,
+        out Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase> owners)
     {
+        owners = new Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase>(StringComparer.Ordinal);
         var assigned = new List<LinkedPlacement>();
         string dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
         IReadOnlyDictionary<string, List<Assets.Sds.ImportLinks.Link>> links = Assets.Sds.ImportLinks.All(dir);
-        if (links.Count == 0 || FindCollisionLayer(documentNode) is not { } layer) return assigned;
+        if (links.Count == 0) return assigned;
 
-        List<SceneNode> placements = [.. layer.Children];
+        // Without a collision layer nothing is placed, but a record is still somebody's.
+        List<SceneNode> placements = FindCollisionLayer(documentNode) is { } layer ? [.. layer.Children] : [];
         var byHull = new Dictionary<ulong, List<int>>();
         for (int i = 0; i < placements.Count; i++)
         {
@@ -433,7 +471,6 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         // two, it is the one the record FITS — whose matrix puts the recorded places where placements of
         // those hulls stand — and not simply the first in the file: by file order, renaming an earlier object
         // onto a later one's name handed it the later one's collision.
-        var owners = new Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase>(StringComparer.Ordinal);
         foreach (var named in scene.Frame.FrameObjects.Values.OfType<Formats.Frames.ObjectTypes.FrameObjectBase>()
                      .Where(f => f.Name.String is { Length: > 0 } n && links.ContainsKey(n)).GroupBy(f => f.Name.String, StringComparer.Ordinal))
         {
@@ -449,8 +486,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
                 float total = 0f;
                 foreach (Assets.Sds.ImportLinks.Link link in links[named.Key])
                 {
-                    if (link.At is not { } place) continue;
-                    Vector3 expected = Vector3.Transform(place, standing);
+                    // An entry from before places were kept has only the hull to go by: how near a placement
+                    // of it stands to the object. Skipped, a record made of such entries fitted every bearer
+                    // equally and went to the first in the file.
+                    Vector3 expected = link.At is { } place ? Vector3.Transform(place, standing) : standing.Translation;
                     float nearest = 1e6f;
                     if (byHull.TryGetValue(link.Hull, out List<int>? candidates))
                     {

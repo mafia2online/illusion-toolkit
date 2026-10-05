@@ -23,7 +23,7 @@ internal static class FramePropertyCatalog
         FrameObjectBase o = node.Frame;
         var c = new GroupCollector();
 
-        AddBase(o, node, c);
+        AddBase(o, c);
 
         // if-chain, not a switch — the vendor hierarchy makes many types share a base (SingleMesh:Joint,
         // Model:SingleMesh, Area:Joint …); each applicable layer contributes its own groups.
@@ -44,11 +44,11 @@ internal static class FramePropertyCatalog
     }
 
     // ── Common (every frame object) ──
-    private static void AddBase(FrameObjectBase o, FrameNodeAdapter node, GroupCollector c)
+    private static void AddBase(FrameObjectBase o, GroupCollector c)
     {
         // Name is always editable: the name-table rewrite on save (SdsWriter.SaveFrameNameTable) keeps an
         // on-table object's listed name in sync. The type + triangle count live in the tab's header card.
-        c.AddCommon("Identity", HashNameDesc("Base.Name", "Name", () => o.Name, name => Rename(o, node, name),
+        c.AddCommon("Identity", HashNameDesc("Base.Name", "Name", () => o.Name, name => o.Name.Set(name),
             "The FNV64 hash is re-derived from the name."));
 
         // Frame table — the flag bits (1..4096) and whether the object is listed in the frame table at all.
@@ -62,29 +62,6 @@ internal static class FramePropertyCatalog
         // Hierarchy (parent) is edited by the Object tab's own parent picker (a reparent has tree + world-transform
         // side effects a descriptor can't express); the raw parent indices are intentionally not surfaced here.
         // The local transform is likewise absent — the gizmo and the Position/Rotation/Scale fields own it.
-    }
-
-    // The collision an imported object was given is tied to it by its NAME (Sds.ImportLinks) — the only handle
-    // a static object has. A rename takes the record along; an undo of the rename comes through here as well.
-    private static void Rename(FrameObjectBase o, FrameNodeAdapter node, string name)
-    {
-        string old = o.Name.String;
-        // Only for the one object that bears the name. With two of a name — an earlier rename onto a name
-        // that was taken — the record under it belongs to one of them and cannot be told to follow the
-        // other: renaming the newcomer away again must leave it where it is.
-        bool sole = !node.Document.Frame.FrameObjects.Values.OfType<FrameObjectBase>()
-            .Any(f => !ReferenceEquals(f, o) && string.Equals(f.Name.String, old, StringComparison.Ordinal));
-        o.Name.Set(name);
-        if (!sole) return;
-        try
-        {
-            Sds.ImportLinks.Rename(MafiaEnvironment.ExtractedDir(node.Document.SourceArchive), old, name);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-                                       or InvalidOperationException or NullReferenceException)
-        {
-            // no game environment (a probe, a loose file): there is no link file to keep in step
-        }
     }
 
     private static void AddJoint(FrameObjectJoint j, GroupCollector c)

@@ -319,6 +319,60 @@ internal static class ObjectImportLiveProbes
                 sb.AppendLine("    (a second copy could not be imported — the rename-onto step was skipped: " + why + ")");
             }
 
+            // ── a name shared with an object that has NO record: the record still goes with its own object ──
+            {
+                void GiveName(SceneNode which, string to)
+                {
+                    Domain.Properties.PropertyDescriptor field = ((Domain.Properties.IPropertySource)which.Source!).GetPropertyGroups()
+                        .SelectMany(g => g.Properties).First(p => p.Id == "Base.Name");
+                    host.CommitPropertyEdit(which, field, field.Get(), new Domain.Properties.HashNameValue(0, to));
+                }
+                // The stock mesh the copy was made of: same scene, named `source`, nothing recorded under that name.
+                SceneNode? namesake = Nodes(host).FirstOrDefault(n => !ReferenceEquals(n, node)
+                    && n.Source is FrameNodeAdapter f && n.Source is not CollisionInstanceAdapter && f.Frame.Name.String == source
+                    && ReferenceEquals(n.OwningDocumentNode(), node.OwningDocumentNode()));
+                if (namesake != null && ImportLinks.HullsOf(dir, source).Count == 0)
+                {
+                    IReadOnlyList<ImportLinks.Link> own = [.. ImportLinks.HullsOf(dir, "probe_live_renamed")];
+                    GiveName(node, source);
+                    Check("renamed onto the name of a stock object, the imported one brings its record along",
+                        ImportLinks.HullsOf(dir, source).SequenceEqual(own) && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 0
+                        && host.LinkedCollisionNodes(node).Count == given && host.LinkedCollisionNodes(namesake).Count == 0,
+                        $"{host.LinkedCollisionNodes(node).Count} with the imported one, {host.LinkedCollisionNodes(namesake).Count} with the stock one");
+                    host.Undo();
+                    Check("…and the undo takes the record back from the shared name",
+                        ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(own) && ImportLinks.HullsOf(dir, source).Count == 0
+                        && host.LinkedCollisionNodes(node).Count == given,
+                        $"{ImportLinks.HullsOf(dir, "probe_live_renamed").Count} under its own name, {ImportLinks.HullsOf(dir, source).Count} under the shared one");
+                    host.Redo();
+
+                    // Two of a name now, the record the imported one's.
+                    GiveName(namesake, "probe_live_stock");
+                    Check("the stock namesake renamed away leaves the record with the object it belongs to",
+                        ImportLinks.HullsOf(dir, source).SequenceEqual(own) && ImportLinks.HullsOf(dir, "probe_live_stock").Count == 0
+                        && host.LinkedCollisionNodes(node).Count == given);
+                    host.Undo();
+                    Check("…and is the stock object's name again after the undo, the record untouched",
+                        ((FrameNodeAdapter)namesake.Source!).Frame.Name.String == source && ImportLinks.HullsOf(dir, source).SequenceEqual(own));
+
+                    GiveName(node, "probe_live_c");
+                    Check("the imported object renamed away from the shared name takes its record with it",
+                        ImportLinks.HullsOf(dir, "probe_live_c").SequenceEqual(own) && ImportLinks.HullsOf(dir, source).Count == 0
+                        && host.LinkedCollisionNodes(node).Count == given && host.LinkedCollisionNodes(namesake).Count == 0,
+                        $"{ImportLinks.HullsOf(dir, "probe_live_c").Count} under the new name, {ImportLinks.HullsOf(dir, source).Count} left under the shared one");
+                    host.Undo();
+                    host.Undo();
+                    Check("…and with both renames undone everything is as it was",
+                        ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(own) && ImportLinks.HullsOf(dir, source).Count == 0
+                        && ImportLinks.HullsOf(dir, "probe_live_c").Count == 0 && host.LinkedCollisionNodes(node).Count == given
+                        && ((FrameNodeAdapter)node.Source!).Frame.Name.String == "probe_live_renamed");
+                }
+                else
+                {
+                    sb.AppendLine("    (no stock namesake in the same scene — the shared-name steps were skipped)");
+                }
+            }
+
             // ── delete takes the hull; undo brings both back ──
             host.Selection.SetSelection([node], node);
             host.DeleteSelected();
