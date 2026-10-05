@@ -100,6 +100,13 @@ public sealed unsafe class TextureLibrary : IDisposable
         }
     }
 
+    /// <summary>How many rewritten textures are still held by a mesh that has not rebound — zero once every
+    /// part drawing one has taken the new picture. What a repaint leaks, if it leaks.</summary>
+    public int RetiredCount
+    {
+        get { lock (_sync) return _retired.Count; }
+    }
+
     /// <summary>Resolves a texture and records the acquisition in <paramref name="leases"/> (nothing is
     /// recorded for an empty name or an uncached miss). Pass the leases back via <see cref="Release"/> when
     /// the owning mesh is disposed.</summary>

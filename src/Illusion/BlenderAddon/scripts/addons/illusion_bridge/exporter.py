@@ -311,6 +311,14 @@ def _describe_authored(material, entry, blocks, image_refs, signatures):
     level = materials.specular_level(material)
     roughness = materials.roughness(material)
 
+    # A Normal Map node in Object or World space is not something the game can use, and it is said
+    # rather than dropped: the toolkit refuses the material by name, where a silently missing normal
+    # map would only show as "the lighting is off". Sent on every push — whether the images changed
+    # or not — so the refusal stays until the node is put back to Tangent.
+    space = materials.normal_map_space(material)
+    if space is not None and space != 'TANGENT':
+        entry["normalSpace"] = space
+
     # Unsaved paint on any image has no cheap identity, so it resends every time (signature None).
     parts = [materials.image_signature(i) for i in (diffuse, normal, specular) if i is not None]
     signature = None if any(p is None for p in parts) else "|".join(
