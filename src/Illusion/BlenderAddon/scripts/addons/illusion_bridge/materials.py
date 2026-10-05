@@ -153,16 +153,31 @@ def normal_map_image(material):
     """The image behind the Normal Map node feeding the Principled BSDF's Normal, or None.
 
     Only a tangent-space Normal Map node counts: a Bump node's height map is a different thing, and
-    sending it as a normal map would light the surface from nowhere.
+    sending it as a normal map would light the surface from nowhere. So is a Normal Map node set to
+    Object or World space — its channels are directions in the object or the world, and the packer
+    would read them as tangent-space X and Y (and flip the green). `normal_map_space` says which it is,
+    so the push can refuse the material in words instead of exporting wrong lighting.
     """
+    node = _normal_map_node(material)
+    if node is None or node.space != 'TANGENT':
+        return None
+    return _image_behind(node.inputs.get("Color"))
+
+
+def normal_map_space(material):
+    """The Space of the Normal Map node feeding the Principled BSDF's Normal ('TANGENT', 'OBJECT',
+    'WORLD', ...), or None when there is no such node."""
+    node = _normal_map_node(material)
+    return None if node is None else node.space
+
+
+def _normal_map_node(material):
     principled = _principled(material)
     socket = None if principled is None else principled.inputs.get("Normal")
     if socket is None or not socket.is_linked:
         return None
     node = socket.links[0].from_node
-    if node.type != 'NORMAL_MAP':
-        return None
-    return _image_behind(node.inputs.get("Color"))
+    return node if node.type == 'NORMAL_MAP' else None
 
 
 def specular_image(material):
@@ -262,8 +277,12 @@ def _resample(pixels, size, axis):
     position = (np.arange(size) + 0.5) * current / size - 0.5
     low = np.floor(position)
     weight = (position - low).astype(np.float32)
+    # Each neighbour is clamped on its own. When a size is rounded UP, the first new texel's centre lies
+    # before source texel 0, so `low` is -1: the pair is meant to be (0, 0). Deriving the second index from
+    # the already-clamped first made it (0, 1) with nearly all the weight on texel 1 — the first row and
+    # column of every upsampled image came out as their neighbour.
     first = np.clip(low.astype(np.int64), 0, current - 1)
-    second = np.clip(first + 1, 0, current - 1)
+    second = np.clip(low.astype(np.int64) + 1, 0, current - 1)
     shape = [1, 1, 1]
     shape[axis] = size
     weight = weight.reshape(shape)
