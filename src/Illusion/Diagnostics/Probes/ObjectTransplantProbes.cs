@@ -358,7 +358,8 @@ internal static class ObjectTransplantProbes
                 PutBack();
                 ArchiveCarry.SweepUnused(dir, ours);
                 Check("a texture carried again while it was parked is the one in use, and the parked copy is dropped",
-                    second.Textures.Count == brought.Length && brought.All(InUse) && !brought.Any(Parked)
+                    brought.All(t => second.Textures.Contains(t, StringComparer.OrdinalIgnoreCase)) && brought.All(InUse)
+                    && !brought.Any(Parked)
                     && !Directory.Exists(Path.Combine(dir, ArchiveCarry.ParkedFolder)),
                     $"{second.Textures.Count} carried again");
 
