@@ -418,6 +418,31 @@ internal static class ObjectTransplantProbes
                     carriedScenery.DirectTextures);
             }
 
+            // ── The texture index: a scan made once, kept true as the mirror changes under it ──
+            Illusion.Assets.Textures.TextureSearchIndex.EnsureBuilt();
+            if (Illusion.Assets.Textures.TextureSearchIndex.IsBuilt)
+            {
+                string indexA = Path.Combine(scratch, "index_a"), indexB = Path.Combine(scratch, "index_b"), late = Path.Combine(scratch, "index_late");
+                foreach (string made in new[] { indexA, indexB, late }) Directory.CreateDirectory(made);
+                const string Twice = "illusion_probe_index_twice.dds", Late = "illusion_probe_index_late.dds";
+                File.WriteAllBytes(Path.Combine(indexA, Twice), [1]);
+                File.WriteAllBytes(Path.Combine(indexB, Twice), [2]);
+                File.WriteAllBytes(Path.Combine(late, Late), [3]);
+                bool unknown = Illusion.Assets.Textures.TextureSearchIndex.FindPath(Late) == null;
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(late);
+                Check("a folder that appears after the scan is found once it is announced",
+                    unknown && string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Late), Path.Combine(late, Late), StringComparison.OrdinalIgnoreCase));
+                Illusion.Assets.Textures.TextureSearchIndex.Register(Path.Combine(indexA, Twice));
+                Illusion.Assets.Textures.TextureSearchIndex.Register(Path.Combine(indexB, Twice));
+                bool firstWins = string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice), Path.Combine(indexA, Twice), StringComparison.OrdinalIgnoreCase);
+                File.Delete(Path.Combine(indexA, Twice));
+                bool fallsThrough = string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice), Path.Combine(indexB, Twice), StringComparison.OrdinalIgnoreCase);
+                File.Delete(Path.Combine(indexB, Twice));
+                Check("a name held twice answers with the first copy, with the second when the first is gone, with nothing when both are",
+                    firstWins && fallsThrough && Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice) == null,
+                    $"first {firstWins}, second {fallsThrough}");
+            }
+
             // ── A destination that has neither a prefab nor an item description of its own ──
             string bare = Path.Combine(scratch, "bare");
             Directory.CreateDirectory(bare);
