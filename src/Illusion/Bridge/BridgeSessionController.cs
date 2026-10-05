@@ -962,7 +962,7 @@ internal sealed class BridgeSessionController : IDisposable
                 // The catalog's own history cannot do it — a repaint under the same name changes no binding
                 // and so leaves no entry there at all.
                 if (authored.TextureChanges.Count > 0)
-                    collisionEdits.Add(new TextureFilesEdit(_host, authored.TextureChanges));
+                    collisionEdits.Add(new TextureFilesEdit(_host, authored.TextureChanges, authored.TouchedArchives.Values));
                 foreach (ReshapedHull hull in reshapes)
                 {
                     if (!_host.Tree.IsInScene(hull.Node) || hull.Node.Parent is not { } layer
