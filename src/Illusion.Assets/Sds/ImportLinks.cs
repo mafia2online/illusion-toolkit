@@ -51,7 +51,11 @@ public static class ImportLinks
         ArgumentException.ThrowIfNullOrEmpty(extractedDir);
         if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName) || oldName == newName) return;
         Dictionary<string, List<Link>> links = Read(extractedDir);
-        if (!links.Remove(oldName, out List<Link>? hulls)) return;
+        // Not over another object's record. Renamed onto a name that has one, this object gives up its own
+        // tie (two objects of one name cannot both be found by it) — but the other's stays, and so does this
+        // one's entry under the old name, which is what the undo of the rename finds and leaves alone. Moved
+        // over it, the other object's record was gone, and the undo then took what was left away from it too.
+        if (links.ContainsKey(newName) || !links.Remove(oldName, out List<Link>? hulls)) return;
         links[newName] = hulls;
         Write(extractedDir, links);
     }

@@ -83,22 +83,24 @@ internal sealed class PropThumbnailRenderer : IDisposable
         {
             ExtractedSds? held;
             ActorPlacements? placements;
-            string dir;
+            string? dir;
             lock (_read)
             {
-                if (_archive != entry.Archive || _scene == null)
+                (held, placements, dir) = _archive == entry.Archive ? (_scene, _placements, _archiveDir) : (null, null, null);
+            }
+            if (held == null || dir == null)
+            {
+                // Read OUTSIDE the lock: it takes a second or more, and the lock is also what the UI thread
+                // takes to let the held archive go when the tab is left — held through the read, that froze
+                // the window until the read was done. One prop is staged at a time, so nothing reads twice.
+                var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+                dir = Assets.MafiaEnvironment.ExtractedDir(sds);
+                held = ExtractedSds.Load(dir);
+                placements = held.FrameResource is { } fr ? ActorPlacements.Load(held.Manifest, fr) : null;
+                lock (_read)
                 {
-                    var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
-                    _archiveDir = Assets.MafiaEnvironment.ExtractedDir(sds);
-                    _scene = null;
-                    ExtractedSds fresh = ExtractedSds.Load(_archiveDir);
-                    _placements = fresh.FrameResource is { } fr ? ActorPlacements.Load(fresh.Manifest, fr) : null;
-                    _scene = fresh;
-                    _archive = entry.Archive;
+                    (_scene, _placements, _archiveDir, _archive) = (held, placements, dir, entry.Archive);
                 }
-                held = _scene;
-                placements = _placements;
-                dir = _archiveDir!;
             }
             if (held?.FrameResource is not { } scene || placements == null) return new Staged { Entry = entry };
 
