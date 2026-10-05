@@ -29,6 +29,9 @@ public partial class PropsTabView : UserControl
     private readonly List<PropTileViewModel> _all = [];
     private readonly PropThumbnailRenderer _thumbnails = new();
     private readonly DispatcherTimer _pictures;
+    // The one prop whose archive is being read, on a pool thread, and the tile it is for.
+    private Task<PropThumbnailRenderer.Staged>? _reading;
+    private PropTileViewModel? _readingFor;
     private bool _loading;
     private bool _loaded;
     private Point _pressedAt;
@@ -43,7 +46,19 @@ public partial class PropsTabView : UserControl
         CategoryBox.SelectedIndex = 0;
 
         _pictures = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(15) };
-        _pictures.Tick += (_, _) => DrawNextPicture();
+        _pictures.Tick += (_, _) =>
+        {
+            try
+            {
+                DrawNextPicture();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Nothing above a timer tick catches: an exception here ends the program, with whatever is
+                // unsaved in the editor. The pictures stop instead.
+                _pictures.Stop();
+            }
+        };
         IsVisibleChanged += (_, _) =>
         {
             if (IsVisible) LoadCatalog(force: false);
@@ -110,17 +125,27 @@ public partial class PropsTabView : UserControl
     }
 
     // One picture per tick: a kept one if any tile shown still lacks it, otherwise one drawn — taking the
-    // archive the renderer already holds first, so archives are read once rather than once per tile.
+    // archive the renderer already holds first, so archives are read once rather than once per tile. The
+    // reading happens on a pool thread; the tick only starts it and, once it is done, draws.
     private void DrawNextPicture()
     {
+        if (_reading is { IsCompleted: true } read && _readingFor is { } readFor)
+        {
+            _reading = null;
+            _readingFor = null;
+            readFor.Thumbnail = read.IsCompletedSuccessfully ? _thumbnails.Draw(read.Result) : null;
+            return;
+        }
         if (Tiles.ItemsSource is not List<PropTileViewModel> shown || !IsVisible)
         {
             _pictures.Stop();
             return;
         }
+        if (_reading != null) return;
         List<PropTileViewModel> missing = shown.Where(t => t.Thumbnail == null && !t.ThumbnailTried).ToList();
         if (missing.Count == 0)
         {
+            _thumbnails.Rest();
             _pictures.Stop();
             return;
         }
@@ -137,7 +162,8 @@ public partial class PropsTabView : UserControl
 
         PropTileViewModel next = missing.OrderBy(t => t.Entry.Archive, StringComparer.OrdinalIgnoreCase).First();
         next.ThumbnailTried = true;
-        next.Thumbnail = _thumbnails.Render(next.Entry);
+        _readingFor = next;
+        _reading = Task.Run(() => _thumbnails.Stage(next.Entry));
     }
 
     private void Rescan_Click(object sender, RoutedEventArgs e) => LoadCatalog(force: true);

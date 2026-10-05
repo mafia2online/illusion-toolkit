@@ -252,8 +252,47 @@ internal static class ObjectTransplantProbes
                 && prefab.ToBytes().AsSpan().SequenceEqual(prefabBytes),
                 $"{BitConverter.ToInt32(prefabBytes, 0)} + 4 against {prefabBytes.Length}");
 
+            // ── A carry that is taken back: the working copy's lists and files are what they were ──
+            string again2 = CopyWithoutTextures(SdsMeshLoader.EnsureExtracted(districtSds), Path.Combine(scratch, "takeback"));
+            string[] filesBefore = [.. Directory.GetFiles(again2).Select(Path.GetFileName).Order()!];
+            byte[] manifestBefore2 = File.ReadAllBytes(Path.Combine(again2, "SDSContent.xml"));
+            Dictionary<string, byte[]> prefabsBefore2 = SdsManifest.Load(again2).GetFiles("PREFAB").ToDictionary(p => p, File.ReadAllBytes);
+            ArchiveCarry.Before note = ArchiveCarry.Note(again2);
+            ArchiveCarry.Report taken = ArchiveCarry.Carry(sourceDir, again2, carriedDoor.MaterialHashes,
+                carriedDoor.CollisionHashes, door.LinkedDefinition);
+            bool broughtSomething = taken.ItemDescriptions.Count > 0 && taken.Prefab
+                && !File.ReadAllBytes(Path.Combine(again2, "SDSContent.xml")).AsSpan().SequenceEqual(manifestBefore2);
+            ArchiveCarry.TakeBack(note);
+            Check("a carry taken back leaves the manifest, the prefab and the folder as they were",
+                broughtSomething && File.ReadAllBytes(Path.Combine(again2, "SDSContent.xml")).AsSpan().SequenceEqual(manifestBefore2)
+                && prefabsBefore2.All(p => File.ReadAllBytes(p.Key).AsSpan().SequenceEqual(p.Value))
+                && Directory.GetFiles(again2).Select(Path.GetFileName).Order().SequenceEqual(filesBefore),
+                $"brought {taken.Textures.Count} texture(s), {taken.ItemDescriptions.Count} description(s), a prefab entry: {taken.Prefab}; "
+                + $"{Directory.GetFiles(again2).Length} files after against {filesBefore.Length} before");
+
+            // ── A texture a mesh names itself (its occlusion map) is carried like one a material names ──
+            SdsManifest theirManifest = SdsManifest.Load(sourceDir);
+            string? direct = theirManifest.Entries.Where(e => e.Type == "Texture").Select(e => e.File)
+                .FirstOrDefault(f => !SdsManifest.Load(dir).HasFile(f) && File.Exists(Path.Combine(sourceDir, f)));
+            if (direct != null)
+            {
+                ((FrameObjectSingleMesh)carriedScenery.Root).OMTextureHash = new HashName(direct);
+                Check("the copy says which texture its mesh names itself",
+                    carriedScenery.DirectTextures.Contains(direct, StringComparer.OrdinalIgnoreCase), direct);
+            }
+            else
+            {
+                sb.AppendLine("    (the source has no texture the district lacks — the occlusion-map step has nothing to carry)");
+            }
+
             // ── Carried textures and undo: what a save sweeps is parked, and comes back with its object ──
-            ArchiveCarry.Report sceneryCarry = ArchiveCarry.Carry(sourceDir, dir, carriedScenery.MaterialHashes, [], null);
+            ArchiveCarry.Report sceneryCarry = ArchiveCarry.Carry(sourceDir, dir, carriedScenery.MaterialHashes, [], null,
+                carriedScenery.DirectTextures);
+            if (direct != null)
+            {
+                Check("and the carry brings it", sceneryCarry.Textures.Contains(direct, StringComparer.OrdinalIgnoreCase),
+                    $"{sceneryCarry.Textures.Count} texture(s) for the scenery");
+            }
             string[] brought = [.. doorCarry.Textures.Concat(propCarry.Textures).Concat(sceneryCarry.Textures)
                 .Distinct(StringComparer.OrdinalIgnoreCase)];
             bool InUse(string texture) => SdsManifest.Load(dir).HasFile(texture) && File.Exists(Path.Combine(dir, texture));
@@ -315,7 +354,8 @@ internal static class ObjectTransplantProbes
                 TakeOut();
                 ArchiveCarry.SweepUnused(dir, ours);
                 ArchiveCarry.Report second = ArchiveCarry.Carry(sourceDir, dir,
-                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null);
+                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null,
+                    carriedScenery.DirectTextures);
                 PutBack();
                 ArchiveCarry.SweepUnused(dir, ours);
                 Check("a texture carried again while it was parked is the one in use, and the parked copy is dropped",
@@ -335,7 +375,8 @@ internal static class ObjectTransplantProbes
                     && !Directory.Exists(Path.Combine(dir, ArchiveCarry.ParkedFolder)));
                 PutBack();
                 ArchiveCarry.Carry(sourceDir, dir,
-                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null);
+                    [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null,
+                    carriedScenery.DirectTextures);
             }
 
             // ── A destination that has neither a prefab nor an item description of its own ──

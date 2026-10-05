@@ -194,6 +194,13 @@ internal static class ProbeRunner
             case "--probe-geometry-sweep":
                 GeometrySweepProbes.RunGeometrySweepProbe();
                 return true;
+            // The import as the editor makes it, in a real window with a district loaded: undo, the tree, the
+            // link to collision. Touches the install and puts it back. Output: %TEMP%\illusion_object_import_live.txt
+            case "--probe-object-import-live":
+                ObjectImportLiveProbes.Run(
+                    args.Length >= 2 ? args[1] : "hill",
+                    args.Length >= 3 ? args[2] : @"shops\harry.sds");
+                return true;
             case "--probe-object-transplant":
                 ObjectTransplantProbes.RunObjectTransplantProbe(
                     args.Length >= 2 ? args[1] : "hill",

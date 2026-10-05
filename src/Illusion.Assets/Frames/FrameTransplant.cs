@@ -97,6 +97,13 @@ public static class FrameTransplant
             }
         }
 
+        /// <summary>The textures the copied meshes name themselves, not through a material: the occlusion
+        /// map (<c>OMTextureHash</c>). A copy keeps the name, so the file has to be in its new archive too.</summary>
+        public IReadOnlyCollection<string> DirectTextures =>
+            Frames.OfType<FrameObjectSingleMesh>().Select(m => m.OMTextureHash)
+                .Where(om => om is { Hash: not 0, String.Length: > 0 }).Select(om => om.String)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>The item descriptions the copied collision frames name, by hash.</summary>
         public IReadOnlyCollection<ulong> CollisionHashes =>
             Frames.OfType<FrameObjectCollision>().Select(c => c.Hash).Where(h => h != 0).ToHashSet();

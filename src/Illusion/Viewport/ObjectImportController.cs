@@ -129,11 +129,21 @@ internal sealed class ObjectImportController
     /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
     /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's; null keeps it.</param>
     /// <param name="hulls">What collision scenery brings (an actor's object always brings its own).</param>
+    /// <param name="occurrence">Which of the things answering to <paramref name="name"/> in the source,
+    /// counting from 1: its actors of that name first, then its frame objects — the ones that draw and that no
+    /// actor places before the helpers that share their name. Shipped scenes repeat names heavily (one interior
+    /// has 87 objects called 'lahev'), and without this only the first could ever be asked for.</param>
     public string? Import(FileInfo destination, string sourceArchive, string name, string newName, Vector3 at,
-        float? yawDegrees, out Mcp.ObjectImportOutcome? outcome, Assets.Collisions.CollisionChoice hulls = default)
+        float? yawDegrees, out Mcp.ObjectImportOutcome? outcome, Assets.Collisions.CollisionChoice hulls = default,
+        int occurrence = 1)
     {
         outcome = null;
         if (_host.BridgeEditedCount > 0) return "a Blender edit session is open — end it first";
+        // A number too large for a float arrives as Infinity, and a heading of Infinity is a rotation of NaNs —
+        // which would be written into the object's matrix, or the actor's record, and answered with "success".
+        if (!float.IsFinite(at.X) || !float.IsFinite(at.Y) || !float.IsFinite(at.Z)) return "the position is not a finite point";
+        if (yawDegrees is { } asked && !float.IsFinite(asked)) return "the heading is not a finite number";
+        if (occurrence < 1) return "occurrence counts from 1";
         // The receiving archive's two rows: its scene, and — when it has a pack — its actors.
         SceneNode? frameRow = AllNodes().FirstOrDefault(n => n.Source is Assets.Adapters.SceneDocumentAdapter d
             && string.Equals(d.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase));
@@ -159,19 +169,50 @@ internal sealed class ObjectImportController
         // with no row in the tree to delete them by and no undo entry to take them back.
         Assets.Frames.FrameTransplant.TransplantedObject? carried = null;
         bool registered = false;
+        // What the working copy's lists held before this import brought anything: a refused or failed import
+        // puts them back, so that an object that never arrived leaves no textures, item descriptions or
+        // prefab entry behind in the working copy — and in every archive built from it.
+        Assets.Sds.ArchiveCarry.Before? noted = null;
+        void TakeCarryBack()
+        {
+            if (noted == null) return;
+            try
+            {
+                Assets.Sds.ArchiveCarry.TakeBack(noted);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // what could not be removed stays unused in the working copy; the import is still refused
+            }
+            noted = null;
+        }
+
         try
         {
             string sourceDir = Assets.Sds.SdsMeshLoader.EnsureExtracted(sds);
-            Formats.Frames.ExtractedSds source = Formats.Frames.ExtractedSds.Load(sourceDir);
-            if (source.FrameResource is not { } theirs) return $"{sds.Name} carries no scene";
-            Assets.Actors.ActorPlacements theirPlacements = Assets.Actors.ActorPlacements.Load(source.Manifest, theirs);
+            (Formats.Frames.ExtractedSds source, Assets.Actors.ActorPlacements? read) = SourceOf(sourceDir);
+            if (source.FrameResource is not { } theirs || read is not { } theirPlacements) return $"{sds.Name} carries no scene";
 
             Quaternion? facing = yawDegrees is { } yaw
                 ? Quaternion.CreateFromAxisAngle(Vector3.UnitZ, yaw * MathF.PI / 180f)
                 : null;
 
-            Formats.Actors.ActorEntry? actor = theirPlacements.All.FirstOrDefault(
-                a => string.Equals(a.EntityName, name, StringComparison.OrdinalIgnoreCase));
+            // Everything in the source that answers to the name: its actors, then its frame objects — those
+            // that draw and that no actor places first, which is what a library card of that name shows.
+            List<object> named =
+            [
+                .. theirPlacements.All.Where(a => string.Equals(a.EntityName, name, StringComparison.OrdinalIgnoreCase)),
+                .. theirs.FrameObjects.Values.OfType<FrameObjectBase>()
+                    .Where(o => string.Equals(o.Name.String, name, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(o => o is FrameObjectSingleMesh mesh && mesh.Refs.ContainsKey(Formats.Frames.FrameEntryRefTypes.Geometry)
+                        && theirPlacements.ActorCovering(mesh) == null ? 0 : 1),
+            ];
+            if (named.Count == 0) return $"{sds.Name} has neither an actor nor a frame object named '{name}'";
+            if (occurrence > named.Count)
+            {
+                return $"{sds.Name} has {named.Count} thing(s) named '{name}' — there is no occurrence {occurrence}";
+            }
+            Formats.Actors.ActorEntry? actor = named[occurrence - 1] as Formats.Actors.ActorEntry;
             Assets.Sds.ArchiveCarry.Report carry;
             string kind;
             string? reason;
@@ -186,9 +227,13 @@ internal sealed class ObjectImportController
                 Assets.MafiaEnvironment.ExtractedDir(destination),
                 Path.GetRelativePath(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds"), sds.FullName));
 
-            Assets.Sds.ArchiveCarry.Report Carry(Assets.Frames.FrameTransplant.TransplantedObject copied) =>
-                Assets.Sds.ArchiveCarry.Carry(sourceDir, Assets.MafiaEnvironment.ExtractedDir(destination),
-                    copied.MaterialHashes, copied.CollisionHashes, actor?.LinkedDefinition);
+            Assets.Sds.ArchiveCarry.Report Carry(Assets.Frames.FrameTransplant.TransplantedObject copied)
+            {
+                string into = Assets.MafiaEnvironment.ExtractedDir(destination);
+                noted = Assets.Sds.ArchiveCarry.Note(into);
+                return Assets.Sds.ArchiveCarry.Carry(sourceDir, into, copied.MaterialHashes, copied.CollisionHashes,
+                    actor?.LinkedDefinition, copied.DirectTextures);
+            }
             if (actor != null)
             {
                 if (theirPlacements.TargetOf(actor) is not { } prototype)
@@ -205,6 +250,7 @@ internal sealed class ObjectImportController
                 if (ImportPlaced(actorsRow, frameRow, theirPack, actor, newName, at, facing,
                         carried, out reason) is not { Source: ActorNodeAdapter placed })
                 {
+                    TakeCarryBack();
                     return reason ?? "the pack refused the actor";
                 }
                 registered = true;
@@ -221,10 +267,7 @@ internal sealed class ObjectImportController
             }
             else
             {
-                Formats.Frames.ObjectTypes.FrameObjectBase? frame = theirs.FrameObjects.Values
-                    .OfType<Formats.Frames.ObjectTypes.FrameObjectBase>()
-                    .FirstOrDefault(o => string.Equals(o.Name.String, name, StringComparison.OrdinalIgnoreCase));
-                if (frame == null) return $"{sds.Name} has neither an actor nor a frame object named '{name}'";
+                var frame = (FrameObjectBase)named[occurrence - 1];
 
                 // Turned and scaled as it was — the matrix an actor gives it folded in, since a prototype's own
                 // is the origin — and STANDING where it is asked to: the middle of the bottom of its geometry
@@ -263,9 +306,10 @@ internal sealed class ObjectImportController
 
             outcome = new ObjectImportOutcome(kind, newName, carried.Pairs.Count, carried.Renderables.Count,
                 carry.Textures, carry.ItemDescriptions.Count, carry.Prefab, carry.Elsewhere, carry.Unresolved.Count,
-                collision);
+                collision, named.Count, occurrence);
             _host.RaiseNotice(
-                $"Imported '{name}' from {sds.Name} as '{newName}' ({kind}): {outcome.Frames} frame(s), "
+                (named.Count > 1 ? $"'{name}' names {named.Count} things in {sds.Name}; this is number {occurrence}. " : "")
+                + $"Imported '{name}' from {sds.Name} as '{newName}' ({kind}): {outcome.Frames} frame(s), "
                 + $"{outcome.Meshes} mesh(es), {carry.Textures.Count} texture(s), {carry.ItemDescriptions.Count} item "
                 + $"description(s){(carry.Prefab ? ", a prefab entry" : "")} carried"
                 + (carry.Elsewhere.Count > 0 ? $"; {carry.Elsewhere.Count} texture(s) are in neither archive" : "")
@@ -283,8 +327,46 @@ internal sealed class ObjectImportController
                 return $"'{newName}' was imported and is in the scene (undo takes it out), but finishing up failed: {ex.Message}";
             }
             if (carried is { IsAttached: true }) carried.Detach();
+            TakeCarryBack();
             return "the import failed and nothing of it was left in the scene: " + ex.Message;
         }
+    }
+
+    // The source archive as last read. An import reads the whole of it — every buffer pool, the scene, the
+    // actor packs — and ten benches out of one interior used to mean ten such reads, on the UI thread. Kept
+    // while imports from the same archive keep coming and let go a minute after the last one; read again when
+    // its working copy has been written to since.
+    private string? _sourceDir;
+    private DateTime _sourceStamp;
+    private Formats.Frames.ExtractedSds? _source;
+    private Assets.Actors.ActorPlacements? _sourcePlacements;
+    private System.Windows.Threading.DispatcherTimer? _sourceRelease;
+
+    private (Formats.Frames.ExtractedSds Source, Assets.Actors.ActorPlacements? Placements) SourceOf(string dir)
+    {
+        DateTime stamp = Directory.GetLastWriteTimeUtc(dir);
+        if (_source == null || !string.Equals(_sourceDir, dir, StringComparison.OrdinalIgnoreCase) || _sourceStamp != stamp)
+        {
+            _source = null;
+            Formats.Frames.ExtractedSds fresh = Formats.Frames.ExtractedSds.Load(dir);
+            _sourcePlacements = fresh.FrameResource is { } scene ? Assets.Actors.ActorPlacements.Load(fresh.Manifest, scene) : null;
+            _source = fresh;
+            _sourceDir = dir;
+            _sourceStamp = stamp;
+        }
+        if (_sourceRelease == null)
+        {
+            _sourceRelease = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            _sourceRelease.Tick += (_, _) =>
+            {
+                _sourceRelease.Stop();
+                _source = null;
+                _sourcePlacements = null;
+            };
+        }
+        _sourceRelease.Stop();
+        _sourceRelease.Start();
+        return (_source, _sourcePlacements);
     }
 
     /// <summary>
@@ -355,13 +437,21 @@ internal sealed class ObjectImportController
             string name = hulls.Count == 1 ? $"{carried.Root.Name} collision" : $"{carried.Root.Name} collision {i + 1}";
             edits.AddRange(_host.CollisionEditing.BuildCreateHull(document, layer, hulls[i].Added, hulls[i].Placement, name) ?? []);
         }
-        // Written down, so the hulls move and are deleted with the object (see D3DImageHost.LinkedCollisionNodes).
-        Assets.Sds.ImportLinks.Set(Assets.MafiaEnvironment.ExtractedDir(destination), carried.Root.Name.String,
-            hulls.Select(h => h.Placement.Hash));
+        // Written down, so the hulls move and are deleted with the object (see D3DImageHost.LinkedCollision) —
+        // as one more edit of the import, so that an import undone takes its record back out of the file.
+        if (hulls.Count > 0)
+        {
+            edits.Add(new ImportLinkEdit(Assets.MafiaEnvironment.ExtractedDir(destination), carried.Root.Name.String,
+                [.. hulls.Select(h => h.Placement.Hash)]));
+        }
+        // "Its own" is a guess by position: nothing in an archive ties a static object to its collision, so
+        // what is taken is every hull standing inside the object's box. For a shelf that includes what stood
+        // on it — hence the wording, and the way out.
         summary = hulls.Count == 0
             ? "none — " + (refusal ?? "nothing to make one of")
             : hulls[0].FromSource
-                ? $"{hulls.Count} hull(s) of its own from the source archive"
+                ? $"{hulls.Count} hull(s) that stood inside its box in the source archive, taken as its own "
+                    + "(collision=convex, box or mesh makes one from its shape instead)"
                 : choice switch
                 {
                     Assets.Collisions.CollisionChoice.Box => "its box, cooked here",

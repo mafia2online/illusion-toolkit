@@ -50,8 +50,16 @@ public static class ArchiveCarry
     /// <summary>Carries the three kinds from one extracted folder to another.</summary>
     /// <param name="definition">The actor's definition name, or null/empty for an object no actor places.</param>
     public static Report Carry(string fromDir, string toDir, IReadOnlyCollection<ulong> materialHashes,
-        IReadOnlyCollection<ulong> collisionHashes, string? definition)
+        IReadOnlyCollection<ulong> collisionHashes, string? definition) =>
+        Carry(fromDir, toDir, materialHashes, collisionHashes, definition, directTextures: []);
+
+    /// <summary>The same, with the textures the object's meshes name themselves rather than through a
+    /// material — the occlusion map a mesh carries by name (<c>OMTextureHash</c>). The copy keeps the name,
+    /// so the file has to come along like any other.</summary>
+    public static Report Carry(string fromDir, string toDir, IReadOnlyCollection<ulong> materialHashes,
+        IReadOnlyCollection<ulong> collisionHashes, string? definition, IReadOnlyCollection<string> directTextures)
     {
+        ArgumentNullException.ThrowIfNull(directTextures);
         ArgumentException.ThrowIfNullOrEmpty(fromDir);
         ArgumentException.ThrowIfNullOrEmpty(toDir);
         ArgumentNullException.ThrowIfNull(materialHashes);
@@ -62,7 +70,7 @@ public static class ArchiveCarry
 
         var textures = new List<string>();
         var elsewhere = new List<string>();
-        CarryTextures(from, to, fromDir, toDir, materialHashes, textures, elsewhere);
+        CarryTextures(from, to, fromDir, toDir, materialHashes, directTextures, textures, elsewhere);
 
         var descriptions = new List<ulong>();
         var unresolved = new List<ulong>();
@@ -73,10 +81,12 @@ public static class ArchiveCarry
     }
 
     private static void CarryTextures(SdsManifest from, SdsManifest to, string fromDir, string toDir,
-        IReadOnlyCollection<ulong> materialHashes, List<string> added, List<string> elsewhere)
+        IReadOnlyCollection<ulong> materialHashes, IReadOnlyCollection<string> directTextures, List<string> added,
+        List<string> elsewhere)
     {
         MafiaMaterials.EnsureLoaded();
-        var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var wanted = new HashSet<string>(directTextures.Where(t => !string.IsNullOrWhiteSpace(t)),
+            StringComparer.OrdinalIgnoreCase);
         foreach (ulong hash in materialHashes)
         {
             IMaterial? material = MafiaMaterials.Collection?.FindByHash(hash);
@@ -94,16 +104,84 @@ public static class ArchiveCarry
                 elsewhere.Add(texture);
                 continue;
             }
-            if (!CopyEntry(from, to, fromDir, toDir, texture)) continue;
+            // A texture stored split keeps its top level in a companion entry, and its own entry says so —
+            // one without the other is a chain the game streams and does not find. So the companion goes
+            // FIRST, and a texture whose companion cannot be brought is not brought either.
+            string companion = SdsImportTypes.MipNameFor(texture);
+            bool withCompanion = from.HasFile(companion) && !to.HasFile(companion);
+            if (withCompanion && !CopyEntry(from, to, fromDir, toDir, companion))
+            {
+                elsewhere.Add(texture);
+                continue;
+            }
+            if (!CopyEntry(from, to, fromDir, toDir, texture))
+            {
+                if (withCompanion && to.RemoveEntry(companion)) File.Delete(Path.Combine(toDir, companion));
+                elsewhere.Add(texture);
+                continue;
+            }
             added.Add(texture);
             Remember(toDir, texture);
             TextureSearchIndex.Register(Path.Combine(toDir, texture));
-
-            // A texture stored split keeps its top level in a companion entry, and its own entry says so —
-            // one without the other is a chain the game streams and does not find.
-            string companion = SdsImportTypes.MipNameFor(texture);
-            if (from.HasFile(companion) && !to.HasFile(companion)) CopyEntry(from, to, fromDir, toDir, companion);
         }
+    }
+
+    /// <summary>What a working copy's lists held before a carry, so that a carry whose import then fails can
+    /// be taken back whole (<see cref="TakeBack"/>).</summary>
+    public sealed class Before
+    {
+        internal Before(string dir, byte[] manifest, HashSet<string> files, Dictionary<string, byte[]> prefabs, byte[]? register)
+        {
+            Dir = dir;
+            Manifest = manifest;
+            Files = files;
+            Prefabs = prefabs;
+            Register = register;
+        }
+
+        internal string Dir { get; }
+        internal byte[] Manifest { get; }
+        internal HashSet<string> Files { get; }
+        internal Dictionary<string, byte[]> Prefabs { get; }
+        internal byte[]? Register { get; }
+    }
+
+    /// <summary>Notes what <paramref name="toDir"/>'s manifest, prefab containers and carried register hold now.</summary>
+    public static Before Note(string toDir)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(toDir);
+        SdsManifest manifest = SdsManifest.Load(toDir);
+        string register = Path.Combine(toDir, RegisterName);
+        return new Before(
+            toDir,
+            File.ReadAllBytes(Path.Combine(toDir, "SDSContent.xml")),
+            new HashSet<string>(manifest.Entries.Select(e => e.File), StringComparer.OrdinalIgnoreCase),
+            manifest.GetFiles("PREFAB").ToDictionary(p => p, File.ReadAllBytes, StringComparer.OrdinalIgnoreCase),
+            File.Exists(register) ? File.ReadAllBytes(register) : null);
+    }
+
+    /// <summary>
+    /// Takes a carry back out of the working copy: the files it added are removed and the manifest, the prefab
+    /// containers and the carried register are what they were at <see cref="Note"/>. For an import that was
+    /// refused or failed after its carry — the object never arrived, and what was brought for it would
+    /// otherwise stay in the working copy, and in every archive built from it, for nothing.
+    /// Only for the moment right after the carry: it puts the lists back as a whole. It goes by what the
+    /// manifest gained since the note, not by the carry's report — a carry that threw half-way has no report.
+    /// </summary>
+    public static void TakeBack(Before before)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        string dir = before.Dir;
+        List<string> gained = [.. SdsManifest.Load(dir).Entries.Select(e => e.File).Where(f => !before.Files.Contains(f))];
+
+        AtomicFile.WriteAllBytes(Path.Combine(dir, "SDSContent.xml"), before.Manifest);
+        foreach ((string path, byte[] bytes) in before.Prefabs) AtomicFile.WriteAllBytes(path, bytes);
+        string register = Path.Combine(dir, RegisterName);
+        if (before.Register is { } kept) AtomicFile.WriteAllBytes(register, kept);
+        else File.Delete(register);
+
+        // Files the manifest did not list before, and so nothing of the archive's own.
+        foreach (string file in gained) File.Delete(Path.Combine(dir, file.TrimStart('/', '\\')));
     }
 
     private static void CarryItemDescriptions(SdsManifest from, SdsManifest to, string fromDir, string toDir,
@@ -178,12 +256,14 @@ public static class ArchiveCarry
             if (fields is not { Count: >= 3 } || !int.TryParse(fields[^1].Value, out int version)) return false;
             var fresh = new PrefabFile();
             if (!fresh.Adopt(source, hash)) return false;
-            const string name = "PREFAB_carried.prf";
-            AtomicFile.WriteAllBytes(Path.Combine(toDir, name), fresh.ToBytes());
-            return to.AddEntry(fields[0].Value, name, version, [.. fields.Skip(2).Take(fields.Count - 3)]);
+            AtomicFile.WriteAllBytes(Path.Combine(toDir, CarriedPrefabName), fresh.ToBytes());
+            return to.AddEntry(fields[0].Value, CarriedPrefabName, version, [.. fields.Skip(2).Take(fields.Count - 3)]);
         }
         return false;
     }
+
+    // The container a destination with no prefab of its own is given.
+    private const string CarriedPrefabName = "PREFAB_carried.prf";
 
     // Beside the working copy, never in its manifest: packing goes by the manifest, so the game never sees it.
     private const string RegisterName = "illusion_carried.json";
@@ -369,6 +449,13 @@ public static class ArchiveCarry
                     }
                 }
             }
+        }
+
+        // And the ones a mesh names itself — its occlusion map — which no material leads to.
+        foreach (Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh in
+                 scene.FrameObjects.Values.OfType<Formats.Frames.ObjectTypes.FrameObjectSingleMesh>())
+        {
+            if (mesh.OMTextureHash is { Hash: not 0, String.Length: > 0 } direct) named.Add(direct.String);
         }
 
         SdsManifest manifest = SdsManifest.Load(extracted);

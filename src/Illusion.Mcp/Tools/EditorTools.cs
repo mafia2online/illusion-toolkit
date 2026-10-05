@@ -757,7 +757,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "object_import")]
-    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable; the files carried into the working copy stay there, unused, if it is undone. Skinned models cannot travel yet.")]
+    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
     public static async Task<string> ImportObject(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -766,14 +766,15 @@ public sealed class EditorTools
         [Description("Name for the copy; must be new in the loaded area (it names both the object and, for an actor, the actor).")] string newName,
         [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
         [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null,
-        [Description("Collision for scenery: 'auto' (default — its own hulls from the source, else its convex hull), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null)
+        [Description("Collision for scenery: 'auto' (default — the hulls that stand inside its box in the source archive, taken as its own, else its convex hull; for a shelf or a room that includes the hulls of what stood on or in it), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null,
+        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1)
     {
         try
         {
-            if (position.Length != 3) return ToolResult.Invalid("position takes three numbers");
+            if (position is not { Length: 3 }) return ToolResult.Invalid("position takes three numbers");
             ObjectImportOutcome? outcome = null;
             string? refused = await ui.RunAsync(
-                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, out outcome));
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, out outcome));
             if (refused != null) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
         }

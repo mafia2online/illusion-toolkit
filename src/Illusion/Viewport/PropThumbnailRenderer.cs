@@ -6,6 +6,7 @@ using Illusion.Assets.Actors;
 using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
+using Illusion.Domain;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Hashing;
@@ -21,7 +22,13 @@ namespace Illusion.Viewport;
 /// Built like the material thumbnails — a headless GPU stack of its own, created on first use, drawing into a
 /// small offscreen target that is read back — because the viewport's renderer holds the scene. A picture costs
 /// reading its archive's scene, so it is drawn once and kept on disk; the archive last read is kept in memory,
-/// since the library asks for the props of one archive one after another. UI thread only.
+/// since the library asks for the props of one archive one after another.
+/// </para>
+/// <para>
+/// In two halves: <see cref="Stage"/> reads the archive and converts the object — any thread, nothing of the
+/// GPU — and <see cref="Draw"/> puts it on the offscreen target, UI thread only. Reading a district's scene
+/// takes a second or more, and done in the tile timer's tick it froze the editor once per archive. Neither
+/// half throws: the tick has nothing above it to catch an exception.
 /// </para>
 /// </summary>
 internal sealed class PropThumbnailRenderer : IDisposable
@@ -34,7 +41,9 @@ internal sealed class PropThumbnailRenderer : IDisposable
     private SharedRenderTarget? _target;
     private bool _failed;
 
+    private readonly object _read = new();
     private string? _archive;               // the archive whose scene is held below
+    private string? _archiveDir;
     private ExtractedSds? _scene;
     private ActorPlacements? _placements;
 
@@ -44,46 +53,69 @@ internal sealed class PropThumbnailRenderer : IDisposable
     /// <summary>The kept picture, without drawing anything — null when there is none yet.</summary>
     public static ImageSource? Cached(PropEntry entry)
     {
-        string path = PathOf(entry);
+        string path = StemOf(entry) + ".png";
         return File.Exists(path) ? Load(path) : null;
     }
 
     /// <summary>The picture for one prop: the kept one, or a fresh one drawn and kept. Null when the object
     /// cannot be found or drawn — the tile then keeps its placeholder.</summary>
-    public ImageSource? Render(PropEntry entry)
-    {
-        string path = PathOf(entry);
-        if (File.Exists(path)) return Load(path);
-        if (!EnsureContext()) return null;
+    public ImageSource? Render(PropEntry entry) => Cached(entry) ?? Draw(Stage(entry));
 
+    /// <summary>What <see cref="Stage"/> worked out for one prop: what to draw, where its textures are and
+    /// what it has to fit in. Nothing to draw when <see cref="Meshes"/> is empty.</summary>
+    public sealed class Staged
+    {
+        public required PropEntry Entry { get; init; }
+        public List<MeshData> Meshes { get; init; } = [];
+        public string TextureFolder { get; init; } = "";
+        public Vector3 Centre { get; init; }
+        public float Radius { get; init; }
+    }
+
+    /// <summary>
+    /// Reads the prop's archive (the last one read is kept, since a library asks for one archive's props one
+    /// after another) and converts the object for drawing. Any thread; touches nothing of the GPU; never
+    /// throws — a prop that cannot be found or read comes back with nothing to draw.
+    /// </summary>
+    public Staged Stage(PropEntry entry)
+    {
         try
         {
-            if (_archive != entry.Archive)
+            ExtractedSds? held;
+            ActorPlacements? placements;
+            string dir;
+            lock (_read)
             {
-                var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
-                string dir = Assets.MafiaEnvironment.ExtractedDir(sds);
-                _scene = ExtractedSds.Load(dir);
-                _placements = _scene.FrameResource is { } fr ? ActorPlacements.Load(_scene.Manifest, fr) : null;
-                _archive = entry.Archive;
-                _renderer!.Textures.AddFolder(dir);
+                if (_archive != entry.Archive || _scene == null)
+                {
+                    var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+                    _archiveDir = Assets.MafiaEnvironment.ExtractedDir(sds);
+                    _scene = null;
+                    ExtractedSds fresh = ExtractedSds.Load(_archiveDir);
+                    _placements = fresh.FrameResource is { } fr ? ActorPlacements.Load(fresh.Manifest, fr) : null;
+                    _scene = fresh;
+                    _archive = entry.Archive;
+                }
+                held = _scene;
+                placements = _placements;
+                dir = _archiveDir!;
             }
-            if (_scene?.FrameResource is not { } scene || _placements == null) return null;
+            if (held?.FrameResource is not { } scene || placements == null) return new Staged { Entry = entry };
 
             FrameObjectBase? root = entry.Kind == "Scenery"
                 ? scene.FrameObjects.Values.OfType<FrameObjectBase>().FirstOrDefault(o => o.Name.String == entry.Name)
-                : _placements.All.FirstOrDefault(a => a.EntityName == entry.Name) is { } actor ? _placements.TargetOf(actor) : null;
-            if (root == null) return null;
+                : placements.All.FirstOrDefault(a => a.EntityName == entry.Name) is { } actor ? placements.TargetOf(actor) : null;
+            if (root == null) return new Staged { Entry = entry };
 
             Assets.MafiaMaterials.EnsureLoaded();
-            _renderer!.Clear();
-            Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+            var meshes = new List<MeshData>();
             foreach (FrameObjectSingleMesh mesh in Subtree(root).OfType<FrameObjectSingleMesh>())
             {
                 if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Geometry)) continue;
                 // The prototype's own world — an actor's object stands at the origin; nothing here places it.
-                if (SdsMeshLoader.TryConvert(mesh, placement: Matrix4x4.Identity) is not { } data) continue;
-                _renderer.AddMesh(data);
+                if (SdsMeshLoader.TryConvert(mesh, placement: Matrix4x4.Identity) is { } data) meshes.Add(data);
             }
+            Vector3 min = new(float.MaxValue), max = new(float.MinValue);
             foreach ((Vector3[] positions, _) in FrameTransplant.TrianglesOf(root))
             {
                 foreach (Vector3 p in positions)
@@ -92,28 +124,66 @@ internal sealed class PropThumbnailRenderer : IDisposable
                     max = Vector3.Max(max, p);
                 }
             }
-            if (min.X > max.X) return null;
+            if (min.X > max.X || meshes.Count == 0 || !float.IsFinite((max - min).Length())) return new Staged { Entry = entry };
+
+            return new Staged
+            {
+                Entry = entry, Meshes = meshes, TextureFolder = dir, Centre = (min + max) / 2f,
+                Radius = MathF.Max(0.05f, (max - min).Length() / 2f),
+            };
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Whatever a broken working copy throws on the way in — the list is not knowable in advance, and
+            // the answer to each is the same: this tile keeps its placeholder.
+            return new Staged { Entry = entry };
+        }
+    }
+
+    /// <summary>Draws what <see cref="Stage"/> worked out and keeps the picture. UI thread. Null when there is
+    /// nothing to draw or the GPU would not have it; never throws.</summary>
+    public ImageSource? Draw(Staged staged)
+    {
+        ArgumentNullException.ThrowIfNull(staged);
+        if (staged.Meshes.Count == 0 || !EnsureContext()) return null;
+        try
+        {
+            // Only this archive's folder: a texture is taken from the first folder that has its name, and
+            // folders left from the archives drawn before would lend theirs.
+            _renderer!.Clear();
+            _renderer.Textures.ClearFolders();
+            _renderer.Textures.AddFolder(staged.TextureFolder);
+            foreach (MeshData mesh in staged.Meshes) _renderer.AddMesh(mesh);
 
             // Three-quarters from the front and above, far enough for the bounding sphere to fill the frame.
-            Vector3 centre = (min + max) / 2f;
-            float radius = MathF.Max(0.05f, (max - min).Length() / 2f);
-            float distance = radius / MathF.Sin(_renderer.Camera.Fov / 2f) * 1.05f;
+            float distance = staged.Radius / MathF.Sin(_renderer.Camera.Fov / 2f) * 1.05f;
             Vector3 from = Vector3.Normalize(new Vector3(0.75f, -1f, 0.65f));
-            _renderer.Camera.Near = MathF.Max(0.01f, distance - radius * 1.5f);
-            _renderer.Camera.Far = distance + radius * 3f;
-            _renderer.Camera.LookAt(centre + from * distance, centre);
+            _renderer.Camera.Near = MathF.Max(0.01f, distance - staged.Radius * 1.5f);
+            _renderer.Camera.Far = distance + staged.Radius * 3f;
+            _renderer.Camera.LookAt(staged.Centre + from * distance, staged.Centre);
             _renderer.Render(_target!);
 
             byte[] bgra = RenderTargetReadback.Read(_gpu!, _target!);
             BitmapSource bmp = BitmapSource.Create(Width, Height, 96, 96, PixelFormats.Bgra32, null, bgra, Width * 4);
             bmp.Freeze();
-            Save(bmp, path);
+            Save(bmp, staged.Entry);
             return bmp;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException
-                                       or Formats.SdsFormatException or ArgumentException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return null;
+        }
+    }
+
+    /// <summary>Lets go of the archive held for the next prop — for when there is no next prop: a district's
+    /// whole scene is not worth keeping in memory for a library tab that has all its pictures.</summary>
+    public void Rest()
+    {
+        lock (_read)
+        {
+            _scene = null;
+            _placements = null;
+            _archive = null;
         }
     }
 
@@ -131,7 +201,49 @@ internal sealed class PropThumbnailRenderer : IDisposable
         }
     }
 
-    private static string PathOf(PropEntry entry) => Path.Combine(CacheDir, $"{Fnv64.Hash(entry.Key):x16}.png");
+    // Bumped when what a tile shows changes, so that pictures kept by an older build are not handed out.
+    private const int Look = 2;
+
+    // "<which prop>_<which state of its archive's working copy>". The picture is drawn from the working
+    // copy, and a district's working copy is edited — keyed by the prop alone, a picture stayed whatever
+    // became of the object. One prop's pictures share the first half, which is how the outdated ones are found.
+    private static string StemOf(PropEntry entry)
+    {
+        long copy = 0;
+        try
+        {
+            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+            string dir = Assets.MafiaEnvironment.ExtractedDir(sds);
+            if (Directory.Exists(dir)) copy = Directory.GetLastWriteTimeUtc(dir).Ticks;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or InvalidOperationException or NullReferenceException)
+        {
+            // no environment: then there is no working copy to speak of
+        }
+        return Path.Combine(CacheDir, $"{Fnv64.Hash(entry.Key):x16}_{Fnv64.Hash($"{copy}|{Look}"):x16}");
+    }
+
+    private static bool _legacyDropped;
+
+    private static void DropOlder(string stem)
+    {
+        string whose = Path.GetFileName(stem)[..17]; // sixteen digits and the underscore
+        foreach (string other in Directory.GetFiles(CacheDir, whose + "*"))
+        {
+            if (!Path.GetFileNameWithoutExtension(other).Equals(Path.GetFileName(stem), StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(other);
+            }
+        }
+        if (_legacyDropped) return;
+        _legacyDropped = true;
+        // Pictures under the name the first version of this gave them (no underscore): nothing reads them.
+        foreach (string old in Directory.GetFiles(CacheDir, "*.png"))
+        {
+            if (!Path.GetFileName(old).Contains('_')) File.Delete(old);
+        }
+    }
 
     private static ImageSource? Load(string path)
     {
@@ -151,15 +263,16 @@ internal sealed class PropThumbnailRenderer : IDisposable
         }
     }
 
-    private static void Save(BitmapSource bmp, string path)
+    private static void Save(BitmapSource bmp, PropEntry entry)
     {
         try
         {
             Directory.CreateDirectory(CacheDir);
+            string stem = StemOf(entry);
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bmp));
-            using FileStream file = File.Create(path);
-            encoder.Save(file);
+            using (FileStream file = File.Create(stem + ".png")) encoder.Save(file);
+            DropOlder(stem);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -200,8 +313,6 @@ internal sealed class PropThumbnailRenderer : IDisposable
         _renderer = null;
         _target = null;
         _gpu = null;
-        _scene = null;
-        _placements = null;
-        _archive = null;
+        Rest();
     }
 }

@@ -102,7 +102,7 @@ public interface IEditorSession
     /// the rotation the original has.</param>
     /// <param name="collision">For scenery: auto (its own hulls, else its convex hull), convex, box, mesh or none.</param>
     string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        string? collision, out ObjectImportOutcome? outcome);
+        string? collision, int occurrence, out ObjectImportOutcome? outcome);
 
     /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
     string? DuplicateSelected(out IReadOnlyList<string> copies);
