@@ -135,6 +135,24 @@ public static class FrameTransplant
                 if (!Resource.FrameMaterials.ContainsKey(material.RefID))
                     Resource.FrameMaterials.Add(material.RefID, material);
             }
+            // And the blocks its meshes point at without owning them. A second import of the same object
+            // draws from the first one's geometry block (CopyBlocks) and lists none of its own; with the
+            // first copy deleted and this one undone, a save prunes the block as unused — and a redo that
+            // put back only what is listed above left a mesh naming a block the resource no longer had,
+            // which the next save writes as a mesh index pointing nowhere.
+            foreach (FrameObjectSingleMesh mesh in Frames.OfType<FrameObjectSingleMesh>())
+            {
+                if (mesh.Refs.ContainsKey(FrameEntryRefTypes.Geometry) && mesh.Geometry is { } drawn
+                    && !Resource.FrameGeometries.ContainsKey(drawn.RefID))
+                {
+                    Resource.FrameGeometries.Add(drawn.RefID, drawn);
+                }
+                if (mesh.Refs.ContainsKey(FrameEntryRefTypes.Material) && mesh.Material is { } worn
+                    && !Resource.FrameMaterials.ContainsKey(worn.RefID))
+                {
+                    Resource.FrameMaterials.Add(worn.RefID, worn);
+                }
+            }
             foreach (VertexBuffer vb in VertexBuffers)
             {
                 Resource.VertexBuffers.TryAddToPool(vb);
