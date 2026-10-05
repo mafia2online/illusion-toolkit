@@ -1475,7 +1475,10 @@ internal sealed class DistrictStreamer
             // Drop undo/redo entries whose objects have ALL left the scene: those in THIS district (about to
             // detach) plus any already detached by an earlier unload — covers cross-district group edits too.
             // (Discard on the dropped edits releases any detached-delete meshes they were holding.)
-            _host.Editing.History.RemoveWhere(a => a is INodeEdit ne &&
+            // An entry that names no objects at all is not one of those — "all of none" is true of every
+            // district: a push that only repainted a texture was dropped from the history by the first
+            // unload of anything, and Ctrl+Z then undid whatever came before it.
+            _host.Editing.History.RemoveWhere(a => a is INodeEdit ne && ne.Nodes.Any() &&
                 ne.Nodes.All(n => SceneTree.IsSelfOrDescendantOf(n, sds) || !_host.Tree.IsInScene(n)));
             // The unloaded frame resource can no longer be saved from memory — drop its persistence flags.
             if (_host.Persistence.PruneEditedFrames(n => SceneTree.IsSelfOrDescendantOf(n, sds)))
