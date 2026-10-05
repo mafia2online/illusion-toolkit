@@ -40,15 +40,18 @@ internal sealed class MaterialThumbnailRenderer : IDisposable
         // D013/D027 feed the preview lighting and C002 the paint — a parameter edit must re-render, so they
         // join the key. Without the tint in it, recolouring a material would leave its tile on the old colour.
         LightingConstants lighting = MaterialPreviewViewport.LightingFor(info);
-        Vector4 tint = Assets.MafiaMaterials.GetMaterialTextures(info.Hash).Tint;
-        string key = $"{info.Hash:X}|{diffuse}|{normal}|{specular}|{folders.Count}|{lighting.SpecParams}|{tint}";
+        // …and so is whether its alpha is blended or tested: the tile of a pane of glass at 0.3 was cut out
+        // against one half — an empty tile — beside a preview that showed it translucent.
+        Assets.MafiaMaterials.MaterialTextures look = Assets.MafiaMaterials.GetMaterialTextures(info.Hash);
+        Vector4 tint = look.Tint;
+        string key = $"{info.Hash:X}|{diffuse}|{normal}|{specular}|{folders.Count}|{lighting.SpecParams}|{tint}|{look.Blended}";
         if (_cache.TryGetValue(key, out ImageSource? hit)) return hit;
 
         if (!EnsureContext()) return null;
         foreach (string folder in folders) _renderer!.Textures.AddFolder(folder);
 
         _renderer!.Clear();
-        _renderer.AddMesh(SphereMesh.Create(new MeshPart(0, 0, diffuse, normal, specular, info.Hash, tint)));
+        _renderer.AddMesh(SphereMesh.Create(new MeshPart(0, 0, diffuse, normal, specular, info.Hash, tint, look.Blended)));
         _renderer.Lighting = lighting;
         _renderer.Render(_target!);
 

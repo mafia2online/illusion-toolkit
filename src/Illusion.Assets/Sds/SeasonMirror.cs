@@ -46,7 +46,8 @@ public static class SeasonMirror
     /// <param name="Matched">Objects every one of whose materials was settled: winter's own where the season
     /// changes it, summer's where it was deliberately changed.</param>
     /// <param name="Added">Summer objects under a name the shipped pair does not have — they arrive as they are.</param>
-    /// <param name="Dropped">Meshes the shipped pair has and summer no longer does — gone from winter too.</param>
+    /// <param name="Dropped">Meshes the winter scene held that the mirrored scene does not: ones deleted in
+    /// summer, and ones that were only ever in winter — both are gone from winter after the mirror.</param>
     /// <param name="Reassigned">Material slots the modder pointed at another material in summer; the new
     /// material is carried into winter rather than overwritten with the old winter one.</param>
     /// <param name="Ambiguous">Objects that could not be told apart from a namesake wearing the same summer
@@ -377,8 +378,15 @@ public static class SeasonMirror
             if (MaterialOf(frame) != null) namesakes[frame.Name.Hash] = namesakes.GetValueOrDefault(frame.Name.Hash) + 1;
         }
 
-        int matched = 0, added = 0, reassigned = 0, ambiguous = 0, known = 0;
+        int matched = 0, added = 0, reassigned = 0, ambiguous = 0;
         var seen = new Dictionary<ulong, int>();
+        // A material block can be worn by more than one object, and the hashes are rewritten IN the block.
+        // Settled object by object, the second wearer was resolved from winter's hashes as if they were
+        // summer's — counted as re-pointed by the modder, or, where a winter hash is also some summer one,
+        // substituted a second time. So the wearers of each block are gathered first, and the block is then
+        // settled once, from summer's hashes, by whichever of its wearers the pair has an answer for.
+        var wearers = new Dictionary<FrameMaterial, List<(ulong Name, int Occurrence)>>(ReferenceEqualityComparer.Instance);
+        var blocks = new List<FrameMaterial>();
         foreach (FrameObjectBase frame in scene.FrameObjects.Values.OfType<FrameObjectBase>())
         {
             if (MaterialOf(frame) is not { } ours) continue;
@@ -389,29 +397,43 @@ public static class SeasonMirror
                 added++;
                 continue;
             }
-            known++;
-
-            bool unsure = false;
-            for (int lod = 0; lod < ours.Materials.Count; lod++)
+            if (!wearers.TryGetValue(ours, out List<(ulong, int)>? worn))
             {
-                for (int slot = 0; slot < ours.Materials[lod].Length; slot++)
+                wearers[ours] = worn = [];
+                blocks.Add(ours);
+            }
+            worn.Add((name, occurrence));
+        }
+
+        foreach (FrameMaterial block in blocks)
+        {
+            bool unsure = false;
+            for (int lod = 0; lod < block.Materials.Count; lod++)
+            {
+                for (int slot = 0; slot < block.Materials[lod].Length; slot++)
                 {
-                    MaterialStruct material = ours.Materials[lod][slot];
-                    switch (pair.Resolve(name, occurrence, namesakes[name], lod, slot, material.MaterialHash, out ulong winter))
+                    MaterialStruct material = block.Materials[lod][slot];
+                    ulong summerHash = material.MaterialHash;
+                    bool seasonal = false, doubt = false;
+                    foreach ((ulong name, int occurrence) in wearers[block])
                     {
-                        case SeasonPair.Answer.Seasonal:
+                        SeasonPair.Answer answer =
+                            pair.Resolve(name, occurrence, namesakes[name], lod, slot, summerHash, out ulong winter);
+                        if (answer == SeasonPair.Answer.Seasonal)
+                        {
                             material.MaterialHash = winter;
+                            seasonal = true;
                             break;
-                        case SeasonPair.Answer.Reassigned:
-                            reassigned++;
-                            break;
-                        default:
-                            unsure = true;
-                            break;
+                        }
+                        doubt |= answer == SeasonPair.Answer.Ambiguous;
                     }
+                    if (seasonal) continue;
+                    if (doubt) unsure = true;
+                    else reassigned++;
                 }
             }
-            if (unsure) ambiguous++; else matched++;
+            if (unsure) ambiguous += wearers[block].Count;
+            else matched += wearers[block].Count;
         }
 
         // Two archives that merely share a few names are not a seasonal pair, and writing one over the other
@@ -499,7 +521,12 @@ public static class SeasonMirror
             if (wrote) textures.Add(texture);
         }
 
-        return new Report(matched, added, pair.Meshes - kept, reassigned, ambiguous, files, textures);
+        // What this mirror took out of winter: every mesh the winter scene held, name by name, beyond what
+        // the mirrored scene has under that name — whether the pair shipped with it or it was put into
+        // winter alone. Counted against the shipped pair it missed the second kind, and a mesh that existed
+        // only in winter vanished with "0 dropped".
+        int dropped = standing.Sum(n => Math.Max(0, n.Value - namesakes.GetValueOrDefault(n.Key)));
+        return new Report(matched, added, dropped, reassigned, ambiguous, files, textures);
 
         // Adds a summer file winter lacks, or refreshes one an earlier mirror brought. True when it wrote.
         bool Bring(string name)
@@ -511,7 +538,19 @@ public static class SeasonMirror
             string target = Path.Combine(winterDir, name.TrimStart('/', '\\'));
             if (!File.Exists(source)) return false;
             byte[] bytes = File.ReadAllBytes(source);
-            if (File.Exists(target) && File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes)) return false;
+            bool sameBytes = File.Exists(target) && File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes);
+            // The entry as well as the bytes. A texture's entry says whether a MIP companion goes with it
+            // (HasMIP), and a repaint at another size changes that: the picture refreshed under the entry of
+            // the old one is an entry promising a companion that is no longer there — a chain the game
+            // streams and does not find — or one hiding a companion that now is.
+            IReadOnlyList<(string Name, string Value)>? theirs = from.Manifest.EntryFields(name), ours = manifest.EntryFields(name);
+            bool sameEntry = theirs != null && ours != null && theirs.SequenceEqual(ours);
+            if (sameBytes && sameEntry) return false;
+            if (!sameEntry && theirs != null)
+            {
+                manifest.RemoveEntry(name);
+                return CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
+            }
             AtomicFile.WriteAllBytes(target, bytes);
             return true;
         }

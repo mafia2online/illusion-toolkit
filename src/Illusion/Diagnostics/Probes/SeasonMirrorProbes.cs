@@ -135,6 +135,52 @@ internal static class SeasonMirrorProbes
             Check("and winter is whole again, byte for byte the scene it was",
                 File.ReadAllBytes(winterScene).AsSpan().SequenceEqual(resaved));
 
+            // ── A mesh that is ONLY in winter goes with the mirror — and has to be counted ──
+            {
+                FrameResource lone = ExtractedSds.Load(winter).FrameResource!;
+                FrameObjectSingleMesh only = lone.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
+                    .Last(m => m.GetType() == typeof(FrameObjectSingleMesh) && m.Refs.ContainsKey(FrameEntryRefTypes.Material)
+                        && lone.FrameObjects.Values.OfType<FrameObjectBase>().Count(o => o.Name.Hash == m.Name.Hash) == 1);
+                only.Name = new Formats.Hashing.HashName("illusion_probe_only_in_winter");
+                AtomicFile.WriteAllBytes(winterScene, lone.WriteToStream());
+                SeasonMirror.Report? swept = SeasonMirror.Mirror(summer, winter, "summer", "winter", pair, out reason);
+                Check("a mesh that was only in winter is reported as dropped, not lost without a word",
+                    swept is { Dropped: 1, Added: 0 }, swept == null ? reason ?? "" : $"{swept.Dropped} dropped");
+                Check("…and winter is the mirrored scene again", File.ReadAllBytes(winterScene).AsSpan().SequenceEqual(resaved));
+            }
+
+            // ── Two objects wearing ONE material block: the block is settled once ──
+            // The hashes are rewritten in the block, so the second wearer used to be resolved from winter's
+            // hashes as if they were summer's — and counted as a slot the modder had re-pointed.
+            {
+                FrameResource sharing = ExtractedSds.Load(summer).FrameResource!;
+                List<FrameObjectBase> frames = [.. sharing.FrameObjects.Values.OfType<FrameObjectBase>()];
+                // One of the dressed meshes owns the block (S1 in summer, W1 in winter); a stock mesh of
+                // another name, which never wore S1, is put on it — whichever of the two comes first in the file.
+                const ulong ownerWinter = W1;
+                var owner = (FrameObjectSingleMesh)frames[groups[0][1]];
+                FrameObjectSingleMesh? guest = frames.OfType<FrameObjectSingleMesh>().FirstOrDefault(
+                    m => m.GetType() == typeof(FrameObjectSingleMesh) && m.Refs.ContainsKey(FrameEntryRefTypes.Material)
+                        && m.Name.Hash != owner.Name.Hash && !groups.SelectMany(g => g).Contains(frames.IndexOf(m)));
+                Check("a second mesh was found to put on the first one's material block", guest != null);
+                if (guest != null)
+                {
+                    ulong guestName = guest.Name.Hash;
+                    guest.Material = owner.Material;
+                    guest.ReplaceRef(FrameEntryRefTypes.Material, owner.Material.RefID);
+                    AtomicFile.WriteAllBytes(summerScene, sharing.WriteToStream());
+                    SeasonMirror.Report? shared = SeasonMirror.Mirror(summer, winter, "summer", "winter", pair, out reason);
+                    ulong worn = ExtractedSds.Load(winter).FrameResource!.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
+                        .Where(m => m.Name.Hash == guestName && m.Refs.ContainsKey(FrameEntryRefTypes.Material))
+                        .Select(m => m.Material.Materials[0][0].MaterialHash).FirstOrDefault();
+                    Check("a block two objects wear is turned to winter once: nothing counted as re-pointed, both in its winter material",
+                        shared is { Reassigned: 0, Ambiguous: 0 } && worn == ownerWinter,
+                        shared == null ? reason ?? "" : $"{shared.Reassigned} re-pointed, the second wearer in 0x{worn:X16}");
+                    AtomicFile.WriteAllBytes(summerScene, summerAsShipped);
+                    SeasonMirror.Mirror(summer, winter, "summer", "winter", pair, out _);
+                }
+            }
+
             // ── Review of #5, P1: equal size is not "the same scene" ──
             // One object of the winter archive stands 50 units away. Nothing about the file's size or its
             // pools changes; the pair must still be refused, or the mirror would put it back where summer has it.
@@ -241,6 +287,24 @@ internal static class SeasonMirrorProbes
                         refreshed != null && File.ReadAllBytes(Path.Combine(winter, texture)).AsSpan().SequenceEqual(repainted)
                         && refreshed.Textures.Contains(texture, StringComparer.OrdinalIgnoreCase),
                         refreshed == null ? reason ?? "no pair" : string.Join(", ", refreshed.Textures));
+
+                    // The entry with the picture: a repaint at another size changes whether the texture has
+                    // a MIP companion, which its manifest entry states.
+                    byte[] summerListing = File.ReadAllBytes(Path.Combine(summer, "SDSContent.xml"));
+                    SdsManifest listing = SdsManifest.Load(summer);
+                    IReadOnlyList<(string Name, string Value)> asListed = listing.EntryFields(texture)!;
+                    string flipped = asListed.FirstOrDefault(f => f.Name == "HasMIP").Value == "1" ? "0" : "1";
+                    listing.RemoveEntry(texture);
+                    listing.AddEntry("Texture", texture, int.Parse(asListed[^1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                        [("HasMIP", flipped)]);
+                    SeasonMirror.Report? relisted = authoredPair == null ? null
+                        : SeasonMirror.Mirror(summer, winter, "summer", "winter", authoredPair, out reason);
+                    IReadOnlyList<(string Name, string Value)>? inWinterNow = SdsManifest.Load(winter).EntryFields(texture);
+                    Check("…and its manifest entry follows when the repaint changed whether it has a MIP companion",
+                        relisted != null && inWinterNow != null && inWinterNow.SequenceEqual(SdsManifest.Load(summer).EntryFields(texture)!)
+                        && inWinterNow.Any(f => f.Name == "HasMIP" && f.Value == flipped),
+                        relisted == null ? reason ?? "no pair" : string.Join(" ", (inWinterNow ?? []).Select(f => $"{f.Name}={f.Value}")));
+                    File.WriteAllBytes(Path.Combine(summer, "SDSContent.xml"), summerListing);
 
                     File.WriteAllBytes(Path.Combine(winter, texture), painted);
                     SeasonMirror.Report? kept = SeasonMirror.Mirror(summer, winter, "summer", "winter", pair, out reason);
