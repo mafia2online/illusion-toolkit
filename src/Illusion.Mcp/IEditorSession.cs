@@ -78,7 +78,8 @@ public interface IEditorSession
     bool FrameSelection();
 
     /// <summary>Switches the shading mode and the overlay layers; a null argument leaves that one alone.</summary>
-    string? SetView(string? renderMode, bool? collision, bool? crash, bool? zones, bool? navigation);
+    string? SetView(string? renderMode, bool? collision, bool? crash, bool? zones, bool? navigation,
+        bool discardUnsavedEdits = false);
 
     /// <summary>Renders the viewport's current view into a PNG. Null on success.</summary>
     string? Screenshot(string path, int width, int height);

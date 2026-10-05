@@ -89,9 +89,23 @@ internal sealed class GeometryEditController
 
         foreach (TransformItem item in transforms)
         {
+            Matrix4x4? parent = item.Node.Source is IFrameNode placed ? placed.ParentWorldTransform : null;
             ApplyTransform(item.Node, item.After);
             children.Add(new TransformSubEdit(this, item));
             _host.Persistence.MarkFrameModified(item.Node);
+
+            // An object moved in Blender takes the collision it was given along, as one moved in the editor
+            // does: those placements are tied to it by nothing in the file, and left behind they are an
+            // obstacle where the object used to stand.
+            if (parent is not { } parentWorld) continue;
+            (List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> carried, List<IEditAction> applied) =
+                _host.Editing.CarryLinked(item.Node, item.Before * parentWorld, item.After * parentWorld);
+            foreach ((SceneNode hull, Matrix4x4 hullBefore, Matrix4x4 hullAfter) in carried)
+            {
+                children.Add(new TransformSubEdit(this, new TransformItem(hull, hullBefore, hullAfter)));
+                _host.Persistence.MarkFrameModified(hull);
+            }
+            children.AddRange(applied);
         }
 
         foreach (CreationItem item in creations)

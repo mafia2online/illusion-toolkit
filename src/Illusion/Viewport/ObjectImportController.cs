@@ -594,7 +594,14 @@ internal sealed class ObjectImportController
             D3DImageHost host = _owner._host;
             // The object first — frames, blocks and buffers back in the resource — so the actor below has
             // something to claim. The first Redo finds it there already, from the transplant that made it.
-            if (!_carried.IsAttached) _carried.Reattach();
+            if (!_carried.IsAttached)
+            {
+                _carried.Reattach();
+                // A save while the import was undone set its textures aside; they are back with the object,
+                // not only with the next save.
+                var scene = (SceneDocumentAdapter)_frameRow.Source!;
+                ArchiveCarry.ReturnParked(Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive), scene.Frame);
+            }
             if (!_rows.Parent.Children.Contains(_rows.Root)) _rows.Parent.AddChild(_rows.Root);
 
             var placements = ((SceneDocumentAdapter)_frameRow.Source!).Placements;

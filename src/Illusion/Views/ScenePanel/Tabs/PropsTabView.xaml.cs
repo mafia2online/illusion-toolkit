@@ -159,15 +159,58 @@ public partial class PropsTabView : UserControl
         {
             _firstInView = Math.Clamp((int)(e.VerticalOffset / e.ExtentHeight * _paged.Count), 0, _paged.Count - 1);
         }
-        if (_paged.Count >= _filtered.Count || e.VerticalOffset + (2 * e.ViewportHeight) < e.ExtentHeight) return;
+        PageIfNearEnd(e.OriginalSource as ScrollViewer ?? FindScroller());
+    }
+
+    private void PageIfNearEnd(ScrollViewer? scroller)
+    {
+        if (scroller == null || _paged.Count >= _filtered.Count
+            || scroller.VerticalOffset + (2 * scroller.ViewportHeight) < scroller.ExtentHeight)
+        {
+            return;
+        }
         // A jump to the very end (the End key) keeps the view pinned there while the list grows under it, and
         // would walk through every page in one go — the two seconds this paging exists to avoid. One page per
-        // gesture, unless what is shown does not even fill the pane.
-        bool fills = e.ExtentHeight > e.ViewportHeight;
-        if (fills && (DateTime.UtcNow - _lastPage).TotalMilliseconds < 200) return;
+        // gesture, unless what is shown does not even fill the pane. A page held back is looked at again a
+        // moment later: at the very end no further scroll event comes to ask for it.
+        bool fills = scroller.ExtentHeight > scroller.ViewportHeight;
+        double since = (DateTime.UtcNow - _lastPage).TotalMilliseconds;
+        if (fills && since < 200)
+        {
+            if (_pageLater == null)
+            {
+                _pageLater = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+                _pageLater.Tick += (_, _) =>
+                {
+                    _pageLater!.Stop();
+                    PageIfNearEnd(FindScroller());
+                };
+            }
+            _pageLater.Stop();
+            _pageLater.Start();
+            return;
+        }
         _lastPage = DateTime.UtcNow;
         ShowAnotherPage();
         _pictures.Start();
+    }
+
+    private DispatcherTimer? _pageLater;
+
+    private ScrollViewer? FindScroller()
+    {
+        static ScrollViewer? Under(DependencyObject root)
+        {
+            int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                if (child is ScrollViewer hit) return hit;
+                if (Under(child) is { } deeper) return deeper;
+            }
+            return null;
+        }
+        return Under(Tiles);
     }
 
     private DateTime _lastPage;

@@ -409,6 +409,48 @@ internal static class BridgeMaterialProbes
                 Check("…and the files written for it are put back",
                     File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
                     && unlucky.TextureChanges.Count == 0);
+
+                // An object with two slots: a valid repaint first, a material that cannot be made second.
+                // The object is skipped — and skipped has to mean the first slot's picture was not replaced.
+                var mixed = new ExchangeContainer();
+                MeshMaterialInfo good = NewSlot(mixed, Gradient(w, h, 150), w, h);
+                good.Hash = slot.Hash;
+                MeshMaterialInfo bad = NewSlot(mixed, Gradient(w, h, 151), w, h);
+                bad.Name = ProbeMaterial + "_bad";
+                bad.NormalImage = new MaterialImageRef { Name = "illusion_probe_missing.png", Width = 64, Height = 64, Block = 9999 };
+                var twoSlots = new AuthoredMaterialResolver(mixed, catalogHost);
+                bool both = twoSlots.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { good, bad } }, document, out reason);
+                Check("an object whose second material cannot be made is refused before its first material is touched",
+                    !both && File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && twoSlots.TextureChanges.Count == 0 && MafiaMaterials.FindHashByName(bad.Name) == null, reason ?? "resolved");
+
+                // A write that fails — the texture held open by something — is not remembered as done: the
+                // next object of the same push sharing the image is refused too, not handed a file that was
+                // never written.
+                var shared = new ExchangeContainer();
+                MeshMaterialInfo one = NewSlot(shared, Gradient(w, h, 170), w, h);
+                one.Hash = slot.Hash;
+                var sameImage = new MeshMaterialInfo
+                {
+                    Hash = slot.Hash, Name = ProbeMaterial, Authored = true, DiffuseImage = one.DiffuseImage,
+                };
+                var blocked = new AuthoredMaterialResolver(shared, catalogHost);
+                bool firstTaken, secondTaken;
+                string? firstWhy, secondWhy;
+                using (new FileStream(Path.Combine(extracted, held), FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    firstTaken = blocked.TryResolve(
+                        new MeshObjectPayload { Id = "new:probe1", Name = "probe", Materials = { one } }, document, out firstWhy);
+                    secondTaken = blocked.TryResolve(
+                        new MeshObjectPayload { Id = "new:probe2", Name = "probe", Materials = { sameImage } }, document, out secondWhy);
+                }
+                Check("a texture that cannot be written refuses the object, and the next object sharing the image as well",
+                    !firstTaken && !secondTaken && firstWhy != null && secondWhy != null, $"{firstWhy} / {secondWhy ?? "resolved"}");
+                Check("…leaving the picture as it was, no temp file beside it, and nothing on record as written",
+                    File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && !File.Exists(Path.Combine(extracted, held + ".tmp")) && blocked.TextureChanges.Count == 0
+                    && SdsManifest.Load(extracted).HasFile(held));
             }
 
             // ── What a push wrote can be taken back, and put back ──
@@ -451,7 +493,9 @@ internal static class BridgeMaterialProbes
                         File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(repainted));
                 }
 
-                // A texture the push INTRODUCED goes away with it — file and manifest entry both.
+                // A texture a push INTRODUCED can be taken out again — file and manifest entry both. (That is
+                // what puts a refused material's files back; the push's undo entry leaves an introduced
+                // texture where it is, since the material that names it stays.)
                 var novel = new ExchangeContainer();
                 MeshMaterialInfo born = NewSlot(novel, Gradient(256, 256, 5), 256, 256);
                 born.Name = ProbeMaterial + "_born";
@@ -467,11 +511,11 @@ internal static class BridgeMaterialProbes
                 {
                     ArchiveTextureWriter.Restore(introduced.Dir, introduced.File, introduced.Before);
                     SdsManifest gone = SdsManifest.Load(extracted);
-                    Check("undo removes it: neither file nor manifest entry is left, and the folder still packs",
+                    Check("taken back, neither file nor manifest entry is left, and the folder still packs",
                         !File.Exists(Path.Combine(extracted, introduced.File)) && !File.Exists(Path.Combine(extracted, "MIP_" + introduced.File))
                         && !gone.HasFile(introduced.File) && !gone.HasFile("MIP_" + introduced.File) && Packs(extracted, out _));
                     ArchiveTextureWriter.Restore(introduced.Dir, introduced.File, introduced.After);
-                    Check("redo brings it back with its top level",
+                    Check("put back, it is there with its top level",
                         ArchiveTextureWriter.Read(extracted, introduced.File).Is(introduced.After.Texture!, introduced.After.TopLevel));
                 }
             }

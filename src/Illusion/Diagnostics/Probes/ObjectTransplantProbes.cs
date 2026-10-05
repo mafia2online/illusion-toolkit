@@ -350,6 +350,14 @@ internal static class ObjectTransplantProbes
                 Check("and the carried register knows them again, so a later undo sweeps them again",
                     Sweeps(TakeOut, PutBack, dir, ours, brought, Gone, InUse));
 
+                // The redo itself puts them back — not only the save after it.
+                TakeOut();
+                ArchiveCarry.SweepUnused(dir, ours);
+                PutBack();
+                ArchiveCarry.ReturnParked(dir, ours);
+                Check("a redo returns the textures a save had set aside, without waiting for the next save",
+                    brought.All(InUse) && !brought.Any(Parked) && Sweeps(TakeOut, PutBack, dir, ours, brought, Gone, InUse));
+
                 // Brought a second time while parked — the same object imported again after the undo.
                 TakeOut();
                 ArchiveCarry.SweepUnused(dir, ours);
