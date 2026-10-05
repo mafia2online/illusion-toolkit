@@ -181,6 +181,10 @@ internal static class ProbeRunner
             case "--probe-car-clone-rollback":
                 CarCloneProbes.RunCarCloneRollbackProbe();
                 return true;
+            // Which of the install's cars a clone or a substitution will take. Output: %TEMP%\illusion_car_census.txt
+            case "--probe-car-census":
+                CarCloneProbes.RunCarKeyCensus();
+                return true;
             case "--probe-car-clone":
                 CarCloneProbes.RunCarCloneProbe();
                 return true;

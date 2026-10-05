@@ -594,8 +594,8 @@ internal sealed class AppEditorSession : IEditorSession
         // Switching a layer OFF unloads what it shows, and with it the unsaved edits made there and their
         // undo entries — a crash copy moved and never saved is simply gone. The same loss editor_open_area
         // refuses, by the same rule: not while edits are unsaved, unless the caller says they may go.
-        bool unloads = (crash == false && window.CrashToggle.IsChecked == true)
-            || (collision == false && window.CollisionToggle.IsChecked == true);
+        bool unloads = Window is { } map && ((crash == false && map.CrashToggle.IsChecked == true)
+            || (collision == false && map.CollisionToggle.IsChecked == true));
         if (unloads && host.HasUnsavedEdits && !discardUnsavedEdits)
         {
             return "switching that layer off unloads it, and unsaved edits made in it are dropped together with "

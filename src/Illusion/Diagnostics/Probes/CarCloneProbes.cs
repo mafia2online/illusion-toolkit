@@ -25,6 +25,78 @@ internal static class CarCloneProbes
     private const string Name = "Shubert_38_Clone";
     private const string Title = "Shubert 38 Clone";
 
+    // Output: %TEMP%\illusion_car_census.txt
+    /// <summary>
+    /// Which cars of this install are keyed the way a clone or a substitution needs: a root frame of the model's
+    /// name, a prefab entry and entity data filed under it, geometry buffers. A car that is not is refused by
+    /// both (it used to be built with a note); this says which ones those are. Reads the game's archives into
+    /// a scratch folder — nothing of the install is written.
+    /// </summary>
+    internal static void RunCarKeyCensus()
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_car_census.txt");
+        string scratch = Path.Combine(Path.GetTempPath(), "illusion_car_census");
+        var sb = new StringBuilder();
+        int keyed = 0, looked = 0;
+        var odd = new List<string>();
+        try
+        {
+            if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+            GameTable vehicles = GameTable.Load(Path.Combine(
+                SdsMeshLoader.EnsureExtracted(new FileInfo(Path.Combine(sds, "tables", "tables.sds"))), "tables", "vehicles.tbl"));
+            for (int row = 0; row < vehicles.RowCount; row++)
+            {
+                string model = (string)vehicles.Cell(row, 2);
+                foreach (string suffix in new[] { "", "_z" })
+                {
+                    var archive = new FileInfo(Path.Combine(sds, "cars", model.ToLowerInvariant() + suffix + ".sds"));
+                    if (!archive.Exists) continue;
+                    looked++;
+                    var problems = new List<string>();
+                    try
+                    {
+                        if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
+                        SdsArchive.Open(archive.FullName).Extract(scratch);
+                        ExtractedSds loaded = ExtractedSds.Load(scratch);
+                        if (loaded.FrameResource?.FrameObjects.Values.OfType<FrameObjectBase>()
+                                .Any(f => string.Equals(f.Name.String, model, StringComparison.OrdinalIgnoreCase)) != true)
+                        {
+                            problems.Add("no frame of that name");
+                        }
+                        if (loaded.VertexBuffers.Buffers.Count + loaded.IndexBuffers.Buffers.Count == 0) problems.Add("no buffers");
+                        foreach (string path in loaded.Manifest.GetFiles("PREFAB"))
+                        {
+                            if (!PrefabFile.Load(path).Contains(Fnv64.Hash(model))) problems.Add("prefab not keyed by it");
+                        }
+                        foreach (string path in loaded.Manifest.GetFiles("EntityDataStorage"))
+                        {
+                            if (EntityDataStorageFile.Load(path).Hash != Fnv64.Hash(model.ToLowerInvariant())) problems.Add("entity data not filed under it");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        problems.Add("unreadable: " + ex.Message);
+                    }
+                    if (problems.Count == 0) keyed++;
+                    else odd.Add($"{archive.Name} ({model}): {string.Join(", ", problems)}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("unexpected exception — " + ex);
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+            catch (IOException) { /* a scratch folder left behind is not worth failing for */ }
+            sb.Insert(0, $"CAR KEY CENSUS: {keyed} of {looked} car archives are keyed by their model name; {odd.Count} are not\n\n");
+            foreach (string line in odd) sb.AppendLine("    " + line);
+            File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
     // Output: %TEMP%\illusion_car_clone.txt
     /// <summary>
     /// The real <see cref="CarCloner.Clone"/> against the install, made to fail — the one thing the scratch
@@ -128,6 +200,29 @@ internal static class CarCloneProbes
                 Check("the same clone can be tried again — it is not refused as already existing",
                     again == null && why != null && !why.Contains("already", StringComparison.Ordinal), why ?? "");
                 Check("…and the second failure leaves nothing behind either", Untouched());
+
+                // ── A pack that fails at its LAST step: the new archive built, the backup taken, the swap refused ──
+                // tables.sds is held open, as the running game holds it. The pack's own temp file and the
+                // backup of an archive that was then not replaced are nobody's to know about but the pack's.
+                Directory.Delete(blocker);
+                leftovers.Add(Path.Combine(sds, "cars", Failing + "_z.sds"));
+                string tablesTemp = tablesSds.FullName + ".tmp";
+                using (new FileStream(tablesSds.FullName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    CarCloneOutcome? held = CarCloner.Clone("shubert_38", Failing, true, "Probe car", out why);
+                    Check("a clone whose tables archive cannot be swapped in is refused and taken back",
+                        held == null && why != null && why.Contains("taken back", StringComparison.Ordinal)
+                        && !why.Contains("NOT everything", StringComparison.Ordinal), why ?? "cloned");
+                }
+                tablesSds.Refresh();
+                ingameSds.Refresh();
+                Check("…leaving no temp file beside the archive and no backup of an archive that was not replaced",
+                    !File.Exists(tablesTemp) && !File.Exists(ingameSds.FullName + ".tmp")
+                    && SdsWriter.ListBackups(tablesSds).Count + SdsWriter.ListBackups(ingameSds).Count == backupsBefore
+                    && tablesSds.LastWriteTimeUtc == packedAt.Tables && ingameSds.LastWriteTimeUtc == packedAt.Ingame);
+                Check("…and the tables, the folders and both car archives as they were",
+                    Untouched() && !File.Exists(summer.FullName) && !File.Exists(Path.Combine(sds, "cars", Failing + "_z.sds"))
+                    && !Directory.Exists(MafiaEnvironment.ExtractedDir(summer)));
             }
         }
         catch (Exception ex)
