@@ -360,7 +360,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
                     if (IsSelfOrUnder(owner, root)) return owner.WorldTransform * shift;
                 }
                 return null;
-            });
+            }, null);
             foreach (var a in archive)
             {
                 List<LinkedPlacement> mine = [.. all.Where(p => IsSelfOrUnder(p.Owner, a.Frame.Frame))];
@@ -374,7 +374,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// For collision placements themselves: which imported object each was given to, if any. For a caller
     /// about to change a placement on its own — move it, resize it — and bound to keep its object's record true.
     /// </summary>
-    internal List<LinkedPlacement> LinksOf(IEnumerable<SceneNode> placements)
+    /// <param name="stoodAt">Where a placement stood before the change being recorded, for one that has
+    /// already been moved: it is by where it WAS that it is recognised as its object's.</param>
+    internal List<LinkedPlacement> LinksOf(IEnumerable<SceneNode> placements, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt = null)
     {
         var found = new List<LinkedPlacement>();
         foreach (var layer in placements.Where(n => n.Source is CollisionInstanceAdapter && n.Parent != null).GroupBy(n => n.Parent!))
@@ -390,7 +392,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
             Walk(layer.Key.Parent ?? layer.Key);
             if (documentNode?.Source is not SceneDocumentAdapter scene) continue;
             var wanted = new HashSet<SceneNode>(layer);
-            found.AddRange(Assignments(scene, documentNode, _ => null).Where(p => wanted.Contains(p.Hull)));
+            found.AddRange(Assignments(scene, documentNode, _ => null, stoodAt).Where(p => wanted.Contains(p.Hull)));
         }
         return found;
     }
@@ -408,22 +410,12 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     // Every placement of an archive that some imported object's record claims, worked out once: each recorded
     // entry bids for the placements of its hull, nearest first, and a placement goes to the first bid only.
     private List<LinkedPlacement> Assignments(SceneDocumentAdapter scene, SceneNode documentNode,
-        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom)
+        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt)
     {
         var assigned = new List<LinkedPlacement>();
         string dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
         IReadOnlyDictionary<string, List<Assets.Sds.ImportLinks.Link>> links = Assets.Sds.ImportLinks.All(dir);
         if (links.Count == 0 || FindCollisionLayer(documentNode) is not { } layer) return assigned;
-
-        // The object a recorded name belongs to: the first of that name, as the link was made for.
-        var owners = new Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase>(StringComparer.Ordinal);
-        foreach (object value in scene.Frame.FrameObjects.Values)
-        {
-            if (value is Formats.Frames.ObjectTypes.FrameObjectBase f && f.Name.String is { Length: > 0 } n && links.ContainsKey(n))
-            {
-                owners.TryAdd(n, f);
-            }
-        }
 
         List<SceneNode> placements = [.. layer.Children];
         var byHull = new Dictionary<ulong, List<int>>();
@@ -432,6 +424,43 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
             if (placements[i].Source is not CollisionInstanceAdapter ci) continue;
             if (!byHull.TryGetValue(ci.Instance.Hash, out List<int>? of)) byHull[ci.Instance.Hash] = of = [];
             of.Add(i);
+        }
+        Vector3 Stands(int i) => stoodAt != null && stoodAt.TryGetValue(placements[i], out Vector3 was)
+            ? was
+            : ((CollisionInstanceAdapter)placements[i].Source!).Instance.Position;
+
+        // The object a recorded name belongs to. Usually there is one of that name. When a rename has left
+        // two, it is the one the record FITS — whose matrix puts the recorded places where placements of
+        // those hulls stand — and not simply the first in the file: by file order, renaming an earlier object
+        // onto a later one's name handed it the later one's collision.
+        var owners = new Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase>(StringComparer.Ordinal);
+        foreach (var named in scene.Frame.FrameObjects.Values.OfType<Formats.Frames.ObjectTypes.FrameObjectBase>()
+                     .Where(f => f.Name.String is { Length: > 0 } n && links.ContainsKey(n)).GroupBy(f => f.Name.String, StringComparer.Ordinal))
+        {
+            List<Formats.Frames.ObjectTypes.FrameObjectBase> bearers = [.. named];
+            if (bearers.Count == 1)
+            {
+                owners[named.Key] = bearers[0];
+                continue;
+            }
+            float Misfit(Formats.Frames.ObjectTypes.FrameObjectBase bearer)
+            {
+                Matrix4x4 standing = lookFrom(bearer) ?? bearer.WorldTransform;
+                float total = 0f;
+                foreach (Assets.Sds.ImportLinks.Link link in links[named.Key])
+                {
+                    if (link.At is not { } place) continue;
+                    Vector3 expected = Vector3.Transform(place, standing);
+                    float nearest = 1e6f;
+                    if (byHull.TryGetValue(link.Hull, out List<int>? candidates))
+                    {
+                        foreach (int i in candidates) nearest = MathF.Min(nearest, Vector3.Distance(expected, Stands(i)));
+                    }
+                    total += nearest;
+                }
+                return total;
+            }
+            owners[named.Key] = bearers.MinBy(Misfit)!;
         }
 
         // A tie — a copy on top of its original — goes to the name that sorts first, so the answer does not
@@ -449,7 +478,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
                 if (!byHull.TryGetValue(hulls[slot].Hull, out List<int>? candidates)) continue;
                 foreach (int i in candidates)
                 {
-                    Vector3 at = ((CollisionInstanceAdapter)placements[i].Source!).Instance.Position;
+                    Vector3 at = Stands(i);
                     float distance;
                     if (hulls[slot].At is { } place)
                     {
