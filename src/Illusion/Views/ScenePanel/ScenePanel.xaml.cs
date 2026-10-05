@@ -151,7 +151,7 @@ public partial class ScenePanel : UserControl
         // adds the archive to the build list and says so.
         _selection.TuningEdited += (archive, message, edit) =>
         {
-            viewport.History.Push(edit);
+            viewport.History.Push(new WorkingCopyEdit(edit, () => viewport.MarkArchiveModified(archive)));
             viewport.MarkArchiveModified(archive);
             viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
         };
@@ -159,7 +159,7 @@ public partial class ScenePanel : UserControl
         // And an effect edit — a birth rate, a colour key, a whole effect copied.
         _selection.EffectEdited += (archive, message, edit) =>
         {
-            viewport.History.Push(edit);
+            viewport.History.Push(new WorkingCopyEdit(edit, () => viewport.MarkArchiveModified(archive)));
             viewport.MarkArchiveModified(archive);
             viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
         };

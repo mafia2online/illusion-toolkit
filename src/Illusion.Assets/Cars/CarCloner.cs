@@ -144,23 +144,13 @@ public static partial class CarCloner
         // tables written and not packed, is a state no step of this intended, and one that used to make the
         // retry impossible ("already exists").
         var journal = new GameWriteJournal();
-        journal.Remember(Path.Combine(folders.Tables, "tables", "vehicles.tbl"));
-        foreach (string text in folders.Text) journal.Remember(Path.Combine(text, "tables", "TextDatabase.dat"));
-        string ingameTables = Path.Combine(folders.Ingame, "tables");
-        if (Directory.Exists(ingameTables))
-        {
-            foreach (string table in Directory.GetFiles(ingameTables, "*.tbl")) journal.Remember(table);
-        }
-        journal.Remember(Path.Combine(folders.Ingame, "SDSContent.xml"));
-        journal.RememberContents(Path.Combine(ingameTables, "AiProps"));
-        foreach ((string _, string to) in folders.Cars) journal.WillCreateFolder(to);
 
         CarCloneResult? result;
         var packed = new List<(string Archive, string? Backup)>();
         var droppedByArchive = new List<(string Archive, IReadOnlyList<string> Dropped)>();
         try
         {
-            result = CloneExtracted(folders, stem, name, traffic, title, out refusal);
+            result = CloneExtracted(folders, stem, name, traffic, title, journal, out refusal);
             if (result == null) return null; // refused before writing anything
 
             DateTime when = DateTime.Now;
@@ -232,6 +222,29 @@ public static partial class CarCloner
     public static CarCloneResult? CloneExtracted(
         CarCloneFolders folders, string source, string name, bool traffic, string? title, out string? refusal)
     {
+        // Whole or not at all, here too and not only in Clone: the vehicle row is written before the title,
+        // the paint row and the traffic slots, and a failure at any of those used to leave a car registered
+        // with half of what registers it — and its name taken, so that the clone could not be tried again.
+        var journal = new GameWriteJournal();
+        try
+        {
+            CarCloneResult? result = CloneExtracted(folders, source, name, traffic, title, journal, out refusal);
+            if (result != null) journal.Commit();
+            return result;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            refusal = TakenBack("the clone", ex, journal.Undo());
+            return null;
+        }
+    }
+
+    // The same, noting in <paramref name="journal"/> every file it is about to write and every folder it is
+    // about to make, and leaving the taking back to the caller — who may have more to take back than this.
+    private static CarCloneResult? CloneExtracted(
+        CarCloneFolders folders, string source, string name, bool traffic, string? title, GameWriteJournal journal,
+        out string? refusal)
+    {
         ArgumentNullException.ThrowIfNull(folders);
         refusal = Refuse(name);
         if (refusal != null) return null;
@@ -279,6 +292,19 @@ public static partial class CarCloner
         int id = 0;
         for (int i = 0; i < vehicles.RowCount; i++) id = Math.Max(id, (int)vehicles.Cell(i, VehicleIdColumn) + 1);
         var notes = new List<string>();
+
+        // Everything refused above was refused before a byte was written. From here on files change, and
+        // each is noted first.
+        journal.Remember(vehiclesPath);
+        foreach (string text in folders.Text) journal.Remember(Path.Combine(text, "tables", "TextDatabase.dat"));
+        string ingameTables = Path.Combine(folders.Ingame, "tables");
+        if (Directory.Exists(ingameTables))
+        {
+            foreach (string table in Directory.GetFiles(ingameTables, "*.tbl")) journal.Remember(table);
+        }
+        journal.Remember(Path.Combine(folders.Ingame, "SDSContent.xml"));
+        journal.RememberContents(Path.Combine(ingameTables, "AiProps"));
+        foreach ((string _, string to) in folders.Cars) journal.WillCreateFolder(to);
 
         // The archives first: they are new folders, so a failure there leaves the tables as they were.
         foreach ((string from, string to) in folders.Cars)

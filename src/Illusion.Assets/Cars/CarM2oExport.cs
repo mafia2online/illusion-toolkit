@@ -133,6 +133,20 @@ public static partial class CarM2oExport
             return null;
         }
         string vehiclesFile = Path.Combine(output, VehiclesFile);
+        // Both manifests are read BEFORE anything is copied. One that is there and does not read — a typo, a
+        // file cut short — used to be taken for "no list yet" and written over with this one car: every
+        // earlier registration, or the package's own settings, gone, after the archives had already been
+        // replaced. It is a refusal, and the folder is left as it was.
+        if (Unreadable(vehiclesFile, node => node?["vehicles"] is JsonArray, "a list of vehicles") is { } badList)
+        {
+            refusal = badList;
+            return null;
+        }
+        if (Unreadable(Path.Combine(output, PackageFile), node => node is JsonObject, "a package manifest") is { } badPackage)
+        {
+            refusal = badPackage;
+            return null;
+        }
         if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any() && !File.Exists(vehiclesFile))
         {
             refusal = $"{output} holds something that is not a car export — pick an empty folder";
@@ -296,22 +310,33 @@ public static partial class CarM2oExport
         return json;
     }
 
-    // The cars a folder already lists; a file that does not read as one starts the list over.
+    // Why an existing manifest cannot be built on, or null when it is absent or reads as what it should be.
+    private static string? Unreadable(string path, Func<JsonNode?, bool> isWhatItShouldBe, string what)
+    {
+        if (!File.Exists(path)) return null;
+        string name = Path.GetFileName(path);
+        try
+        {
+            return isWhatItShouldBe(JsonNode.Parse(File.ReadAllText(path)))
+                ? null
+                : $"{name} in the output folder is not {what} — it is left as it is; fix or remove it and export again";
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return $"{name} in the output folder cannot be read ({ex.Message}) — it is left as it is; fix or remove it and export again";
+        }
+    }
+
+    // The cars a folder already lists. ExportFrom has checked that the file reads; one that stopped reading
+    // since is an error, not an empty list.
     private static JsonArray ReadList(string vehiclesFile)
     {
         if (!File.Exists(vehiclesFile)) return [];
-        try
+        if (JsonNode.Parse(File.ReadAllText(vehiclesFile))?["vehicles"] is JsonArray existing)
         {
-            if (JsonNode.Parse(File.ReadAllText(vehiclesFile))?["vehicles"] is JsonArray existing)
-            {
-                return [.. existing.Select(v => v?.DeepClone())];
-            }
+            return [.. existing.Select(v => v?.DeepClone())];
         }
-        catch (JsonException)
-        {
-            // not a list — replaced
-        }
-        return [];
+        throw new InvalidDataException($"{Path.GetFileName(vehiclesFile)} is not a list of vehicles");
     }
 
     // A package.json somebody already wrote keeps what it says; it only has to ship the cars.
@@ -320,14 +345,9 @@ public static partial class CarM2oExport
         JsonObject? package = null;
         if (File.Exists(packageFile))
         {
-            try
-            {
-                package = JsonNode.Parse(File.ReadAllText(packageFile)) as JsonObject;
-            }
-            catch (JsonException)
-            {
-                // not a manifest — replaced
-            }
+            // Checked readable by ExportFrom before anything was written; never replaced for not reading.
+            package = JsonNode.Parse(File.ReadAllText(packageFile)) as JsonObject
+                ?? throw new InvalidDataException($"{Path.GetFileName(packageFile)} is not a package manifest");
         }
         package ??= new JsonObject
         {
