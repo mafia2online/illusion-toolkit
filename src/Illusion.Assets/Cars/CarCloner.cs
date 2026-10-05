@@ -296,7 +296,14 @@ public static partial class CarCloner
         // Everything refused above was refused before a byte was written. From here on files change, and
         // each is noted first.
         journal.Remember(vehiclesPath);
-        foreach (string text in folders.Text) journal.Remember(Path.Combine(text, "tables", "TextDatabase.dat"));
+        // The manifests too: a pack drops entries whose file is missing and rewrites the manifest, and a
+        // clone taken back should not leave that behind either.
+        journal.Remember(Path.Combine(folders.Tables, "SDSContent.xml"));
+        foreach (string text in folders.Text)
+        {
+            journal.Remember(Path.Combine(text, "tables", "TextDatabase.dat"));
+            journal.Remember(Path.Combine(text, "SDSContent.xml"));
+        }
         string ingameTables = Path.Combine(folders.Ingame, "tables");
         if (Directory.Exists(ingameTables))
         {

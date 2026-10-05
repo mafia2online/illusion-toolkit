@@ -76,20 +76,33 @@ public sealed class AuthoredMaterialResolver
     {
         skipReason = null;
         MafiaMaterials.EnsureLoaded();
+
+        // First, every slot of the object for what can be refused without writing anything: an object is
+        // applied whole or skipped whole, and "skipped" has to mean that none of its materials was touched.
+        // Looked at slot by slot as they were resolved, a bad second slot was found after the first slot's
+        // pictures had already been replaced.
         foreach (MeshMaterialInfo info in payload.Materials)
         {
-            bool hasHash = BridgeMeshApplier.TryParseMaterialHash(info.Hash, out ulong hash) && hash != 0;
             string name = info.Name?.Trim() ?? "";
-
             // A normal map in object or world space cannot become the game's: its channels are directions
             // in another frame, and packed as tangent-space X and Y they light the surface wrongly with
-            // nothing to say why. Refused by name, before anything of the material is written.
+            // nothing to say why. Refused by name.
             if (info.NormalSpace is { Length: > 0 } space && !space.Equals("TANGENT", StringComparison.OrdinalIgnoreCase))
             {
                 skipReason = $"material '{name}': its Normal Map node is in {Friendly(space)} space, and the game reads "
                     + "tangent-space normal maps only — set the node's Space to Tangent (or bake the map to tangent space)";
                 return false;
             }
+            foreach (MaterialImageRef? image in new[] { info.DiffuseImage, info.NormalImage, info.SpecularImage })
+            {
+                if (image != null && Pixels(image, out skipReason) == null) return false;
+            }
+        }
+
+        foreach (MeshMaterialInfo info in payload.Materials)
+        {
+            bool hasHash = BridgeMeshApplier.TryParseMaterialHash(info.Hash, out ulong hash) && hash != 0;
+            string name = info.Name?.Trim() ?? "";
 
             // Blender remembers a material this bridge created, but the library may not: the creation was
             // undone, or the toolkit closed without a Save. With the pixels at hand it is simply made again;
@@ -114,7 +127,7 @@ public sealed class AuthoredMaterialResolver
                 if (!info.Authored) continue;
                 if (info.DiffuseImage == null)
                 {
-                    Carry(document, hash);
+                    if ((skipReason = Carry(document, hash)) != null) return false;
                     continue;
                 }
                 lock (CreatedHere) CreatedHere.Add(hash); // stamped by an earlier session's ack
@@ -154,7 +167,7 @@ public sealed class AuthoredMaterialResolver
                 if (updated.NormalSpecular != null
                     && string.Equals(updated.NormalSpecular, current.Normal, StringComparison.OrdinalIgnoreCase))
                     NoteRewritten(hash, updated.NormalSpecular);
-                Carry(document, hash);
+                if ((skipReason = Carry(document, hash)) != null) return false;
                 Acknowledge(name, hash);
                 continue;
             }
@@ -171,7 +184,7 @@ public sealed class AuthoredMaterialResolver
                 // of it is copied anywhere: its textures are wherever the game keeps them.
                 bool ours;
                 lock (CreatedHere) ours = CreatedHere.Contains(known);
-                if (ours) Carry(document, known);
+                if (ours && (skipReason = Carry(document, known)) != null) return false;
                 Acknowledge(name, known);
                 continue;
             }
@@ -211,7 +224,9 @@ public sealed class AuthoredMaterialResolver
     /// objects of two archives therefore has to be in both, and the one that did not create it gets a copy
     /// of the files the other holds — pixels or no pixels in this push.
     /// </summary>
-    private void Carry(ISceneDocument document, ulong hash)
+    /// <returns>Null, or why a texture could not be written into that archive — the object is then not
+    /// applied: it would wear a material its archive cannot show.</returns>
+    private string? Carry(ISceneDocument document, ulong hash)
     {
         string dir = SdsMeshLoader.EnsureExtracted(document.SourceArchive);
         MafiaMaterials.MaterialTextures textures = MafiaMaterials.GetMaterialTextures(hash);
@@ -220,14 +235,47 @@ public sealed class AuthoredMaterialResolver
         {
             if (string.IsNullOrEmpty(texture) || File.Exists(Path.Combine(dir, texture))) continue;
             if (TextureSearchIndex.FindPath(texture) is not { } source || !File.Exists(source)) continue;
-            ArchiveTextureWriter.TextureState held =
-                ArchiveTextureWriter.Read(Path.GetDirectoryName(source)!, Path.GetFileName(source));
-            if (held.Texture == null) continue;
+            try
+            {
+                ArchiveTextureWriter.TextureState held =
+                    ArchiveTextureWriter.Read(Path.GetDirectoryName(source)!, Path.GetFileName(source));
+                if (held.Texture == null) continue;
 
-            ArchiveTextureWriter.TextureState before = ArchiveTextureWriter.Read(dir, texture);
-            ArchiveTextureWriter.Write(dir, texture, held.Texture, held.TopLevel);
-            TextureChanges.Add(new TextureChange(dir, texture, before, held));
-            TouchedArchives[document.SourceArchive.FullName] = document.SourceArchive;
+                ArchiveTextureWriter.TextureState before = ArchiveTextureWriter.Read(dir, texture);
+                WriteOrPutBack(dir, texture, before, held.Texture, held.TopLevel);
+                TextureChanges.Add(new TextureChange(dir, texture, before, held));
+                TouchedArchives[document.SourceArchive.FullName] = document.SourceArchive;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return $"could not copy the texture '{texture}' into {document.SourceArchive.Name} — {ex.Message}";
+            }
+        }
+        return null;
+    }
+
+    // A texture is two files and two manifest entries, written one after another. When one of those steps
+    // fails, the ones before it have already happened — a new picture under an old top level, or files the
+    // manifest does not list — and nothing was on record to put them back from. Put back here, as far as
+    // the folder allows, before the failure is passed on.
+    private static void WriteOrPutBack(string dir, string file, ArchiveTextureWriter.TextureState before,
+        byte[] texture, byte[]? topLevel)
+    {
+        try
+        {
+            ArchiveTextureWriter.Write(dir, file, texture, topLevel);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                ArchiveTextureWriter.Restore(dir, file, before);
+            }
+            catch (Exception again) when (again is IOException or UnauthorizedAccessException)
+            {
+                // whatever holds the folder holds it still; the first failure is the one to report
+            }
+            throw;
         }
     }
 
@@ -352,14 +400,18 @@ public sealed class AuthoredMaterialResolver
             (byte[] texture, byte[]? topLevel) = DdsEncoder.Encode(rgba, width, height, alpha);
             string file = ArchiveTextureWriter.PickName(dir, imageName, reuse, texture, topLevel);
             ArchiveTextureWriter.TextureState before = ArchiveTextureWriter.Read(dir, file);
-            _written[(dir, key)] = file;
             // The same picture under the same name is nothing to write, undo or reload.
-            if (before.Is(texture, topLevel)) return file;
-
-            ArchiveTextureWriter.Write(dir, file, texture, topLevel);
-            TextureChanges.Add(new TextureChange(
-                dir, file, before, new ArchiveTextureWriter.TextureState(texture, topLevel)));
-            TouchedArchives[document.SourceArchive.FullName] = document.SourceArchive;
+            if (!before.Is(texture, topLevel))
+            {
+                WriteOrPutBack(dir, file, before, texture, topLevel);
+                TextureChanges.Add(new TextureChange(
+                    dir, file, before, new ArchiveTextureWriter.TextureState(texture, topLevel)));
+                TouchedArchives[document.SourceArchive.FullName] = document.SourceArchive;
+            }
+            // Remembered only once it IS written: noted before the write, a write that failed was handed
+            // to the next object sharing the image as done, and that object's material named a file that
+            // was never made.
+            _written[(dir, key)] = file;
             return file;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

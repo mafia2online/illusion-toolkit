@@ -178,6 +178,54 @@ internal static class ObjectImportLiveProbes
                 placed.Instance.Hash == hashBefore && ImportLinks.HullsOf(dir, "probe_live") is [{ } then] && then.Hull == hashBefore
                 && host.LinkedCollisionNodes(node).Count == 1);
 
+            // ── the hull resized ON ITS OWN: nothing rides with it, and the object's record still follows ──
+            host.Selection.SetSelection([hulls[0]], hulls[0]);
+            Vector3 hullPivot = hull.WorldTransform.Translation;
+            host.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Scale);
+            host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(-hullPivot) * Matrix4x4.CreateScale(1.3f) * Matrix4x4.CreateTranslation(hullPivot));
+            host.GizmoEndDrag();
+            Check("a hull resized on its own is re-cooked under a new hash, and stays the object's",
+                placed.Instance.Hash != hashBefore && ImportLinks.HullsOf(dir, "probe_live") is [{ } alone] && alone.Hull == placed.Instance.Hash
+                && host.LinkedCollisionNodes(node).Count == 1, $"{hashBefore:x16} → {placed.Instance.Hash:x16}");
+            host.Undo();
+            Check("…and undoing that puts hull and record back", placed.Instance.Hash == hashBefore
+                && ImportLinks.HullsOf(dir, "probe_live") is [{ } restored] && restored.Hull == hashBefore);
+
+            // ── the hull moved on its own, well past where it would be looked for: it is still the object's ──
+            host.Selection.SetSelection([hulls[0]], hulls[0]);
+            host.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Move);
+            host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(0f, -14f, 0f));
+            host.GizmoEndDrag();
+            Vector3 strayedTo = hull.WorldTransform.Translation, objectStood = moved.WorldTransform.Translation;
+            bool stillLinked = host.LinkedCollisionNodes(node).Count == 1;
+            host.Selection.SetSelection([node], node);
+            host.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Move);
+            host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(3f, 0f, 0f));
+            host.GizmoEndDrag();
+            Check("a hull moved fourteen metres on its own is still the object's, and goes with it from where it was put",
+                stillLinked && ProbeAssert.Approx(hull.WorldTransform.Translation - strayedTo, new Vector3(3f, 0f, 0f), 0.01f)
+                && ProbeAssert.Approx(moved.WorldTransform.Translation - objectStood, new Vector3(3f, 0f, 0f), 0.01f),
+                $"linked after its own move: {stillLinked}");
+            host.Undo();
+            host.Undo();
+            Check("…and with both moves undone it is where it was, the record as it was",
+                host.LinkedCollisionNodes(node).Count == 1 && ImportLinks.HullsOf(dir, "probe_live") is [{ } asWas]
+                && asWas.At is { } placeAsWas && Vector3.Distance(placeAsWas, Relative()) < 0.02f);
+
+            // ── a transform pushed from Blender takes the hull along, as one typed or dragged does ──
+            {
+                Vector3 hullWas = hull.WorldTransform.Translation;
+                Matrix4x4 pushedFrom = moved.LocalTransform, pushedTo = pushedFrom;
+                pushedTo.Translation += new Vector3(-6f, 2f, 0f);
+                host.GeometryEditing.ApplyPushBatch([], [new GeometryEditController.TransformItem(node, pushedFrom, pushedTo)], [], null);
+                Check("a transform pushed from Blender carries the hull",
+                    ProbeAssert.Approx(hull.WorldTransform.Translation - hullWas, new Vector3(-6f, 2f, 0f), 0.01f)
+                    && host.LinkedCollisionNodes(node).Count == 1);
+                host.Undo();
+                Check("…and its undo brings both back", ProbeAssert.Approx(hull.WorldTransform.Translation, hullWas, 0.01f)
+                    && ProbeAssert.Approx(moved.LocalTransform.Translation, pushedFrom.Translation, 0.01f));
+            }
+
             // ── the same hull given twice, the second placement nine metres from the object's pivot ──
             int given = 1;
             host.Selection.SetSelection([hulls[0]], hulls[0]);
@@ -222,6 +270,25 @@ internal static class ObjectImportLiveProbes
             Check("undoing the rename moves the record back",
                 ImportLinks.HullsOf(dir, "probe_live").Count == given && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 0);
             host.Redo();
+
+            // ── another imported object renamed ONTO this one's name: this one's record is not written over ──
+            why = session.ImportObject(probeSds.FullName, source, "probe_live_b", [at[0] + 40f, at[1], at[2]], null, "box", 1, out _);
+            if (why == null)
+            {
+                IReadOnlyList<ImportLinks.Link> mine = [.. ImportLinks.HullsOf(dir, "probe_live_renamed")];
+                string? onto = session.SetProperty("probe_live_b", "Base.Name", "probe_live_renamed");
+                Check("renamed onto a name that has a record, the other object's record stays what it was",
+                    onto == null && ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(mine)
+                    && host.LinkedCollisionNodes(node).Count == given, onto ?? "");
+                host.Undo();
+                Check("…and after the undo both objects have their own records",
+                    ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(mine) && ImportLinks.HullsOf(dir, "probe_live_b").Count == 1);
+                host.Undo();    // the second import
+            }
+            else
+            {
+                sb.AppendLine("    (a second copy could not be imported — the rename-onto step was skipped: " + why + ")");
+            }
 
             // ── delete takes the hull; undo brings both back ──
             host.Selection.SetSelection([node], node);

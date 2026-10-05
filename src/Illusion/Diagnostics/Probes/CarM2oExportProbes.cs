@@ -123,6 +123,14 @@ internal static class CarM2oExportProbes
                 && File.ReadAllText(Path.Combine(broken, CarM2oExport.PackageFile)) == BadPackage
                 && Directory.GetFileSystemEntries(broken).Length == 2, unreadPackage ?? "exported");
 
+            const string OddList = "{ \"vehicles\": [ \"not a car\" ] }";
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), OddList);
+            File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), "{ \"name\": \"mine\" }");
+            Check("refuses a vehicles.json whose list holds something that is not a car, before copying anything",
+                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? oddList) == null && oddList != null
+                && File.ReadAllText(Path.Combine(broken, CarM2oExport.VehiclesFile)) == OddList
+                && Directory.GetFileSystemEntries(broken).Length == 2, oddList ?? "exported");
+
             CarM2oExportResult? result = CarM2oExport.ExportFrom(sources, output, CarM2oExport.DefaultResource(Name), out refused);
             Check("exports the clone", result != null, refused ?? "");
             if (result == null) return;

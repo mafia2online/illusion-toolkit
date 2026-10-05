@@ -110,7 +110,8 @@ public static class TuningEditing
             ActorPropertyKind.UInt16 => (ushort.MinValue, ushort.MaxValue),
             ActorPropertyKind.Int32 => (int.MinValue, int.MaxValue),
             ActorPropertyKind.UInt32 => (uint.MinValue, uint.MaxValue),
-            ActorPropertyKind.UInt64 => (0, long.MaxValue),
+            // The 64-bit kinds take any value this API can carry: the upper half of an unsigned one arrives
+            // as a negative number, and a range here would refuse it.
             _ => null,
         };
         return kind switch

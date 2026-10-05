@@ -377,21 +377,41 @@ public static class SdsWriter
         // caller before the temp is ever moved over the live archive.
         var tmp = new FileInfo(sds.FullName + ".tmp");
         if (tmp.Exists) tmp.Delete();
-        SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII, MemoryFor(sds, extracted));
-        using (FileStream output = File.Create(tmp.FullName))
+        string? backup = null;
+        try
         {
-            archive.Save(output, new SdsWriteOptions());
-        }
-        tmp.Refresh();
-        if (!tmp.Exists || tmp.Length == 0)
-            throw new IOException($"Packing {sds.Name} produced no output.");
+            SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII, MemoryFor(sds, extracted));
+            using (FileStream output = File.Create(tmp.FullName))
+            {
+                archive.Save(output, new SdsWriteOptions());
+            }
+            tmp.Refresh();
+            if (!tmp.Exists || tmp.Length == 0)
+                throw new IOException($"Packing {sds.Name} produced no output.");
 
-        // Preserve the archive's current contents (the packer makes no backup of its own — bBackupEnabled is off),
-        // then swap the freshly-built archive into place. File.Move on the same volume is atomic, so the game .sds
-        // is never left half-written. The backup is taken AFTER the temp built successfully, so a failed build
-        // never spawns a spurious version.
-        string? backup = createBackup ? BackupArchive(sds, when) : null;
-        File.Move(tmp.FullName, sds.FullName, overwrite: true);
+            // Preserve the archive's current contents (the packer makes no backup of its own — bBackupEnabled is off),
+            // then swap the freshly-built archive into place. File.Move on the same volume is atomic, so the game .sds
+            // is never left half-written. The backup is taken AFTER the temp built successfully, so a failed build
+            // never spawns a spurious version.
+            backup = createBackup ? BackupArchive(sds, when) : null;
+            File.Move(tmp.FullName, sds.FullName, overwrite: true);
+        }
+        catch
+        {
+            // The archive is as it was — which is the point — but the temp beside it and a backup taken of an
+            // archive that was then NOT replaced are this call's own, and nobody else knows of them: with the
+            // game holding the archive, every failed build left a "version" in backups\ and a .tmp in the folder.
+            try
+            {
+                if (File.Exists(tmp.FullName)) File.Delete(tmp.FullName);
+                if (backup != null && File.Exists(backup)) File.Delete(backup);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // then they stay; the failure being reported is the pack's
+            }
+            throw;
+        }
         return new PackResult(sds.FullName, backup) { Dropped = dropped };
     }
 }

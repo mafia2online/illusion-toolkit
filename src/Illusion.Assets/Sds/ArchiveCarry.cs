@@ -415,25 +415,38 @@ public static class ArchiveCarry
         AtomicFile.WriteAllBytes(Path.Combine(folder, ParkedIndex), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(parked));
     }
 
-    // Out of the manifest and into the parked folder. The copy is made BEFORE the entry is dropped and the
-    // original removed after it: whichever step fails, the manifest never names a file that is not there
-    // (which fails a Build), and the texture is never in neither place.
+    // Out of the manifest and into the parked folder, in two steps. First BOTH files are copied aside and
+    // written down; a failure there leaves the texture exactly as it was (it stays carried). Only then are
+    // the entries dropped and the originals removed — and whatever fails in that half, what was copied is
+    // still returned, so it is on record as parked: an entry already gone with its file not recorded was a
+    // texture the next sweep deleted for good.
     private static List<ParkedFile> Park(SdsManifest manifest, string dir, string texture, List<string> dropped)
     {
         var files = new List<ParkedFile>();
-        foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
+        string[] both = [texture, SdsImportTypes.MipNameFor(texture)];
+        foreach (string file in both)
         {
             string path = Path.Combine(dir, file);
             IReadOnlyList<(string Name, string Value)>? fields = manifest.EntryFields(file);
-            if (fields != null && File.Exists(path))
+            if (fields == null || !File.Exists(path)) continue;
+            string parkedPath = ParkedPath(dir, file);
+            Directory.CreateDirectory(Path.GetDirectoryName(parkedPath)!);
+            File.Copy(path, parkedPath, overwrite: true);
+            files.Add(new ParkedFile { File = file, Fields = [.. fields.Select(f => new[] { f.Name, f.Value })] });
+        }
+
+        foreach (string file in both)
+        {
+            try
             {
-                string parkedPath = ParkedPath(dir, file);
-                Directory.CreateDirectory(Path.GetDirectoryName(parkedPath)!);
-                File.Copy(path, parkedPath, overwrite: true);
-                files.Add(new ParkedFile { File = file, Fields = [.. fields.Select(f => new[] { f.Name, f.Value })] });
+                if (manifest.RemoveEntry(file)) dropped.Add(file);
+                File.Delete(Path.Combine(dir, file));
             }
-            if (manifest.RemoveEntry(file)) dropped.Add(file);
-            File.Delete(path);
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Still listed, or listed no more and its file still there: either way the copy is safe and
+                // on record, and the putting back sorts it out (a file still listed is simply left).
+            }
         }
         return files;
     }
@@ -485,6 +498,41 @@ public static class ArchiveCarry
     {
         ArgumentException.ThrowIfNullOrEmpty(extracted);
         ArgumentNullException.ThrowIfNull(scene);
+        try
+        {
+            return Sweep(extracted, scene, park: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.SdsFormatException
+                                       or System.Xml.XmlException)
+        {
+            // Housekeeping, run in the middle of a save — after the scene is written and before its buffer
+            // pools are. A manifest that cannot be read just now must not leave the save half done.
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Puts back the parked textures the scene names again, and nothing else — for the moment an import is
+    /// redone, so that the working copy has the object's textures as soon as the object is back rather than
+    /// only after the next save.
+    /// </summary>
+    public static void ReturnParked(string extracted, Formats.Frames.FrameResource scene)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extracted);
+        ArgumentNullException.ThrowIfNull(scene);
+        try
+        {
+            Sweep(extracted, scene, park: false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.SdsFormatException
+                                       or System.Xml.XmlException)
+        {
+            // then they come back with the next save
+        }
+    }
+
+    private static IReadOnlyList<string> Sweep(string extracted, Formats.Frames.FrameResource scene, bool park)
+    {
         HashSet<string> carried = ReadRegister(extracted);
         Dictionary<string, List<ParkedFile>> parked = ReadParked(extracted);
         if (carried.Count == 0 && parked.Count == 0) return [];
@@ -529,7 +577,7 @@ public static class ArchiveCarry
                         carried.Add(texture);
                         TextureSearchIndex.Register(Path.Combine(extracted, texture));
                     }
-                    else if (ParkedHere.Contains(ParkedKey(extracted, texture)))
+                    else if (!park || ParkedHere.Contains(ParkedKey(extracted, texture)))
                     {
                         continue; // an undo stack of this run can still bring its object back
                     }
@@ -546,7 +594,7 @@ public static class ArchiveCarry
                 }
             }
 
-            foreach (string texture in carried.ToList())
+            foreach (string texture in park ? carried.ToList() : [])
             {
                 if (named.Contains(texture)) continue;
                 try

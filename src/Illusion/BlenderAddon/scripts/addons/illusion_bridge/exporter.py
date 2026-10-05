@@ -330,7 +330,11 @@ def _describe_authored(material, entry, blocks, image_refs, signatures):
         mode, mask, channel, value = alpha
         if mask is not None and mask != diffuse:
             parts.append(materials.image_signature(mask))
-        alpha_key = f"alpha={mode}:{channel}:{value}:{mask.name if mask is not None else ''}"
+        # …and the colour space the mask is read in: an 8-bit mask tagged sRGB is linearised on the
+        # way out and one tagged Non-Color is not, so retagging it changes what is sent while the
+        # file, its name and its size stay what they were.
+        space = getattr(getattr(mask, "colorspace_settings", None), "name", "") if mask is not None else ""
+        alpha_key = f"alpha={mode}:{channel}:{value}:{mask.name if mask is not None else ''}:{space}"
         values.append(alpha_key)
     signature = None if any(p is None for p in parts) else "|".join(parts + values)
     if game_hash and signature is not None and signature == material.get(materials.SIGNATURE_PROP):
