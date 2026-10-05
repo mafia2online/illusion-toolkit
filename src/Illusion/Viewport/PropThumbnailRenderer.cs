@@ -224,8 +224,9 @@ internal sealed class PropThumbnailRenderer : IDisposable
         return Path.Combine(CacheDir, $"{Fnv64.Hash(entry.Key):x16}_{Fnv64.Hash($"{copy}|{Look}"):x16}");
     }
 
-    private static bool _legacyDropped;
-
+    // Only this prop's own pictures from earlier states of its archive. Pictures named the way the first
+    // version of this named them (the prop alone, no state) are left where they are: a build of that version
+    // may be in use beside this one, on the same folder — and deleting "what nothing reads" emptied its tiles.
     private static void DropOlder(string stem)
     {
         string whose = Path.GetFileName(stem)[..17]; // sixteen digits and the underscore
@@ -235,13 +236,6 @@ internal sealed class PropThumbnailRenderer : IDisposable
             {
                 File.Delete(other);
             }
-        }
-        if (_legacyDropped) return;
-        _legacyDropped = true;
-        // Pictures under the name the first version of this gave them (no underscore): nothing reads them.
-        foreach (string old in Directory.GetFiles(CacheDir, "*.png"))
-        {
-            if (!Path.GetFileName(old).Contains('_')) File.Delete(old);
         }
     }
 
