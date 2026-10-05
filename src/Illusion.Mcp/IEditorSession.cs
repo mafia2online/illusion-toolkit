@@ -24,8 +24,10 @@ public interface IEditorSession
     /// <summary>Opens the map editor from the launcher when it is not open yet. Null on success.</summary>
     string? EnsureEditor();
 
-    /// <summary>Starts loading an area (a no-op when it is the one already shown). Null on success.</summary>
-    string? LoadArea(string area, bool winter);
+    /// <summary>Starts loading an area (a no-op when it is the one already shown). Null on success. A load
+    /// that would replace a scene with unsaved edits is refused unless <paramref name="discardUnsavedEdits"/>
+    /// says they may be lost.</summary>
+    string? LoadArea(string area, bool winter, bool discardUnsavedEdits);
 
     /// <summary>Scene-tree rows by name fragment, kind and/or a world-space box their bounds or position
     /// must touch.</summary>
@@ -48,10 +50,14 @@ public interface IEditorSession
     /// <summary>The most recent notices, oldest first.</summary>
     IReadOnlyList<EditorNotice> Notices(int last);
 
-    /// <summary>Writes every unsaved edit to the working copies. Null on success.</summary>
-    string? Save(out int filesWritten);
+    /// <summary>Writes every unsaved edit to the working copies. Null when the save ran — which is not the
+    /// same as everything being written: <paramref name="notSaved"/> names each thing the save had to leave
+    /// unsaved (a material library that would not write, a working copy that was refused), and is empty only
+    /// when the save is complete.</summary>
+    string? Save(out int filesWritten, out IReadOnlyList<string> notSaved);
 
-    /// <summary>Saves, then packs every archive with edits, keeping a backup of each.</summary>
+    /// <summary>Saves, then packs every archive with edits, keeping a backup of each. When the save does not
+    /// complete nothing is packed, and <see cref="BuildOutcome.NotSaved"/> says what stood in the way.</summary>
     BuildOutcome Build();
 
     /// <summary>Saves, then carries the loaded district's edits into its winter archive's working copy and
