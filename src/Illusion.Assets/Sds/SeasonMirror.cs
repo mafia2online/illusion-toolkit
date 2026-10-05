@@ -561,6 +561,8 @@ public static class SeasonMirror
                 manifest.RemoveEntry(name);
                 return ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
             }
+            // An entry that differs and cannot be copied leaves nothing to do when the bytes are the same.
+            if (sameBytes) return false;
             AtomicFile.WriteAllBytes(target, bytes);
             return true;
         }
