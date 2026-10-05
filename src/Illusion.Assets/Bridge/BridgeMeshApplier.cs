@@ -1083,10 +1083,12 @@ public static class BridgeMeshApplier
         return (min, max);
     }
 
+    // Read off the level's index buffer and nothing else. This runs on every push, ahead of a path that
+    // decodes the mesh anyway — asking a full decode (every vertex channel unpacked, the skin with it) just
+    // to learn the index width paid for the whole mesh twice.
     private static bool HasWideIndices(IFrameNode node, int lod) =>
-        node is FrameNodeAdapter { Frame: FrameObjectSingleMesh frame }
-        && SdsMeshLoader.DecodeLod(frame, lod) is { } decoded
-        && frame.GetIndexBuffer(decoded.Lod) is { IndexFormat: 2 };
+        node is FrameNodeAdapter { Frame: FrameObjectSingleMesh { Geometry.LOD.Length: > 0 } frame }
+        && frame.GetIndexBuffer(SdsMeshLoader.ClampLod(frame, lod)) is { IndexFormat: 2 };
 
     private static bool FaceSetMatches(DecodedMesh decoded, MeshObjectPayload payload, out string? reason)
     {
