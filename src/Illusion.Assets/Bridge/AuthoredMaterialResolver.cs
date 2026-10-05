@@ -96,6 +96,31 @@ public sealed class AuthoredMaterialResolver
             {
                 if (image != null && Pixels(image, out skipReason) == null) return false;
             }
+
+            // A material that would have to be MADE and arrives without a picture to make it from — new, or
+            // one Blender remembers and the library no longer has. Both are told apart further down, where
+            // each gets its own words; here it only matters that neither is found after an earlier slot of
+            // the same object has been written. (A slot earlier in this object that brings the picture under
+            // the same name makes the material first, and this one then binds to it.)
+            bool stamped = BridgeMeshApplier.TryParseMaterialHash(info.Hash, out ulong stampedHash) && stampedHash != 0;
+            bool known = stamped ? MafiaMaterials.KnowsMaterial(stampedHash) || !info.Authored : false;
+            if (!known && name.Length > 0 && info.DiffuseImage == null && MafiaMaterials.FindHashByName(name) == null
+                && !payload.Materials.TakeWhile(other => !ReferenceEquals(other, info)).Any(other => other.DiffuseImage != null
+                    && string.Equals(other.Name?.Trim(), name, StringComparison.Ordinal)))
+            {
+                if (stamped)
+                {
+                    if (_acknowledged.Add(name)) Resolved.Add(new PushMaterial { Name = name, Hash = "" });
+                    skipReason = $"material '{name}' is no longer in the game's library (undone, or never saved) — "
+                        + "push again and it will be created anew";
+                }
+                else
+                {
+                    skipReason = $"material '{name}' is new and has no image on Base Color — "
+                        + "plug an Image Texture into it (plain colours are not supported yet)";
+                }
+                return false;
+            }
         }
 
         foreach (MeshMaterialInfo info in payload.Materials)
