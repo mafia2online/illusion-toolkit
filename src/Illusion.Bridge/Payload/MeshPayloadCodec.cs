@@ -37,6 +37,13 @@ public sealed class MeshMaterialInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MaterialImageRef? NormalImage { get; set; }
 
+    /// <summary>Blender → toolkit only: the Space of the material's Normal Map node when it is NOT tangent
+    /// space ("OBJECT", "WORLD", …). Such a map is not sent as <see cref="NormalImage"/> — the game reads
+    /// tangent-space normals only — and the material is refused with the reason.</summary>
+    [JsonPropertyName("normalSpace")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NormalSpace { get; set; }
+
     /// <summary>Blender → toolkit only: the image wired into the specular input.</summary>
     [JsonPropertyName("specularImage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

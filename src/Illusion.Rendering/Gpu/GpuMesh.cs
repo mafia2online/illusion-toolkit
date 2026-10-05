@@ -123,6 +123,11 @@ public sealed unsafe class GpuMesh : IDisposable
     // user is gone can actually be released (otherwise VRAM grows for the whole session while streaming).
     private TextureLibrary? _textures;
     private readonly List<TextureLease> _textureLeases = new();
+
+    // …and per part, so a part that is rebound can return what it held. Without this every repaint of a
+    // texture left one more GPU copy alive for as long as the mesh stayed loaded: the library retires a
+    // rewritten texture until its last lease comes back, and a lease only ever came back on dispose.
+    private readonly List<List<TextureLease>> _partLeases = new();
     private bool _disposed;
 
     public static GpuMesh Create(GpuContext gpu, MeshData mesh, TextureLibrary textures)
@@ -205,6 +210,7 @@ public sealed unsafe class GpuMesh : IDisposable
         result._textures = textures;
         foreach (MeshPart part in mesh.Parts)
         {
+            var leases = new List<TextureLease>(3);
             result.Parts.Add(new GpuPart
             {
                 StartIndex = (uint)part.StartIndex,
@@ -212,10 +218,11 @@ public sealed unsafe class GpuMesh : IDisposable
                 MaterialHash = part.MaterialHash,
                 Tint = part.Tint,
                 Blended = part.Blended,
-                Srv = textures.Acquire(part.DiffuseTexture, result._textureLeases),
-                NormalSrv = textures.AcquireNormalOrFlat(part.NormalTexture, result._textureLeases), // flat-normal when absent
-                SpecSrv = textures.Acquire(part.SpecularTexture, result._textureLeases),             // white when absent → spec level ×1
+                Srv = textures.Acquire(part.DiffuseTexture, leases),
+                NormalSrv = textures.AcquireNormalOrFlat(part.NormalTexture, leases), // flat-normal when absent
+                SpecSrv = textures.Acquire(part.SpecularTexture, leases),             // white when absent → spec level ×1
             });
+            result._partLeases.Add(leases);
         }
 
         if (instanced)
@@ -299,9 +306,9 @@ public sealed unsafe class GpuMesh : IDisposable
 
     /// <summary>
     /// Re-resolves the textures of every part bound to <paramref name="materialHash"/> (a material edit changed
-    /// its slots). New SRVs come from the same library the mesh acquired from; the superseded leases stay recorded
-    /// until the mesh is disposed — a few stale leases per edit is bounded, and releasing them early would need
-    /// per-part lease bookkeeping. Returns the number of parts rebound.
+    /// its slots). New SRVs come from the same library the mesh acquired from, and the ones the part held are
+    /// handed back once it holds the new ones — other parts and other meshes keep their own leases on the same
+    /// texture. Returns the number of parts rebound.
     /// </summary>
     public int RebindPartTextures(ulong materialHash, string? diffuse, string? normal, string? specular,
         Vector4 tint, bool blended = false)
@@ -312,12 +319,14 @@ public sealed unsafe class GpuMesh : IDisposable
         {
             if (Parts[i].MaterialHash != materialHash) continue;
             GpuPart p = Parts[i];
-            p.Srv = _textures.Acquire(diffuse, _textureLeases);
-            p.NormalSrv = _textures.AcquireNormalOrFlat(normal, _textureLeases);
-            p.SpecSrv = _textures.Acquire(specular, _textureLeases);
+            var fresh = new List<TextureLease>(3);
+            p.Srv = _textures.Acquire(diffuse, fresh);
+            p.NormalSrv = _textures.AcquireNormalOrFlat(normal, fresh);
+            p.SpecSrv = _textures.Acquire(specular, fresh);
             p.Tint = tint;   // a material's colour is as editable as its textures — see MafiaMaterials
             p.Blended = blended;
             Parts[i] = p;
+            Supersede(i, fresh);
             rebound++;
         }
         return rebound;
@@ -331,13 +340,28 @@ public sealed unsafe class GpuMesh : IDisposable
         if (_disposed || _textures == null || index < 0 || index >= Parts.Count) return false;
         GpuPart p = Parts[index];
         p.MaterialHash = materialHash;
-        p.Srv = _textures.Acquire(diffuse, _textureLeases);
-        p.NormalSrv = _textures.AcquireNormalOrFlat(normal, _textureLeases);
-        p.SpecSrv = _textures.Acquire(specular, _textureLeases);
+        var fresh = new List<TextureLease>(3);
+        p.Srv = _textures.Acquire(diffuse, fresh);
+        p.NormalSrv = _textures.AcquireNormalOrFlat(normal, fresh);
+        p.SpecSrv = _textures.Acquire(specular, fresh);
         p.Tint = tint;
         p.Blended = blended;
         Parts[index] = p;
+        Supersede(index, fresh);
         return true;
+    }
+
+    // The new leases are taken BEFORE the old ones go back: a part rebound to the texture it already has must
+    // not drop that texture's last reference on the way.
+    private void Supersede(int part, List<TextureLease> fresh)
+    {
+        if (part >= _partLeases.Count)
+        {
+            _textureLeases.AddRange(fresh); // a part added outside Create: returned on dispose, as before
+            return;
+        }
+        _textures!.Release(_partLeases[part]);
+        _partLeases[part] = fresh;
     }
 
     /// <summary>Sets a new world matrix and refreshes the world-space AABB (used by frustum culling + picking).</summary>
@@ -424,6 +448,7 @@ public sealed unsafe class GpuMesh : IDisposable
         if (Instanced) InstanceBuffer.Dispose();
         if (IsSkinned) SkinBuffer.Dispose();
         // SRVs belong to TextureLibrary — returning the leases lets it evict entries with no users left.
+        foreach (List<TextureLease> leases in _partLeases) _textures?.Release(leases);
         _textures?.Release(_textureLeases);
     }
 }

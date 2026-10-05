@@ -187,10 +187,37 @@ internal sealed class MaterialEditController
     /// A texture FILE was rewritten under the name the material already uses: nothing in the catalog
     /// changed, so the renderer is told to forget its copy and every part drawing the material re-reads it.
     /// </summary>
-    public void ReloadTexture(ulong hash, string textureName)
+    public void ReloadTexture(ulong hash, string textureName) => ReloadTextureFiles([textureName]);
+
+    /// <summary>
+    /// Several texture files were rewritten under their names — by a push, or by undoing one. Each is
+    /// forgotten once, and each material that names any of them rebinds its parts once: a push of a hundred
+    /// objects sharing a material used to invalidate and rebind a hundred times over, every time across
+    /// every loaded mesh.
+    /// </summary>
+    public void ReloadTextureFiles(IEnumerable<string> textureNames)
     {
-        _host.Rnd?.Textures.Invalidate(textureName);
-        RefreshMeshesUsing(hash);
+        var names = new HashSet<string>(textureNames, StringComparer.OrdinalIgnoreCase);
+        if (names.Count == 0 || _host.Rnd is not { } renderer) return;
+        foreach (string name in names) renderer.Textures.Invalidate(name);
+
+        var drawn = new HashSet<ulong>();
+        foreach (GpuMesh gm in renderer.Meshes)
+        {
+            foreach (GpuPart part in gm.Parts)
+            {
+                if (part.MaterialHash != 0) drawn.Add(part.MaterialHash);
+            }
+        }
+        foreach (ulong hash in drawn)
+        {
+            MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
+            if ((tex.Diffuse != null && names.Contains(tex.Diffuse)) || (tex.Normal != null && names.Contains(tex.Normal))
+                || (tex.Specular != null && names.Contains(tex.Specular)))
+            {
+                RefreshMeshesUsing(hash);
+            }
+        }
         _host.RaiseMaterialsChanged();
     }
 

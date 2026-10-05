@@ -929,7 +929,7 @@ internal sealed class BridgeSessionController : IDisposable
                 // changed; and one rewritten under its old name changed no material, so the renderer has
                 // to be told to read the file again.
                 foreach (FileInfo archive in authored.TouchedArchives.Values) _host.Persistence.MarkArchiveModified(archive);
-                foreach ((ulong hash, string texture) in authored.Rewritten) _host.MaterialEditing.ReloadTexture(hash, texture);
+                _host.MaterialEditing.ReloadTextureFiles(authored.Rewritten.Select(r => r.Texture));
 
                 geometry.RemoveAll(g => !_host.Tree.IsInScene(g.Node));
                 transforms.RemoveAll(t => !_host.Tree.IsInScene(t.Node));
@@ -958,6 +958,11 @@ internal sealed class BridgeSessionController : IDisposable
                 // Build the collision edits here, on the UI thread, so their scene lookups happen where the
                 // scene is owned. The cooking they depend on already finished out on the bridge thread.
                 var collisionEdits = new List<IEditAction>();
+                // The texture files this push wrote are part of the push: undone with it, back with a redo.
+                // The catalog's own history cannot do it — a repaint under the same name changes no binding
+                // and so leaves no entry there at all.
+                if (authored.TextureChanges.Count > 0)
+                    collisionEdits.Add(new TextureFilesEdit(_host, authored.TextureChanges));
                 foreach (ReshapedHull hull in reshapes)
                 {
                     if (!_host.Tree.IsInScene(hull.Node) || hull.Node.Parent is not { } layer

@@ -191,8 +191,10 @@ public sealed class MaterialPreviewViewport : ViewportControl
             Indices = outIdx,
             Parts = new[]
             {
+                // The tint with the rest: a material that paints itself has no albedo, and without its
+                // colour the mesh preview showed it white while the sphere showed it painted.
                 new MeshPart(0, outIdx.Length,
-                    part.DiffuseTexture, part.NormalTexture, part.SpecularTexture, part.MaterialHash),
+                    part.DiffuseTexture, part.NormalTexture, part.SpecularTexture, part.MaterialHash, part.Tint),
             },
         };
     }
