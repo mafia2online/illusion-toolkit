@@ -212,6 +212,22 @@ internal static class ObjectImportLiveProbes
                 host.LinkedCollisionNodes(node).Count == 1 && ImportLinks.HullsOf(dir, "probe_live") is [{ } asWas]
                 && asWas.At is { } placeAsWas && Vector3.Distance(placeAsWas, Relative()) < 0.02f);
 
+            // ── the same, with the hull's place TYPED rather than dragged: it has moved by the time it is recorded ──
+            {
+                Matrix4x4 hullFrom = hull.LocalTransform, hullTo = hullFrom;
+                hullTo.Translation += new Vector3(0f, 16f, 0f);
+                hull.LocalTransform = hullTo;
+                host.RecordTransform(hulls[0], hullFrom, hullTo);
+                Check("a hull typed sixteen metres away on its own is still the object's",
+                    host.LinkedCollisionNodes(node).Count == 1
+                    && ImportLinks.HullsOf(dir, "probe_live") is [{ } typed] && typed.At is { } typedAt
+                    && Vector3.Distance(typedAt, Relative()) < 0.02f);
+                host.Undo();
+                Check("…and its undo puts the hull and the record back",
+                    ProbeAssert.Approx(hull.LocalTransform.Translation, hullFrom.Translation, 0.01f)
+                    && host.LinkedCollisionNodes(node).Count == 1);
+            }
+
             // ── a transform pushed from Blender takes the hull along, as one typed or dragged does ──
             {
                 Vector3 hullWas = hull.WorldTransform.Translation;
@@ -283,6 +299,19 @@ internal static class ObjectImportLiveProbes
                 host.Undo();
                 Check("…and after the undo both objects have their own records",
                     ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(mine) && ImportLinks.HullsOf(dir, "probe_live_b").Count == 1);
+
+                // The other way round: the EARLIER object renamed onto the later one's name. It comes first in
+                // the file under that name now — and must not come by the later one's collision for that.
+                SceneNode? later = Nodes(host).FirstOrDefault(n => n.Source is FrameNodeAdapter f && f.Frame.Name.String == "probe_live_b");
+                string? taken = session.SetProperty("probe_live_renamed", "Base.Name", "probe_live_b");
+                Check("an earlier object renamed onto a later one's name does not take over its collision",
+                    taken == null && later != null && host.LinkedCollisionNodes(later).Count == 1
+                    && host.LinkedCollisionNodes(node).Count == 0,
+                    taken ?? $"the later object has {(later == null ? -1 : host.LinkedCollisionNodes(later).Count)}, the renamed one {host.LinkedCollisionNodes(node).Count}");
+                host.Undo();
+                Check("…and renamed back, each has its own again",
+                    later != null && host.LinkedCollisionNodes(later).Count == 1 && host.LinkedCollisionNodes(node).Count == given
+                    && ImportLinks.HullsOf(dir, "probe_live_renamed").SequenceEqual(mine));
                 host.Undo();    // the second import
             }
             else

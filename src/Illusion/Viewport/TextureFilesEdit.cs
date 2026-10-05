@@ -39,6 +39,10 @@ internal sealed class TextureFilesEdit : IEditAction
         _archives = [.. archives];
     }
 
+    /// <summary>Whether there is anything here to take back — a push that only introduced textures has
+    /// nothing, and an entry made of it would be a Ctrl+Z that does nothing.</summary>
+    public bool IsEmpty => _changes.Count == 0;
+
     public void Undo()
     {
         if (!_onDisk) return;

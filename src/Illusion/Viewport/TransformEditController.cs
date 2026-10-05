@@ -114,11 +114,12 @@ internal sealed class TransformEditController
                 if (link.Slot >= entries.Count || link.Hull.Source is not CollisionInstanceAdapter placed) continue;
                 Assets.Sds.ImportLinks.Link now = D3DImageHost.LinkFor(link.Owner, placed.Instance);
                 Assets.Sds.ImportLinks.Link was = entries[link.Slot];
-                bool samePlace = was.At is not { } before || now.At is not { } after || Vector3.Distance(before, after) < 0.01f;
-                if (was.Hull == now.Hull && samePlace) continue;
-                // A record without a place keeps none unless the placement moved on its own — it is matched
-                // by nearness, and a place written now would be right only until the next change.
-                entries[link.Slot] = samePlace ? was with { Hull = now.Hull } : now;
+                // A record from before places were kept gains one here, the first time anything is done to
+                // the placement: found by nearness this once, it is found by its place from now on — and
+                // without it a hull of such a record dragged a little too far on its own was lost.
+                bool samePlace = was.At is { } before && now.At is { } after && Vector3.Distance(before, after) < 0.01f;
+                if (was.Hull == now.Hull && (samePlace || now.At == null)) continue;
+                entries[link.Slot] = now.At == null ? was with { Hull = now.Hull } : now;
                 changed = true;
             }
             if (!changed) continue;
@@ -130,46 +131,29 @@ internal sealed class TransformEditController
     }
 
     /// <summary>
-    /// Moves the collision an imported object was given — and what was given to anything under it — by the
-    /// change that took the object from <paramref name="worldBefore"/> to <paramref name="worldAfter"/>, for
-    /// the ways of moving an object that are not a drag: a number typed into the panel, a transform pushed
-    /// from Blender. The placements are looked for from where the object WAS. Returns what moved, for the
-    /// caller's undo entry, and the edits already applied alongside (re-cooked hulls, the records).
+    /// Moves placements that ride with an object by the change <paramref name="delta"/> made to it, and
+    /// re-cooks the ones a resize reached (a placement cannot store a scale). Returns what moved, for the
+    /// caller's undo entry; <paramref name="minted"/> are the re-cook edits, already applied.
     /// </summary>
-    internal (List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> Moved, List<IEditAction> Applied) CarryLinked(
-        SceneNode node, Matrix4x4 worldBefore, Matrix4x4 worldAfter)
+    /// <param name="skip">Placements that are not to be carried: ones the caller places itself.</param>
+    internal List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> MoveRiders(
+        IEnumerable<D3DImageHost.LinkedPlacement> riders, Matrix4x4 delta, Func<SceneNode, bool>? skip,
+        out List<IEditAction> minted)
     {
-        var moved = new List<(SceneNode, Matrix4x4, Matrix4x4)>();
-        var applied = new List<IEditAction>();
-        if (node.Source is CollisionInstanceAdapter)
-        {
-            // A placement changed on its own: nothing rides with it, but its object's record follows.
-            applied.AddRange(Relink(_host.LinksOf([node])));
-            return (moved, applied);
-        }
-        if (node.Source is not IFrameNode || !Matrix4x4.Invert(worldBefore, out Matrix4x4 back)) return (moved, applied);
-
-        Matrix4x4 delta = back * worldAfter;
-        List<D3DImageHost.LinkedPlacement> links = _host.LinkedSlots([node], new Dictionary<SceneNode, Matrix4x4> { [node] = worldBefore })
-            .TryGetValue(node, out List<D3DImageHost.LinkedPlacement>? mine) ? mine : [];
         var hulls = new List<(SceneNode Node, Matrix4x4 Before)>();
-        foreach (D3DImageHost.LinkedPlacement link in links)
+        foreach (D3DImageHost.LinkedPlacement link in riders)
         {
-            if (link.Hull.Source is not IFrameNode h) continue;
+            if (link.Hull.Source is not IFrameNode h || skip?.Invoke(link.Hull) == true
+                || hulls.Any(x => ReferenceEquals(x.Node, link.Hull)))
+            {
+                continue;
+            }
             hulls.Add((link.Hull, h.LocalTransform));
             h.LocalTransform = TransformOps.WorldDeltaToLocal(h.WorldTransform, h.ParentWorldTransform, delta);
             SyncNodeMeshes(link.Hull);
         }
-        if (hulls.Count == 0) return (moved, applied);
-
-        // A placement cannot store a scale: a resize becomes a rescaled hull, as at the end of a drag.
-        applied.AddRange(_host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList()));
-        applied.AddRange(Relink(links));
-        foreach ((SceneNode hull, Matrix4x4 hullBefore) in hulls)
-        {
-            moved.Add((hull, hullBefore, ((IFrameNode)hull.Source!).LocalTransform));
-        }
-        return (moved, applied);
+        minted = hulls.Count == 0 ? [] : [.. _host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList())];
+        return [.. hulls.Select(x => (x.Node, x.Before, ((IFrameNode)x.Node.Source!).LocalTransform))];
     }
 
     // True if any frame-graph ancestor of fn is itself selected (its cascade will move fn).
@@ -261,12 +245,29 @@ internal sealed class TransformEditController
         // A number typed into the Transform panel comes through here, not through a drag — and the collision
         // an imported object was given has to follow it all the same. It used to stay where the object had
         // stood; past a few metres it was then no longer found as the object's, and a later delete left it in
-        // the file as an obstacle nobody can see.
+        // the file as an obstacle nobody can see. Everything is looked for from where it WAS: the change has
+        // already been made by the time it is recorded.
         if (node.Source is IFrameNode moved)
         {
             Matrix4x4 parent = moved.ParentWorldTransform;
-            (List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> carried, applied) = CarryLinked(node, before * parent, after * parent);
-            items.AddRange(carried);
+            Matrix4x4 worldBefore = before * parent, worldAfter = after * parent;
+            List<D3DImageHost.LinkedPlacement> links;
+            if (node.Source is CollisionInstanceAdapter)
+            {
+                // A placement changed on its own: nothing rides with it, but its object's record follows.
+                links = _host.LinksOf([node], new Dictionary<SceneNode, Vector3> { [node] = worldBefore.Translation });
+            }
+            else
+            {
+                links = _host.LinkedSlots([node], new Dictionary<SceneNode, Matrix4x4> { [node] = worldBefore })
+                    .TryGetValue(node, out List<D3DImageHost.LinkedPlacement>? mine) ? mine : [];
+                if (links.Count > 0 && Matrix4x4.Invert(worldBefore, out Matrix4x4 back))
+                {
+                    items.AddRange(MoveRiders(links, back * worldAfter, null, out List<IEditAction> minted));
+                    applied.AddRange(minted);
+                }
+            }
+            applied.AddRange(Relink(links));
         }
         RecordGroupTransform(items, applied);
     }

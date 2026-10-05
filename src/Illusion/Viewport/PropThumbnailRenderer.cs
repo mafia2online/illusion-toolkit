@@ -42,6 +42,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
     private bool _failed;
 
     private readonly object _read = new();
+    private int _rested;                    // counts the times the held archive was let go
     private string? _archive;               // the archive whose scene is held below
     private string? _archiveDir;
     private ExtractedSds? _scene;
@@ -84,9 +85,11 @@ internal sealed class PropThumbnailRenderer : IDisposable
             ExtractedSds? held;
             ActorPlacements? placements;
             string? dir;
+            int asOf;
             lock (_read)
             {
                 (held, placements, dir) = _archive == entry.Archive ? (_scene, _placements, _archiveDir) : (null, null, null);
+                asOf = _rested;
             }
             if (held == null || dir == null)
             {
@@ -99,7 +102,9 @@ internal sealed class PropThumbnailRenderer : IDisposable
                 placements = held.FrameResource is { } fr ? ActorPlacements.Load(held.Manifest, fr) : null;
                 lock (_read)
                 {
-                    (_scene, _placements, _archiveDir, _archive) = (held, placements, dir, entry.Archive);
+                    // Not kept when the tab let its archive go while this was being read: nobody is left to
+                    // ask for the next prop of it.
+                    if (asOf == _rested) (_scene, _placements, _archiveDir, _archive) = (held, placements, dir, entry.Archive);
                 }
             }
             if (held?.FrameResource is not { } scene || placements == null) return new Staged { Entry = entry };
@@ -186,6 +191,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
             _scene = null;
             _placements = null;
             _archive = null;
+            _rested++;
         }
     }
 

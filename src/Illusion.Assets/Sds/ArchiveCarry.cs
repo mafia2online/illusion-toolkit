@@ -415,16 +415,12 @@ public static class ArchiveCarry
         AtomicFile.WriteAllBytes(Path.Combine(folder, ParkedIndex), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(parked));
     }
 
-    // Out of the manifest and into the parked folder, in two steps. First BOTH files are copied aside and
-    // written down; a failure there leaves the texture exactly as it was (it stays carried). Only then are
-    // the entries dropped and the originals removed — and whatever fails in that half, what was copied is
-    // still returned, so it is on record as parked: an entry already gone with its file not recorded was a
-    // texture the next sweep deleted for good.
-    private static List<ParkedFile> Park(SdsManifest manifest, string dir, string texture, List<string> dropped)
+    // Parking, first half: both files copied aside, with the manifest entries they had. Nothing of the
+    // working copy is changed; a failure here leaves the texture exactly as it was.
+    private static List<ParkedFile> CopyAside(SdsManifest manifest, string dir, string texture)
     {
         var files = new List<ParkedFile>();
-        string[] both = [texture, SdsImportTypes.MipNameFor(texture)];
-        foreach (string file in both)
+        foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
         {
             string path = Path.Combine(dir, file);
             IReadOnlyList<(string Name, string Value)>? fields = manifest.EntryFields(file);
@@ -434,8 +430,16 @@ public static class ArchiveCarry
             File.Copy(path, parkedPath, overwrite: true);
             files.Add(new ParkedFile { File = file, Fields = [.. fields.Select(f => new[] { f.Name, f.Value })] });
         }
+        return files;
+    }
 
-        foreach (string file in both)
+    // Parking, second half — only once the copies are on record ON DISK: the entries dropped and the
+    // originals removed. False when either could not be; the texture then stays carried and is tried again
+    // at the next save, its copies already safe.
+    private static bool RemoveOriginals(SdsManifest manifest, string dir, string texture, List<string> dropped)
+    {
+        bool whole = true;
+        foreach (string file in new[] { texture, SdsImportTypes.MipNameFor(texture) })
         {
             try
             {
@@ -444,11 +448,10 @@ public static class ArchiveCarry
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Still listed, or listed no more and its file still there: either way the copy is safe and
-                // on record, and the putting back sorts it out (a file still listed is simply left).
+                whole = false;
             }
         }
-        return files;
+        return whole;
     }
 
     // Back where it was, announced as it was. False when a file of it could not be put back — it stays
@@ -599,13 +602,22 @@ public static class ArchiveCarry
                 if (named.Contains(texture)) continue;
                 try
                 {
-                    List<ParkedFile> files = Park(manifest, extracted, texture, dropped);
+                    List<ParkedFile> files = CopyAside(manifest, extracted, texture);
                     if (files.Count > 0)
                     {
+                        // What an earlier, interrupted attempt already set aside stays on record beside it.
+                        if (parked.TryGetValue(texture, out List<ParkedFile>? earlier))
+                        {
+                            files.AddRange(earlier.Where(e => !files.Any(f => string.Equals(f.File, e.File, StringComparison.OrdinalIgnoreCase))));
+                        }
                         parked[texture] = files;
                         ParkedHere.Add(ParkedKey(extracted, texture));
+                        // Written down before anything is taken out of the working copy: with the index
+                        // written only at the end, a failure there left textures removed and nowhere on
+                        // record, and the next sweep cleared the folder they were parked in.
+                        WriteParked(extracted, parked);
                     }
-                    carried.Remove(texture);
+                    if (RemoveOriginals(manifest, extracted, texture, dropped)) carried.Remove(texture);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

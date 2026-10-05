@@ -69,7 +69,13 @@ internal static class FramePropertyCatalog
     private static void Rename(FrameObjectBase o, FrameNodeAdapter node, string name)
     {
         string old = o.Name.String;
+        // Only for the one object that bears the name. With two of a name — an earlier rename onto a name
+        // that was taken — the record under it belongs to one of them and cannot be told to follow the
+        // other: renaming the newcomer away again must leave it where it is.
+        bool sole = !node.Document.Frame.FrameObjects.Values.OfType<FrameObjectBase>()
+            .Any(f => !ReferenceEquals(f, o) && string.Equals(f.Name.String, old, StringComparison.Ordinal));
         o.Name.Set(name);
+        if (!sole) return;
         try
         {
             Sds.ImportLinks.Rename(MafiaEnvironment.ExtractedDir(node.Document.SourceArchive), old, name);
