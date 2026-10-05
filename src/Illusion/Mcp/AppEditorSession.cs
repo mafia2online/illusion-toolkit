@@ -431,7 +431,8 @@ internal sealed class AppEditorSession : IEditorSession
 
     public bool FrameSelection() => Host.FrameSelection();
 
-    public string? SetView(string? renderMode, bool? collision, bool? crash, bool? zones, bool? navigation)
+    public string? SetView(string? renderMode, bool? collision, bool? crash, bool? zones, bool? navigation,
+        bool discardUnsavedEdits = false)
     {
         if (Window is not { } window) return NotOpen;
         D3DImageHost host = window.Viewport;
@@ -441,6 +442,16 @@ internal sealed class AppEditorSession : IEditorSession
             return $"unknown shading mode '{renderMode}' — one of {string.Join(", ", Enum.GetNames<RenderMode>())}";
         if ((collision != null || crash != null) && host.BridgeEditedCount > 0)
             return "the collision and crash layers reload part of the scene — blender_end first";
+        // Switching a layer OFF unloads what it shows, and with it the unsaved edits made there and their
+        // undo entries — a crash copy moved and never saved is simply gone. The same loss editor_open_area
+        // refuses, by the same rule: not while edits are unsaved, unless the caller says they may go.
+        bool unloads = (crash == false && window.CrashToggle.IsChecked == true)
+            || (collision == false && window.CollisionToggle.IsChecked == true);
+        if (unloads && host.HasUnsavedEdits && !discardUnsavedEdits)
+        {
+            return "switching that layer off unloads it, and unsaved edits made in it are dropped together with "
+                + "their undo entries — editor_save first, or pass discardUnsavedEdits=true to give them up";
+        }
 
         if (renderMode != null)
         {
@@ -489,6 +500,8 @@ internal sealed class AppEditorSession : IEditorSession
         if (host.BridgeEditedCount > 0 && !host.BridgeSession.IsEditedNode(node))
             return $"'{name}' is not part of the open Blender session — blender_end first";
 
+        // A number too large for a float arrives as Infinity; written into a transform it is saved as one.
+        if ((position ?? []).Concat(offset ?? []).Any(v => !float.IsFinite(v))) return "position and offset must be finite numbers";
         Vector3 delta = Vector3.Zero;
         if (position != null) delta = new Vector3(position[0], position[1], position[2]) - frame.WorldTransform.Translation;
         if (offset != null) delta += new Vector3(offset[0], offset[1], offset[2]);
@@ -508,6 +521,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (Window is not { } window) return NotOpen;
         D3DImageHost host = window.Viewport;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
         if (!File.Exists(sourceActFile)) return $"no such file: {sourceActFile}";
 
         SceneNode? actorsRow = AllNodes(host).FirstOrDefault(n => n.Source is Assets.Adapters.ActorDocumentAdapter);

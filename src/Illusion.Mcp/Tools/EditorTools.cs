@@ -409,11 +409,12 @@ public sealed class EditorTools
         [Description("Show collision hulls.")] bool? collision = null,
         [Description("Show the city_crash prop layer.")] bool? crash = null,
         [Description("Show district load zones.")] bool? zones = null,
-        [Description("Show AI navigation overlays.")] bool? navigation = null)
+        [Description("Show AI navigation overlays.")] bool? navigation = null,
+        [Description("Switch a layer off even though the scene has unsaved edits — those made in that layer are lost with their undo entries. Default false.")] bool discardUnsavedEdits = false)
     {
         try
         {
-            if (await ui.RunAsync(() => editor.SetView(renderMode, collision, crash, zones, navigation)) is { } refused)
+            if (await ui.RunAsync(() => editor.SetView(renderMode, collision, crash, zones, navigation, discardUnsavedEdits)) is { } refused)
                 return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, status = await ui.RunAsync(editor.Status) });
         }
