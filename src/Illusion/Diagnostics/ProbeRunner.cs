@@ -655,6 +655,12 @@ internal static class ProbeRunner
             case "--probe-mcp":
                 McpProbes.RunMcpProbe();
                 return true;
+            // The MCP editor tools against a scripted editor: what a save, a build and an area load tell
+            // the caller when the editor could not do it, and which property values are refused. No game
+            // install needed. Output: %TEMP%\illusion_editor_tools.txt
+            case "--probe-editor-tools":
+                EditorToolProbes.RunEditorToolProbe();
+                return true;
             // Material editor: preview sphere generator, MTL catalog browse/edit/create/delete (in-memory
             // only), SetTextureFor file roundtrip on a TEMP copy of default.mtl, mesh-slot reassignment,
             // and the tile grid + editor window layout. Output: %TEMP%\illusion_material_editor.txt

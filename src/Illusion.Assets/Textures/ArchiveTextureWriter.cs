@@ -20,22 +20,26 @@ public static class ArchiveTextureWriter
     /// answers to — neither in this archive nor anywhere else in the mirror, since a shared name would
     /// either overwrite a shipped texture or be shadowed by one. <paramref name="reuse"/> is a name the
     /// caller already owns (a re-push of the same image) and is handed back unchanged; so is a name in this
-    /// archive whose file is byte for byte <paramref name="content"/> — two materials sharing one image
-    /// share one texture.
+    /// archive that already holds exactly this picture — two materials sharing one image share one texture.
+    /// <para>
+    /// "Exactly this picture" is BOTH files. A texture with a side of 256 or more is stored split: the entry
+    /// itself starts at half resolution, and the top level sits beside it as <c>MIP_name.dds</c>. Two different
+    /// pictures can agree on everything from half resolution down — a fine checkerboard and the flat grey it
+    /// averages to do — so comparing <paramref name="content"/> alone would hand the second one the first
+    /// one's name, and writing it would then replace the first material's top level.
+    /// </para>
     /// </summary>
-    public static string PickName(string extractedDir, string imageName, string? reuse = null, byte[]? content = null)
+    /// <param name="topLevel">The top level that goes with <paramref name="content"/>, or null when the
+    /// picture is stored as one file.</param>
+    public static string PickName(string extractedDir, string imageName, string? reuse = null, byte[]? content = null,
+        byte[]? topLevel = null)
     {
         string stem = Sanitize(Path.GetFileNameWithoutExtension(imageName));
         string candidate = stem + ".dds";
         for (int n = 2; ; n++)
         {
             if (string.Equals(candidate, reuse, StringComparison.OrdinalIgnoreCase)) return candidate;
-            var existing = new FileInfo(Path.Combine(extractedDir, candidate));
-            if (content != null && existing.Exists && existing.Length == content.Length
-                && File.ReadAllBytes(existing.FullName).AsSpan().SequenceEqual(content))
-            {
-                return candidate;
-            }
+            if (content != null && Read(extractedDir, candidate).Is(content, topLevel)) return candidate;
             if (!File.Exists(Path.Combine(extractedDir, candidate)) && TextureSearchIndex.FindPath(candidate) == null)
                 return candidate;
             candidate = $"{stem}_{n}.dds";
@@ -68,6 +72,52 @@ public static class ArchiveTextureWriter
         if (topLevel != null) manifest.AddEntry("Mipmap", mipName, TextureEntryVersion);
         TextureSearchIndex.Register(path);
         return path;
+    }
+
+    /// <summary>What a texture name holds in an archive's folder: the entry and the top level split off it,
+    /// each null when its file is not there.</summary>
+    public sealed record TextureState(byte[]? Texture, byte[]? TopLevel)
+    {
+        /// <summary>The archive has a texture of that name.</summary>
+        public bool Exists => Texture != null;
+
+        /// <summary>Whether this is byte for byte the picture made of the two given files.</summary>
+        public bool Is(byte[] texture, byte[]? topLevel) =>
+            Texture != null && Texture.AsSpan().SequenceEqual(texture)
+            && (topLevel == null ? TopLevel == null : TopLevel != null && TopLevel.AsSpan().SequenceEqual(topLevel));
+    }
+
+    /// <summary>Reads a texture and its top level as the folder has them now.</summary>
+    public static TextureState Read(string extractedDir, string fileName)
+    {
+        string path = Path.Combine(extractedDir, fileName);
+        string mipPath = Path.Combine(extractedDir, "MIP_" + fileName);
+        return new TextureState(
+            File.Exists(path) ? File.ReadAllBytes(path) : null,
+            File.Exists(mipPath) ? File.ReadAllBytes(mipPath) : null);
+    }
+
+    /// <summary>Puts a texture name back to a state read earlier: rewritten when it existed then, taken out
+    /// of the folder and the manifest when it did not.</summary>
+    public static void Restore(string extractedDir, string fileName, TextureState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (state.Texture != null) Write(extractedDir, fileName, state.Texture, state.TopLevel);
+        else Remove(extractedDir, fileName);
+    }
+
+    /// <summary>Takes a texture out of an archive's folder: both files and both manifest entries — an entry
+    /// naming a file that is gone fails the whole Build.</summary>
+    public static void Remove(string extractedDir, string fileName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extractedDir);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        string mipName = "MIP_" + fileName;
+        SdsManifest manifest = SdsManifest.Load(extractedDir);
+        manifest.RemoveEntry(fileName);
+        manifest.RemoveEntry(mipName);
+        File.Delete(Path.Combine(extractedDir, fileName));
+        File.Delete(Path.Combine(extractedDir, mipName));
     }
 
     private static void Replace(string path, byte[] bytes)
