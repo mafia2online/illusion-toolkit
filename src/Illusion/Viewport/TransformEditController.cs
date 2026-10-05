@@ -223,7 +223,9 @@ internal sealed class TransformEditController
         List<IEditAction> mints = [.. _host.CollisionEditing.MintPreviewedScales(nodes)];
         // After the mints in the composite, so before them on undo: the record goes back to the old hashes
         // while the placements still carry the new ones, and then the placements follow.
-        mints.AddRange(Relink(_dragLinks));
+        // Only for a drag that moved something: a click on the gizmo is not an edit, and a record from before
+        // places were kept would be brought up to date by it and leave an undo step that undoes nothing seen.
+        if (_gizmoMoved) mints.AddRange(Relink(_dragLinks));
         _dragLinks = [];
 
         var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)>(_dragGroup.Count);
