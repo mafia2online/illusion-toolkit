@@ -28,15 +28,40 @@ public static class ImportLinks
         List<ulong> list = [.. hulls.Distinct()];
         if (list.Count == 0) links.Remove(frameName);
         else links[frameName] = list;
+        Write(extractedDir, links);
+    }
+
+    /// <summary>Moves an object's record to its new name. An object is found by its name here, so one that is
+    /// renamed without this leaves its hulls behind the next time it is moved or deleted.</summary>
+    public static void Rename(string extractedDir, string oldName, string newName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extractedDir);
+        if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName) || oldName == newName) return;
+        Dictionary<string, List<ulong>> links = Read(extractedDir);
+        if (!links.Remove(oldName, out List<ulong>? hulls)) return;
+        links[newName] = hulls;
+        Write(extractedDir, links);
+    }
+
+    private static void Write(string extractedDir, Dictionary<string, List<ulong>> links)
+    {
+        string path = Path.Combine(extractedDir, FileName);
         try
         {
-            AtomicFile.WriteAllBytes(Path.Combine(extractedDir, FileName), JsonSerializer.SerializeToUtf8Bytes(links));
+            if (links.Count == 0) File.Delete(path);
+            else AtomicFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(links));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // an unrecorded link costs moving the hull by hand, nothing more
         }
+        lock (Cache) Cache.Remove(path);
     }
+
+    // The file as last read, by path, with the time stamp it had: every drag start, delete and duplicate asks
+    // about every node it touches, and parsing the file for each of them is what made a large selection stall.
+    private static readonly Dictionary<string, (DateTime Stamp, Dictionary<string, List<ulong>> Links)> Cache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The hulls recorded for an object of this archive, or none.</summary>
     public static IReadOnlyList<ulong> HullsOf(string extractedDir, string frameName)
@@ -57,13 +82,24 @@ public static class ImportLinks
         string path = Path.Combine(extractedDir, FileName);
         try
         {
-            return File.Exists(path)
-                ? JsonSerializer.Deserialize<Dictionary<string, List<ulong>>>(File.ReadAllText(path)) ?? new()
-                : new();
+            if (!File.Exists(path)) return new();
+            DateTime stamp = File.GetLastWriteTimeUtc(path);
+            lock (Cache)
+            {
+                if (Cache.TryGetValue(path, out var kept) && kept.Stamp == stamp) return Copy(kept.Links);
+            }
+            Dictionary<string, List<ulong>> links =
+                JsonSerializer.Deserialize<Dictionary<string, List<ulong>>>(File.ReadAllText(path)) ?? new();
+            lock (Cache) Cache[path] = (stamp, links);
+            return Copy(links);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             return new();
         }
     }
+
+    // Callers change what they are handed (Set, Rename); the kept one stays as the file is.
+    private static Dictionary<string, List<ulong>> Copy(Dictionary<string, List<ulong>> links) =>
+        links.ToDictionary(pair => pair.Key, pair => pair.Value.ToList());
 }

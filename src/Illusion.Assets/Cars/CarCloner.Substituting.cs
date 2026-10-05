@@ -96,6 +96,11 @@ public static partial class CarCloner
                 SdsWriter.PackResult made = SdsWriter.PackSds(to, createBackup: true, when);
                 journal.Replaced(made.Archive, made.Backup);
                 packed.Add((made.Archive, made.Backup));
+                if (made.Dropped.Count > 0)
+                {
+                    notes.Add($"{to.Name}: {made.Dropped.Count} manifest entr(ies) named a file missing from the working copy "
+                        + $"and were left out — {string.Join(", ", made.Dropped.Take(8))}");
+                }
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

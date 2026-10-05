@@ -76,14 +76,12 @@ internal sealed class TransformEditController
 
         // An object carried in from another archive drags the collision it was given along with it: nothing in
         // the file ties the two, so without this the hull would stay where the object used to stand.
-        foreach ((SceneNode node, _, _) in _dragGroup.ToList())
+        var dragged = new HashSet<SceneNode>(_dragGroup.Select(g => g.Node));
+        foreach (List<SceneNode> hulls in _host.LinkedCollision(dragged.ToList()).Values)
         {
-            foreach (SceneNode hull in _host.LinkedCollisionNodes(node))
+            foreach (SceneNode hull in hulls)
             {
-                if (hull.Source is IFrameNode h && _dragGroup.All(g => !ReferenceEquals(g.Node, hull)))
-                {
-                    _dragGroup.Add((hull, h.WorldTransform, h.LocalTransform));
-                }
+                if (hull.Source is IFrameNode h && dragged.Add(hull)) _dragGroup.Add((hull, h.WorldTransform, h.LocalTransform));
             }
         }
     }
@@ -163,8 +161,41 @@ internal sealed class TransformEditController
     public void RecordTransform(SceneNode node, Matrix4x4 before, Matrix4x4 after)
     {
         if (before == after) return;
-        History.Push(new TransformEdit(this, new[] { (node, before, after) }));
-        if (Persists(node, before, after)) _host.Persistence.MarkFrameModified(node);
+        var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> { (node, before, after) };
+        IReadOnlyList<IEditAction> mints = [];
+
+        // A number typed into the Transform panel comes through here, not through a drag — and the collision
+        // an imported object was given has to follow it all the same. It used to stay where the object had
+        // stood; past a few metres it was then no longer found as the object's, and a later delete left it in
+        // the file as an obstacle nobody can see. The hulls are looked for from where the object WAS, and
+        // given the same world-space change, the way a drag gives it to its group.
+        if (node.Source is IFrameNode moved and not CollisionInstanceAdapter)
+        {
+            Matrix4x4 parent = moved.ParentWorldTransform;
+            Matrix4x4 worldBefore = before * parent;
+            if (Matrix4x4.Invert(worldBefore, out Matrix4x4 back))
+            {
+                Matrix4x4 delta = back * (after * parent);
+                var hulls = new List<(SceneNode Node, Matrix4x4 Before)>();
+                foreach (SceneNode hull in _host.LinkedCollisionNodes(node, worldBefore))
+                {
+                    if (hull.Source is not IFrameNode h) continue;
+                    hulls.Add((hull, h.LocalTransform));
+                    h.LocalTransform = TransformOps.WorldDeltaToLocal(h.WorldTransform, h.ParentWorldTransform, delta);
+                    SyncNodeMeshes(hull);
+                }
+                if (hulls.Count > 0)
+                {
+                    // A placement cannot store a scale: a resize becomes a rescaled hull, as at the end of a drag.
+                    mints = _host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList());
+                    foreach ((SceneNode hull, Matrix4x4 hullBefore) in hulls)
+                    {
+                        items.Add((hull, hullBefore, ((IFrameNode)hull.Source!).LocalTransform));
+                    }
+                }
+            }
+        }
+        RecordGroupTransform(items, mints);
     }
 
     // Records a group's local-transform changes as ONE undoable edit (keeping only the objects that moved),

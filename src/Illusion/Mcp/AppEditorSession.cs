@@ -131,6 +131,31 @@ internal sealed class AppEditorSession : IEditorSession
         }
         if (ResourceWindow is not { } window) return "the resource editor did not open";
         if (window.TargetStage is { } stage && stage.BridgeEditedCount > 0) return "a Blender edit session is open there — blender_end first";
+
+        // Already on the stage: nothing to load. Staging it again would reload it — and a reload empties the
+        // undo history, so the editor_undo after a few car_tuning_set calls found nothing to undo.
+        if (string.Equals(window.StagedEntry?.File.FullName, sds.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            _resourceTarget = true;
+            archivePath = sds.FullName;
+            return null;
+        }
+        // The window answers two situations with a dialog, and a dialog here is a tool call that does not
+        // return until a person clicks. Both are settled before it is asked.
+        if (Assets.Sds.OpenArchives.IsHeldByAnyoneElse(sds, window.Stage))
+        {
+            return $"{sds.Name} is loaded in another editor window — two editors on one working copy overwrite each "
+                + "other's saves. Work on it there (editor_target map), or load something else there first";
+        }
+        if (window.Stage.HasUnsavedEdits)
+        {
+            D3DImageHost.SaveReport saved = window.Stage.SaveEditsReport();
+            if (!saved.Complete)
+            {
+                return "what is on the stage has edits that could not be saved, and opening another archive would drop them: "
+                    + string.Join("; ", saved.NotSaved);
+            }
+        }
         window.Reveal(sds);
         _resourceTarget = true;
         archivePath = sds.FullName;
@@ -154,7 +179,7 @@ internal sealed class AppEditorSession : IEditorSession
     {
         if (Window is not { } window)
         {
-            return new EditorStatus(false, null, false, false, 0, [], false, [], 0, "");
+            return new EditorStatus(false, null, false, false, 0, [], false, [], 0, "", _resourceTarget ? "resource" : "map");
         }
 
         D3DImageHost host = window.Viewport;
@@ -168,6 +193,7 @@ internal sealed class AppEditorSession : IEditorSession
             Loading: host.IsLoading,
             Meshes: host.MeshCount,
             Selection: host.SelectedNodes.Select(n => n.Name).ToList(),
+            Target: _resourceTarget ? "resource" : "map",
             UnsavedEdits: host.HasUnsavedEdits,
             PendingBuild: host.PendingBuildArchives().Select(f => f.Name).ToList(),
             BlenderObjects: host.BridgeEditedCount,
@@ -213,6 +239,10 @@ internal sealed class AppEditorSession : IEditorSession
         if (window.WholeMapCheck.IsChecked == true) window.WholeMapCheck.IsChecked = false;
         if ((window.WinterToggle.IsChecked == true) != winter) window.WinterToggle.IsChecked = winter;
         if (!ReferenceEquals(window.AreaCombo.SelectedItem, target)) window.AreaCombo.SelectedItem = target;
+        // Opening an area is asking for the map, the way resource_open is asking for the resource editor.
+        // Left on the resource editor, the find, select, delete, save and build that follow an
+        // editor_open_area went on acting on whatever car was on its stage.
+        _resourceTarget = false;
         return null;
     }
 
@@ -465,7 +495,8 @@ internal sealed class AppEditorSession : IEditorSession
         return new BuildOutcome(
             report.Packed.Select(p => (p.Archive, p.Backup)).ToList(),
             report.Failed.Select(f => (f.Archive, f.Error)).ToList(),
-            []);
+            [],
+            [.. report.Packed.SelectMany(p => (p.Dropped ?? []).Select(file => $"{Path.GetFileName(p.Archive)}: {file}"))]);
     }
 
     public string? MirrorToWinter(out SeasonMirrorOutcome? outcome)
@@ -495,6 +526,7 @@ internal sealed class AppEditorSession : IEditorSession
             if (report == null) return reason ?? "the winter archive could not be written";
 
             host.MarkArchiveModified(area.Winter);
+            _resourceTarget = false;      // a map-only tool: what follows it is about the map
             outcome = new SeasonMirrorOutcome(area.Winter.FullName, report.Matched, report.Added, report.Dropped,
                 report.Reassigned, report.Ambiguous, report.Files, report.Textures);
             host.RaiseNotice(
@@ -645,13 +677,17 @@ internal sealed class AppEditorSession : IEditorSession
 
         SceneNode? node = host.ActorEditing.Import(
             actorsRow, source, actor, newName, new Vector3(position[0], position[1], position[2]), out string? reason);
-        return node == null ? reason ?? "the pack refused the actor" : null;
+        if (node == null) return reason ?? "the pack refused the actor";
+        _resourceTarget = false;          // a map-only tool: what follows it is about the map
+        return null;
     }
 
     public string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        string? collision, out ObjectImportOutcome? outcome)
+        string? collision, int occurrence, out ObjectImportOutcome? outcome)
     {
         outcome = null;
+        if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
+        if (yawDegrees is { } yaw && !float.IsFinite(yaw)) return "yawDegrees is not a finite number";
         if (Window is not { } window) return NotOpen;
         D3DImageHost host = window.Viewport;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
@@ -666,8 +702,10 @@ internal sealed class AppEditorSession : IEditorSession
         {
             return $"collision '{collision}' is none of auto, convex, box, mesh, none";
         }
-        return host.ObjectImporting.Import(destination, sourceArchive, name, newName,
-            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls);
+        string? refused = host.ObjectImporting.Import(destination, sourceArchive, name, newName,
+            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls, occurrence);
+        if (refused == null) _resourceTarget = false;     // a map-only tool: what follows it is about the map
+        return refused;
     }
 
     public string? DuplicateSelected(out IReadOnlyList<string> copies)
@@ -918,9 +956,12 @@ internal sealed class AppEditorSession : IEditorSession
                 return $"'{value}' is not a {target.Kind} value";
         }
 
-        Assets.EntityData.TuningEditing.Change? change =
-            Assets.EntityData.TuningEditing.Set(chosen.Path, chosen.Index, target.Offset, parsed, target.Name);
-        if (change == null) return $"{target.Name} could not be written";
+        Assets.EntityData.TuningEditing.Change? change = Assets.EntityData.TuningEditing.Set(
+            chosen.Path, chosen.Index, target.Offset, parsed, target.Name, out string? unwritten);
+        if (change == null) return $"{target.Name} was not written: {unwritten ?? "the field could not be found"}";
+        // The undo entry and the build list below are the resource editor's; with the map as the target the
+        // editor_undo and editor_build that follow would act on the map and leave this where it is.
+        _resourceTarget = true;
 
         // The same bookkeeping the Tuning tab does: an undo entry, the archive on the build list, the panel re-read.
         D3DImageHost stage = window.TargetStage;
@@ -938,7 +979,7 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
-    public string? BuildArchive(string archive, string? memoryFrom, out PackedArchive? result)
+    public string? BuildArchive(string archive, string? memoryFrom, bool dropMissing, out PackedArchive? result)
     {
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
@@ -958,8 +999,18 @@ internal sealed class AppEditorSession : IEditorSession
                 if (!Path.IsPathRooted(memoryFrom) || !reference.Exists) return $"no such archive to take memory requirements from: {memoryFrom}";
                 Assets.Sds.SdsWriter.AdoptMemoryRequirements(sds, reference);
             }
+            // This tool is for edits made by hand in the working copy, where a renamed or deleted file is a
+            // slip as often as an intention — and a pack does not skip such an entry quietly: it leaves the
+            // resource out AND unsays it in the manifest, so putting the file back later changes nothing.
+            IReadOnlyList<string> missing = Assets.Sds.SdsWriter.MissingEntries(extracted);
+            if (missing.Count > 0 && !dropMissing)
+            {
+                return $"{missing.Count} file(s) the manifest names are not in the working copy: "
+                    + string.Join(", ", missing.Take(12)) + (missing.Count > 12 ? ", …" : "")
+                    + " — put them back, or pass dropMissing=true to build without them (their manifest entries are then removed for good)";
+            }
             Assets.Sds.SdsWriter.PackResult packed = Assets.Sds.SdsWriter.PackSds(sds, createBackup: true);
-            result = new PackedArchive(packed.Archive, packed.Backup);
+            result = new PackedArchive(packed.Archive, packed.Backup, packed.Dropped.Count > 0 ? packed.Dropped : null);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
@@ -973,6 +1024,13 @@ internal sealed class AppEditorSession : IEditorSession
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target)) return "name the car and the one it replaces";
+        if (OpenWithEdits(source) is { } unsaved) return unsaved;
+        // The target's working copy is about to be replaced under whoever has it loaded: an editor that then
+        // saves writes the OLD car's scene into the new car's folder.
+        if (CarArchives(target).FirstOrDefault(a => Assets.Sds.OpenArchives.HoldersOf(a).Count > 0) is { } held)
+        {
+            return $"{held.Name} is open in an editor — its working copy is about to be replaced; open something else there first";
+        }
         try
         {
             if (Assets.Cars.CarCloner.Substitute(source, target, out string? refusal) is not { } outcome) return refusal;
@@ -1013,6 +1071,7 @@ internal sealed class AppEditorSession : IEditorSession
     {
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
+        if (OpenWithEdits(source) is { } unsaved) return unsaved;
         try
         {
             if (Assets.Cars.CarCloner.Clone(source, name, traffic, title, out string? refusal) is not { } outcome) return refusal;
@@ -1024,6 +1083,31 @@ internal sealed class AppEditorSession : IEditorSession
         {
             return "could not write the archives (is the game running?): " + ex.Message;
         }
+    }
+
+    // A car's archives, summer and winter, by archive or model name.
+    private static IEnumerable<FileInfo> CarArchives(string car)
+    {
+        string stem = Path.GetFileNameWithoutExtension(car).ToLowerInvariant();
+        foreach (string suffix in new[] { "", "_z" })
+        {
+            yield return new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", "cars", stem + suffix + ".sds"));
+        }
+    }
+
+    // A clone and a substitution are made from the working copy ON DISK. A car open in an editor with edits
+    // not yet saved would be copied without them, and nothing would say so.
+    private static string? OpenWithEdits(string car)
+    {
+        foreach (FileInfo archive in CarArchives(car))
+        {
+            if (Assets.Sds.OpenArchives.HoldersOf(archive).OfType<D3DImageHost>().Any(h => h.HasUnsavedEdits))
+            {
+                return $"{archive.Name} is open in an editor with unsaved edits — editor_save first, "
+                    + "or the copy would be made from what is on disk, without them";
+            }
+        }
+        return null;
     }
 
     public string? Undo()

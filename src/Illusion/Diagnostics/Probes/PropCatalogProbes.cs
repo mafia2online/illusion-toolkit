@@ -58,12 +58,13 @@ internal static class PropCatalogProbes
             if (Directory.Exists(pictures)) Directory.Delete(pictures, recursive: true);
             Directory.CreateDirectory(pictures);
             using var renderer = new PropThumbnailRenderer();
-            int drawn = 0, tried = 0;
+            int drawn = 0, tried = 0, kept = 0;
             foreach (PropEntry entry in entries.GroupBy(e => e.Category).Select(g => g.First()).Take(9))
             {
                 tried++;
                 if (renderer.Render(entry) is not BitmapSource picture) continue;
                 drawn++;
+                if (PropThumbnailRenderer.Cached(entry) != null) kept++;
                 var encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(picture));
                 using FileStream file = File.Create(Path.Combine(pictures, $"{entry.Category}_{entry.Label}.png"));
@@ -71,6 +72,13 @@ internal static class PropCatalogProbes
                 if (drawn == 1) Check("a picture is not a blank tile", HasDetail(picture));
             }
             Check("each shelf's first prop gets a picture", drawn == tried, $"{drawn} of {tried}");
+            Check("and each is kept, under a key the next look-up finds", kept == drawn, $"{kept} of {drawn}");
+            // A prop whose archive is not there: no picture, and no exception — the tile asks from a timer tick.
+            PropEntry gone = entries[0] with { Archive = @"city\illusion_no_such_archive.sds" };
+            bool quiet;
+            try { quiet = renderer.Draw(renderer.Stage(gone)) == null; }
+            catch (Exception) { quiet = false; }
+            Check("a prop whose archive cannot be read gets no picture and throws nothing", quiet);
         }
         catch (Exception ex)
         {

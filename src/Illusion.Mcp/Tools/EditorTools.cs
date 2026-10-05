@@ -183,7 +183,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_clone")]
-    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
+    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every CARM* traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). Only the main game's tables are edited: the story DLCs ship an ingame.sds of their own and the clone is not in those (the result's notes say which). A source that is not keyed by its model name the way a stock car is, or anything failing on the way, is refused and everything written is taken back. A source open in an editor with unsaved edits is refused — save it first. The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
     public static async Task<string> CarClone(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -210,12 +210,13 @@ public sealed class EditorTools
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("Full path of the .sds archive in the game folder (pc\\sds\\… or pc\\dlcs\\…).")] string archive,
+        [Description("Build although the manifest names files that are not in the working copy. Default false: such a build is refused and the files are listed — put them back first. With true they are left out of the archive AND their manifest entries are removed for good; restoring a file later does not bring its entry back.")] bool dropMissing = false,
         [Description("Full path of an archive to take the per-resource memory requirements from, for an archive that never shipped itself: a cloned car built before requirements were kept takes them from the stock car it was cloned from. Omit normally — a working copy keeps the requirements of the archive it was extracted from.")] string? memoryFrom = null)
     {
         try
         {
             PackedArchive? result = null;
-            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, memoryFrom, out result));
+            string? refused = await ui.RunAsync(() => editor.BuildArchive(archive, memoryFrom, dropMissing, out result));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, packed = result });
         }
         catch (Exception ex)
@@ -388,10 +389,16 @@ public sealed class EditorTools
             while (true)
             {
                 await Task.Delay(Poll);
-                EditorStatus status = await ui.RunAsync(editor.Status);
+                // Of the editor the session was opened in: with the resource editor as the target, the map's
+                // count stays at zero for good and this used to run out its whole timeout on a session that
+                // had opened in the first second.
+                ResourceStatus resource = await ui.RunAsync(editor.ResourceStatus);
+                int inBlender = resource.Target == "resource"
+                    ? resource.BlenderObjects
+                    : (await ui.RunAsync(editor.Status)).BlenderObjects;
                 var said = (await ui.RunAsync(() => editor.Notices(8))).Where(n => n.Time >= started).ToList();
-                if (status.BlenderObjects > 0)
-                    return ToolResult.Json(new { success = true, blenderObjects = status.BlenderObjects, notices = said });
+                if (inBlender > 0)
+                    return ToolResult.Json(new { success = true, blenderObjects = inBlender, notices = said });
                 if (said.Any(n => n.Error))
                     return ToolResult.Json(new { success = false, error = "the editor refused", notices = said });
                 if (DateTime.UtcNow > deadline)
@@ -757,7 +764,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "object_import")]
-    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable; the files carried into the working copy stay there, unused, if it is undone. Skinned models cannot travel yet.")]
+    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
     public static async Task<string> ImportObject(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -766,14 +773,15 @@ public sealed class EditorTools
         [Description("Name for the copy; must be new in the loaded area (it names both the object and, for an actor, the actor).")] string newName,
         [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
         [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null,
-        [Description("Collision for scenery: 'auto' (default — its own hulls from the source, else its convex hull), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null)
+        [Description("Collision for scenery: 'auto' (default — the hulls that stand inside its box in the source archive, taken as its own, else its convex hull; for a shelf or a room that includes the hulls of what stood on or in it), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null,
+        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1)
     {
         try
         {
-            if (position.Length != 3) return ToolResult.Invalid("position takes three numbers");
+            if (position is not { Length: 3 }) return ToolResult.Invalid("position takes three numbers");
             ObjectImportOutcome? outcome = null;
             string? refused = await ui.RunAsync(
-                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, out outcome));
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, out outcome));
             if (refused != null) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
         }

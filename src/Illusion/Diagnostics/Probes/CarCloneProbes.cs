@@ -343,6 +343,41 @@ internal static class CarCloneProbes
                         && swapped.IndexBuffers.GetBuffer(l.IndexBufferRef.Hash) != null)
                     && swapped.VertexBuffers.GetBuffer(Fnv64.Hash(Other + ".Root.L0.VB0")) != null);
                 Check("substitute: packs and reads as a car", Packs(substitute) && Car.ReadFrom(substitute) != null);
+
+                // A source that is not keyed by the name it is said to have: no root frame of that name, no
+                // prefab entry, entity data filed elsewhere. It used to be built all the same, with a note.
+                string unkeyed = Path.Combine(scratch, "unkeyed");
+                string? refusedBecause = null;
+                try
+                {
+                    CarCloner.SubstituteExtracted(cars[0].To, unkeyed, "Not_Its_Name", Other);
+                }
+                catch (InvalidDataException ex)
+                {
+                    refusedBecause = ex.Message;
+                }
+                Check("substitute: a car that is not keyed by the model name given is a failure, not a note",
+                    refusedBecause != null, refusedBecause ?? "built without complaint");
+
+                // What a pack would leave out, asked before packing.
+                string shortOf = Path.Combine(scratch, "short");
+                Directory.CreateDirectory(shortOf);
+                foreach (string file in Directory.GetFiles(substitute, "*", SearchOption.AllDirectories))
+                {
+                    string copy = Path.Combine(shortOf, Path.GetRelativePath(substitute, file));
+                    Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+                    File.Copy(file, copy);
+                }
+                string? gone = Directory.GetFiles(shortOf, "*.dds").FirstOrDefault();
+                if (gone != null)
+                {
+                    File.Delete(gone);
+                    IReadOnlyList<string> missing = Illusion.Assets.Sds.SdsWriter.MissingEntries(shortOf);
+                    Check("a working copy short of a file its manifest names says which, before any pack",
+                        missing.Count == 1 && missing.Any(m => string.Equals(m.TrimStart('/', '\\'), Path.GetFileName(gone), StringComparison.OrdinalIgnoreCase))
+                        && Illusion.Assets.Sds.SdsWriter.MissingEntries(substitute).Count == 0,
+                        $"{missing.Count} missing: " + string.Join(", ", missing.Take(4)));
+                }
             }
 
             // A rebuilt name table has to be the table the archive shipped with — order included.

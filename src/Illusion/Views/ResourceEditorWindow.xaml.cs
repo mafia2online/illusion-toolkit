@@ -55,8 +55,11 @@ public partial class ResourceEditorWindow : Window
             UpdateTitle();
             CommandManager.InvalidateRequerySuggested();
         });
-        Stage.TransientNotice += (message, isError) => Notices.Post(message, isError);
-        Stage.BridgeNotice += (message, isError) => Notices.Post(message, isError);
+        // Into the application's notice log as well as onto the banner: editor_notices and the Blender tools
+        // read the log, and with this window as their target they were waiting for lines only the map
+        // editor ever wrote — a push that had landed was reported as "no push arrived".
+        Stage.TransientNotice += PostNotice;
+        Stage.BridgeNotice += PostNotice;
 
         // The same tools the map editor has, over the same kind of viewport: select / move / rotate / scale,
         // walk mode, and the Blender bridge. The bridge refuses skinned geometry (a car body is exactly that
@@ -528,14 +531,29 @@ public partial class ResourceEditorWindow : Window
         finally { Mouse.OverrideCursor = null; }
     }
 
+    private void PostNotice(string message, bool isError)
+    {
+        Mcp.EditorNoticeLog.Add(message, isError);
+        Notices.Post(message, isError);
+    }
+
     // Short and to the point: the map editor's version offers a "don't show again" for successful builds,
     // which only earns its keep when you build district after district.
     private void ShowBuildResult(Viewport.D3DImageHost.BuildReport report)
     {
+        // Entries a pack left out because their file was not in the working copy: said, and as an error —
+        // the archive is short of a resource, whatever else went well.
+        List<string> dropped = [.. report.Packed.SelectMany(p => (p.Dropped ?? []).Select(f => $"{Path.GetFileName(p.Archive)}: {f}"))];
+        if (dropped.Count > 0)
+        {
+            PostNotice($"{dropped.Count} manifest entr(ies) named a file missing from the working copy and were left out: "
+                + string.Join(", ", dropped.Take(6)) + (dropped.Count > 6 ? ", …" : ""), true);
+        }
         if (report.Failed.Count == 0)
         {
             string? backup = report.Packed.Select(r => r.Backup).FirstOrDefault(b => b != null);
-            Notices.Post(report.Packed.Count == 1 ? "Built 1 archive." : $"Built {report.Packed.Count} archives."
+            if (dropped.Count > 0) return;      // the line above is the one to read
+            PostNotice(report.Packed.Count == 1 ? "Built 1 archive." : $"Built {report.Packed.Count} archives."
                          + (backup != null ? "  Backup: " + Path.GetDirectoryName(backup) : ""), false);
             return;
         }
