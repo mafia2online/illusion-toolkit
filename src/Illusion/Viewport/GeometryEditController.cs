@@ -87,6 +87,15 @@ internal sealed class GeometryEditController
             }
         }
 
+        // The collision of imported objects, for the transforms of this push. Worked out BEFORE any of them
+        // is applied — once for the whole batch — while everything still stands where the records say:
+        // which placements ride with each moved object, and whose each moved placement is.
+        var pushed = new HashSet<SceneNode>(transforms.Select(t => t.Node));
+        Dictionary<SceneNode, List<D3DImageHost.LinkedPlacement>> riding =
+            _host.LinkedSlots(transforms.Where(t => t.Node.Source is not CollisionInstanceAdapter).Select(t => t.Node));
+        List<D3DImageHost.LinkedPlacement> touched = _host.LinksOf(transforms.Select(t => t.Node));
+        var minted = new List<IEditAction>();
+
         foreach (TransformItem item in transforms)
         {
             Matrix4x4? parent = item.Node.Source is IFrameNode placed ? placed.ParentWorldTransform : null;
@@ -96,17 +105,30 @@ internal sealed class GeometryEditController
 
             // An object moved in Blender takes the collision it was given along, as one moved in the editor
             // does: those placements are tied to it by nothing in the file, and left behind they are an
-            // obstacle where the object used to stand.
-            if (parent is not { } parentWorld) continue;
-            (List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> carried, List<IEditAction> applied) =
-                _host.Editing.CarryLinked(item.Node, item.Before * parentWorld, item.After * parentWorld);
+            // obstacle where the object used to stand. NOT the placements the session holds itself, though:
+            // Blender says where those are, in this push and in every later one, and a hull carried here
+            // would be put back by the next push — or moved twice by this one.
+            if (parent is not { } parentWorld || !riding.TryGetValue(item.Node, out List<D3DImageHost.LinkedPlacement>? riders)
+                || !Matrix4x4.Invert(item.Before * parentWorld, out Matrix4x4 back))
+            {
+                continue;
+            }
+            List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> carried = _host.Editing.MoveRiders(
+                riders, back * (item.After * parentWorld),
+                hull => pushed.Contains(hull) || _host.BridgeSession.IsEditedNode(hull), out List<IEditAction> cooked);
             foreach ((SceneNode hull, Matrix4x4 hullBefore, Matrix4x4 hullAfter) in carried)
             {
                 children.Add(new TransformSubEdit(this, new TransformItem(hull, hullBefore, hullAfter)));
                 _host.Persistence.MarkFrameModified(hull);
             }
-            children.AddRange(applied);
+            minted.AddRange(cooked);
+            touched.AddRange(riders);
         }
+        // Last, with everything where the push leaves it: the records are brought in line once — a placement
+        // that rode keeps its place in its object's space, one the session moved (or left behind) gets the
+        // place it now has.
+        children.AddRange(minted);
+        children.AddRange(_host.Editing.Relink([.. touched.Distinct()]));
 
         foreach (CreationItem item in creations)
         {

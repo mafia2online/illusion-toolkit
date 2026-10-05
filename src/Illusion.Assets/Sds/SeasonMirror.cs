@@ -414,21 +414,23 @@ public static class SeasonMirror
                 {
                     MaterialStruct material = block.Materials[lod][slot];
                     ulong summerHash = material.MaterialHash;
-                    bool seasonal = false, doubt = false;
+                    bool doubt = false;
+                    var answers = new HashSet<ulong>();
                     foreach ((ulong name, int occurrence) in wearers[block])
                     {
                         SeasonPair.Answer answer =
                             pair.Resolve(name, occurrence, namesakes[name], lod, slot, summerHash, out ulong winter);
-                        if (answer == SeasonPair.Answer.Seasonal)
-                        {
-                            material.MaterialHash = winter;
-                            seasonal = true;
-                            break;
-                        }
+                        if (answer == SeasonPair.Answer.Seasonal) answers.Add(winter);
                         doubt |= answer == SeasonPair.Answer.Ambiguous;
                     }
-                    if (seasonal) continue;
-                    if (doubt) unsure = true;
+                    if (answers.Count == 1)
+                    {
+                        material.MaterialHash = answers.First();
+                        continue;
+                    }
+                    // Wearers that disagree about what this slot is in winter — the block cannot be both. It
+                    // keeps summer's material and is put down as in doubt, like any other that cannot be told.
+                    if (answers.Count > 1 || doubt) unsure = true;
                     else reassigned++;
                 }
             }
@@ -544,9 +546,17 @@ public static class SeasonMirror
             // the old one is an entry promising a companion that is no longer there — a chain the game
             // streams and does not find — or one hiding a companion that now is.
             IReadOnlyList<(string Name, string Value)>? theirs = from.Manifest.EntryFields(name), ours = manifest.EntryFields(name);
-            bool sameEntry = theirs != null && ours != null && theirs.SequenceEqual(ours);
+            // File names are compared the way the manifests are searched — without regard to case: a material
+            // may spell a texture otherwise than summer's manifest does, and a difference in spelling alone
+            // would have every mirror rewrite the entry and report the texture as refreshed.
+            bool sameEntry = theirs != null && ours != null && theirs.Count == ours.Count
+                && theirs.Zip(ours).All(f => f.First.Name == f.Second.Name && (f.First.Name == "File"
+                    ? string.Equals(f.First.Value, f.Second.Value, StringComparison.OrdinalIgnoreCase)
+                    : f.First.Value == f.Second.Value));
             if (sameBytes && sameEntry) return false;
-            if (!sameEntry && theirs != null)
+            // Replaced only when summer's entry is one that can be copied: the old entry is taken out first,
+            // and an entry that then could not be written would leave the file unlisted.
+            if (!sameEntry && theirs is { Count: >= 3 } && theirs[^1].Name == "Version" && int.TryParse(theirs[^1].Value, out _))
             {
                 manifest.RemoveEntry(name);
                 return ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
