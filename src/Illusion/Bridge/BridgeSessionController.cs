@@ -655,6 +655,13 @@ internal sealed class BridgeSessionController : IDisposable
             var sharedMeshNotes = new List<string>();
             var editedBuffers = new List<(string Name, ulong Hash, string Archive)>();
             var geometry = new List<GeometryEditController.GeometryItem>();
+            // Results already worked out in this push, per frame. Both levels of a mesh are one frame: they
+            // share its quantization lattice, its bounds and — on a model — its pools, and a result is
+            // computed against the frame as it stands. Two computed side by side against the SAME state each
+            // carry "the other level as it was", so applying the second put the first level's edit back
+            // where it came from. The second is therefore computed with the first in place.
+            var perFrame = new Dictionary<FrameObjectSingleMesh, List<BridgeMeshApplier.ApplyResult>>();
+            var levelsMoved = new List<(string Name, FrameObjectSingleMesh Frame)>();
             var transforms = new List<GeometryEditController.TransformItem>();
             var reshapes = new List<ReshapedHull>();
             var newHulls = new List<NewHull>();
@@ -755,9 +762,14 @@ internal sealed class BridgeSessionController : IDisposable
                         continue;
                     }
 
-                    // Back into the level the row stands for — the same one it was exported from.
+                    // Back into the level the row stands for — the same one it was exported from. What this
+                    // push has already decided for the same frame goes in first and comes out again after:
+                    // the batch below applies the results in this order, and undoes them in reverse.
+                    FrameObjectSingleMesh? levelFrame = fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh ofRow } ? ofRow : null;
+                    List<BridgeMeshApplier.ApplyResult> earlier =
+                        levelFrame != null && perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? held) ? held : [];
                     BridgeMeshApplier.ApplyResult? result =
-                        BridgeMeshApplier.TryApply(fn, payload, out string? reason, node.Lod);
+                        BridgeMeshApplier.TryApplyAfter(earlier, fn, payload, out string? reason, node.Lod);
                     if (result == null)
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
@@ -785,6 +797,11 @@ internal sealed class BridgeSessionController : IDisposable
                     if (!result.Unchanged)
                     {
                         geometry.Add(new GeometryEditController.GeometryItem(node, result));
+                        if (levelFrame != null)
+                        {
+                            if (!perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? sofar)) perFrame[levelFrame] = sofar = [];
+                            sofar.Add(result);
+                        }
                         touchedTotal += result.TouchedVertices;
 
                         // A frame references its mesh rather than owning it, and the shipped districts reuse
@@ -815,11 +832,23 @@ internal sealed class BridgeSessionController : IDisposable
 
                     // Object moved in Blender's Object Mode → re-localize against the CURRENT
                     // parent and ride the same undoable batch.
+                    //
+                    // The FRAME is what stands somewhere, and its first level speaks for it. A coarser level
+                    // is a second Blender object of the same frame: left where it was while the first one
+                    // moved, it still carries the old matrix, and taken at its word it moved the frame back
+                    // on the very next push — and forth again on the one after.
                     if (!MatrixNear(payload.World, fn.WorldTransform))
                     {
-                        transforms.Add(new GeometryEditController.TransformItem(
-                            node, fn.LocalTransform,
-                            TransformMath.ComputeLocalTransform(payload.World, fn.ParentWorldTransform)));
+                        if (node.Lod == 0)
+                        {
+                            transforms.Add(new GeometryEditController.TransformItem(
+                                node, fn.LocalTransform,
+                                TransformMath.ComputeLocalTransform(payload.World, fn.ParentWorldTransform)));
+                        }
+                        else if (levelFrame != null)
+                        {
+                            levelsMoved.Add((payload.Name, levelFrame));
+                        }
                     }
 
                     ack.Applied.Add(payload.Id);
@@ -864,6 +893,18 @@ internal sealed class BridgeSessionController : IDisposable
                             Id = id,
                             Reason = "a skinned model is deleted in the toolkit, not by disappearing from "
                                 + "Blender — its rig and everything attached to its bones would go with it",
+                        });
+                        continue;
+                    }
+                    // A coarser LEVEL is not an object. Its row stands for the same frame as the first
+                    // level's, so deleting "it" deleted the whole mesh, near level and all.
+                    if (node.Lod > 0)
+                    {
+                        ack.Skipped.Add(new PushSkip
+                        {
+                            Id = id,
+                            Reason = "a level of detail cannot be deleted on its own — the mesh keeps the level "
+                                + "it had; delete the object itself (its first level) to remove it",
                         });
                         continue;
                     }
@@ -1035,6 +1076,14 @@ internal sealed class BridgeSessionController : IDisposable
             });
 
             var notes = new List<string>(notesEarly);
+            // A coarser level moved by itself: said, since nothing happened. (Moved together with the first
+            // level it simply follows the frame, and there is nothing to say.)
+            foreach ((string name, FrameObjectSingleMesh frame) in levelsMoved)
+            {
+                if (transforms.Any(t => t.Node.Source is FrameNodeAdapter { Frame: FrameObjectSingleMesh moved } && ReferenceEquals(moved, frame))) continue;
+                notes.Add($"{name}: a coarser level was moved on its own — a mesh is placed by its first level, "
+                    + "so the object stayed where it is. Move the LOD 0 object to move it.");
+            }
             if (skinNotSent.Count > 0)
             {
                 notes.Add($"{string.Join(", ", skinNotSent.Take(3))}: no vertex weights came back — every "
