@@ -41,6 +41,13 @@ The map editor currently supports visualizing district streaming zones, collisio
 
 ## Download
 
+> **This is the `raighen` fork's release line.** It carries work that is still under review in the
+> original project (pull requests #3 to #9 of `mafia2online/illusion-toolkit`) and work that has not
+> been proposed there yet. Its builds are on
+> [this fork's Releases](https://github.com/raighen/illusion-toolkit/releases). The built-in updater
+> checks the original project's releases: taking an official version it offers replaces the fork's
+> build with it.
+
 Grab the latest archive from [Releases](https://github.com/mafia2online/illusion-toolkit/releases), unpack
 it anywhere and run `Illusion.exe`. It carries no runtime of its own, so the machine needs the
 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) - Windows offers
@@ -93,6 +100,10 @@ Pick the game folder, bulk-unpack all archives with a live progress bar, then en
 The last path is remembered. A green download arrow appears beside the gear when a newer release is
 out; the same progress bar shows the download, and the toolkit restarts to install it.
 *(A "Resource Editor" tile exists but is a disabled stub.)*
+
+The library browser shows a picture of each character, wardrobe piece and car, drawn from its
+archive: people head and shoulders, a car on its wheels. Pictures are kept on disk and only the
+tiles on screen are read.
 
 ### Viewport and streaming
 
@@ -200,6 +211,9 @@ with it: *Blended* becomes a translucent surface (glass), anything else a cut-ou
 grille). The material is written to the library on Save and its textures are packed into the
 archive on Build.
 
+A skinned mesh - a car body - can gain vertices: its remap pools are rebuilt from the pushed skin.
+Two levels of detail of one object can go in one push. A person opens standing on their rig.
+
 Limits worth knowing: untouched geometry round-trips bit-exactly (that is how a real reshape is
 told apart from an untouched one); a topology rebuild leaves lower LODs and collision with the old
 shape; collision placements refuse scale and mirror pushes (resize the hull with the toolkit's own
@@ -240,7 +254,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 76 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 80 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -254,9 +268,9 @@ map editor itself.
 | **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
-| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
+| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games`, `ping` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
-| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
+| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
@@ -270,6 +284,13 @@ and nothing reaches the game before `editor_build` (which keeps the usual timest
 `editor_target resource` points the same tools at the resource editor's stage (one archive, such as
 a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
 entity-data tables the way the Tuning tab does.
+
+`mesh_hide_triangles` cuts an opening into a stock mesh without rebuilding it: the triangles inside
+a world-space box are hidden on every level of detail and no vertex is touched, so a stock facade
+keeps the channels Blender never sees. It reports by default and hides with `apply`.
+`collision_unused_hulls` counts, and with `apply` removes, the hulls no placement references.
+`crash_placements` lists the crash-layer props (trees, lamps, bins) standing in a box and can
+delete them, the twin season included.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and
