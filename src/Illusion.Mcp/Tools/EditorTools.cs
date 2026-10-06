@@ -228,6 +228,64 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "collision_unused_hulls")]
+    [Description("Count the collision hulls no placement references — dead weight a delete, a re-cook or a resize leaves behind in the .col (deleting a placement never removes its hull, so undo can put the file back). For every collision file of the open scene: its placements, its hulls and how many of those are unused. By default it only REPORTS; pass apply=true to remove them, all files as one undoable edit. Placements are never touched, so nothing changes in the game except the archive's size. Saved by editor_save, packed by editor_build; run editor_mirror_winter afterwards so the winter district loses them too.")]
+    public static async Task<string> CollisionUnusedHulls(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Remove the unused hulls. Default false: count only.")] bool apply = false)
+    {
+        try
+        {
+            IReadOnlyList<UnusedHullsInfo> layers = [];
+            string? refused = await ui.RunAsync(() => editor.UnusedHulls(apply, out layers));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new { success = true, unused = layers.Sum(l => l.Unused), removed = apply, layers });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "crash_placements")]
+    [Description("The city_crash props — trees, bushes, lamps, bins, mailboxes — standing inside a world-space box: each one's prop name, placement id, position and whether the other season holds the same placement. scene_find only shows the prop TYPES of that layer ('lampLuxus — 31'); this is how to see where the copies stand. The layer must be in the scene (view_set crash=true). By default it only LISTS; pass delete=true to remove every placement the box (and the name filter) takes, as one undoable edit — a placement linked to the other season is removed there too. city_crash is ONE archive for the whole city: keep the box tight. Saved by editor_save, packed by editor_build.")]
+    public static async Task<string> CrashPlacements(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only props whose name contains this. Omit for every prop.")] string? nameContains = null,
+        [Description("Delete the placements found. Default false: list only.")] bool delete = false,
+        [Description("How many placements to list (the count is always complete; a delete lists everything it removed). Default 200.")] int limit = 200,
+        [Description("The most placements one delete may remove. With more than this in the box the call is refused and nothing is deleted. Default 100.")] int maxDelete = 100)
+    {
+        try
+        {
+            IReadOnlyList<CrashPlacementInfo> placements = [];
+            int total = 0;
+            string? refused = await ui.RunAsync(() =>
+                editor.CrashPlacements(boxMin, boxMax, nameContains, delete, limit, maxDelete, out placements, out total));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new
+                {
+                    success = true,
+                    count = total,
+                    deleted = delete ? total : 0,
+                    // Gone from the OTHER season as well: only the linked ones. An unlinked placement that
+                    // has a twin keeps it.
+                    deletedInOtherSeasonToo = delete ? placements.Count(p => p.BothSeasons && p.SeasonLinked) : 0,
+                    placements,
+                });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "car_substitute")]
     [Description("Build one car under ANOTHER car's name: pc\\sds\\cars\\<target>.sds is replaced by the source car's model, with the root frame, name table, prefab entry, entity data and buffers keyed by the target's model name. No table is touched — the game lists the target as before and finds the source's shape and tuning in its archive. For trying a car where nothing can be registered (a multiplayer that spawns from a fixed list of names). A timestamped backup of each replaced archive is kept in cars\\backups; the winter _z twin is replaced only where both cars have one. This OVERWRITES game files and the target's working copy: the game must not be running.")]
     public static async Task<string> CarSubstitute(

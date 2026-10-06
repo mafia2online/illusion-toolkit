@@ -948,6 +948,98 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? UnusedHulls(bool apply, out IReadOnlyList<UnusedHullsInfo> result)
+    {
+        result = [];
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (apply && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+
+        // Counted before the sweep: afterwards a layer's hull list no longer says what it carried.
+        var layers = AllNodes(host)
+            .Where(n => n.Source is Assets.Adapters.CollisionDocumentAdapter)
+            .Select(n => (Node: n, File: ((Assets.Adapters.CollisionDocumentAdapter)n.Source!).Collision))
+            .Select(l => (l.Node, Placements: l.File.Instances.Count, Hulls: l.File.Meshes.Count))
+            .ToList();
+        if (layers.Count == 0) return "the open scene has no collision file";
+
+        Dictionary<SceneNode, int> unused = host.CollisionEditing.SweepUnusedHulls(layers.Select(l => l.Node), apply)
+            .ToDictionary(l => l.Layer, l => l.Unused);
+        result = [.. layers.Select(l =>
+        {
+            int n = unused.GetValueOrDefault(l.Node);
+            return new UnusedHullsInfo(PathOf(l.Node), l.Placements, l.Hulls, n, apply && n > 0);
+        })];
+        return null;
+    }
+
+    public string? CrashPlacements(float[] boxMin, float[] boxMax, string? nameContains, bool delete, int limit, int maxDelete,
+        out IReadOnlyList<CrashPlacementInfo> result, out int total)
+    {
+        result = [];
+        total = 0;
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 }) return "boxMin and boxMax are [x, y, z]";
+        // A box that holds nothing by construction answers "count 0", and that reads as "nothing stands here".
+        if (boxMin.Concat(boxMax).Any(v => !float.IsFinite(v))) return "boxMin and boxMax must be finite numbers";
+        for (int axis = 0; axis < 3; axis++)
+        {
+            if (boxMin[axis] > boxMax[axis])
+            {
+                return $"boxMin is above boxMax on {"xyz"[axis]} ({boxMin[axis]} > {boxMax[axis]}) — such a box holds "
+                    + "nothing; give the lower corner first";
+            }
+        }
+        if (host.Streamer.CrashLayer is not { } layer) return "the crash layer is not in the scene — view_set crash=true first";
+        if (delete && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+
+        var lo = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
+        var hi = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+        var hits = new List<(Formats.Translokator.Object Row, Formats.Translokator.Instance Placement)>();
+        foreach (Formats.Translokator.Object row in layer.Rows)
+        {
+            if (!string.IsNullOrWhiteSpace(nameContains)
+                && !row.Name.String.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (Formats.Translokator.Instance placement in row.Instances)
+            {
+                Vector3 p = placement.Position;
+                if (p.X >= lo.X && p.X <= hi.X && p.Y >= lo.Y && p.Y <= hi.Y && p.Z >= lo.Z && p.Z <= hi.Z)
+                    hits.Add((row, placement));
+            }
+        }
+
+        total = hits.Count;
+        // A wide box with no name is the whole city table — tens of thousands of placements and their twins as
+        // one edit, of which the list would show the first two hundred. Refused whole instead: the caller
+        // says how many it means to remove.
+        if (delete && hits.Count > Math.Max(0, maxDelete))
+        {
+            return $"{hits.Count} placements are in the box — more than maxDelete ({maxDelete}); nothing was deleted. "
+                + "List them first (delete=false), narrow the box or the name, or raise maxDelete";
+        }
+        // A delete lists everything it removed, whatever the listing limit: what went has to be readable.
+        result = [.. hits.Take(delete ? hits.Count : Math.Max(0, limit)).Select(h => new CrashPlacementInfo(
+            h.Row.Name.String, h.Placement.ID, [h.Placement.Position.X, h.Placement.Position.Y, h.Placement.Position.Z],
+            layer.Document.HasTwinOf(h.Placement, h.Row), layer.Document.Node(h.Placement, h.Row).SeasonLinked))];
+        if (!delete || hits.Count == 0) return null;
+
+        // The viewport's own delete, so the edit is the one the Delete key makes: undoable, the streaming grid
+        // kept in step, the twin in the other season gone with a linked placement.
+        List<SceneNode> nodes = [.. hits.Select(h => host.Streamer.CrashNodeFor(h.Placement, h.Row)).OfType<SceneNode>()];
+        if (nodes.Count != hits.Count) return "some placements could not be given a tree node — nothing was deleted";
+        // That delete works on the selection. What the user had selected is put back afterwards, less
+        // whatever of it was just deleted — a tool that lists and removes props has no business leaving the
+        // editor with nothing selected.
+        List<SceneNode> selectedBefore = [.. host.Selection.Selected];
+        SceneNode? activeBefore = host.Selection.Active;
+        host.Selection.SetSelection(nodes, nodes[^1]);
+        host.CrashEditing.DeleteSelected();
+        var gone = new HashSet<SceneNode>(nodes);
+        List<SceneNode> kept = [.. selectedBefore.Where(n => !gone.Contains(n))];
+        host.Selection.SetSelection(kept,
+            activeBefore != null && kept.Contains(activeBefore) ? activeBefore : kept.Count > 0 ? kept[^1] : null);
+        return null;
+    }
+
     public string? Undo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;

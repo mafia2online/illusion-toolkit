@@ -158,6 +158,18 @@ public interface IEditorSession
     string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
         out HiddenTrianglesInfo? result);
 
+    /// <summary>Counts — and with <paramref name="apply"/> removes, as one undoable edit — the hulls no placement
+    /// references, in every collision file of the open scene. Null on success.</summary>
+    string? UnusedHulls(bool apply, out IReadOnlyList<UnusedHullsInfo> result);
+
+    /// <summary>Lists — and with <paramref name="delete"/> removes, as one undoable edit and in both seasons where
+    /// the placement is linked — the city_crash props standing inside a world-space box. <paramref name="total"/>
+    /// is how many the box holds; the list stops at <paramref name="limit"/> — except for a delete, which lists
+    /// every placement it removed. A delete of more than <paramref name="maxDelete"/> placements is refused
+    /// whole. Null on success.</summary>
+    string? CrashPlacements(float[] boxMin, float[] boxMax, string? nameContains, bool delete, int limit, int maxDelete,
+        out IReadOnlyList<CrashPlacementInfo> result, out int total);
+
     string? Undo();
 
     string? Redo();
