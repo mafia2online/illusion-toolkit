@@ -262,7 +262,16 @@ def _bind_skin(obj, desc, header, blocks, armatures, warnings):
                 group = groups[b] = obj.vertex_groups.new(name=bone_names[b])
             group.add((v,), w, 'REPLACE')
 
+    # Parenting keeps the mesh's own matrix as its offset FROM the armature — and that matrix is already the
+    # model's world, the same one the armature stands at. Left alone the mesh is carried there twice. On a
+    # car nobody sees it (a car's model sits at the identity); a person's model is turned a quarter turn —
+    # its geometry is stored along the spine — so the body arrived lying down beside a rig that stood, and
+    # a push from that scene read as "the object was moved". The offset is what is left of the mesh's world
+    # once the armature's is taken out: nothing, for a mesh on its own rig.
+    world = obj.matrix_world.copy()
     obj.parent = armature
+    obj.matrix_parent_inverse = Matrix.Identity(4)
+    obj.matrix_basis = armature.matrix_world.inverted_safe() @ world
     modifier = obj.modifiers.new(name="Illusion Rig", type='ARMATURE')
     modifier.object = armature
     modifier.use_vertex_groups = True

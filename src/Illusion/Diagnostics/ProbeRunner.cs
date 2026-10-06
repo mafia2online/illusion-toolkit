@@ -173,6 +173,21 @@ internal static class ProbeRunner
             case "--probe-prop-catalog":
                 PropCatalogProbes.RunPropCatalogProbe();
                 return true;
+            // What a remap pool is, over every skinned model: the pools against the skeleton's own account
+            // of them. Optional arg = the car to dump. Output: %TEMP%\illusion_remap_pools.txt
+            case "--probe-remap-pools":
+                RemapPoolProbes.RunRemapPoolProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // Where a person's stored geometry and rig stand, against where they are drawn.
+            // Optional arg = archive under pc\sds. Output: %TEMP%\illusion_person_rig.txt
+            case "--probe-person-rig":
+                PersonRigProbes.RunPersonRigProbe(args.Length >= 2 ? args[1] : "traffic/cirand.sds");
+                return true;
+            // The content browser's archive pictures: people (head and shoulders, from both sides) and a car.
+            // Optional args = archives under pc\sds. Output: %TEMP%\illusion_archive_thumbs.txt + pictures.
+            case "--probe-archive-thumbs":
+                ArchiveThumbnailProbes.RunArchiveThumbnailProbe(args.Skip(1).ToArray());
+                return true;
             // A car cloned under a new name, on scratch copies of the working copies.
             // Output: %TEMP%\illusion_car_clone.txt
             // The real clone against the install with a pack made to fail, and everything it wrote taken
@@ -195,6 +210,17 @@ internal static class ProbeRunner
                 return true;
             // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
             // Output: %TEMP%\illusion_geometry_sweep.txt
+            // Which meshes of an archive carry no normals (foliage), and what the renderer is handed for them.
+            // Output: %TEMP%\illusion_vertex_normals.txt
+            case "--probe-vertex-normals":
+                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
+                return true;
+            // Hiding triangles of a stock mesh without a rebuild, in memory only: what a box finds, that
+            // nothing but the found triangles' indices changes, on every level of detail.
+            // Output: %TEMP%\illusion_hide_triangles.txt
+            case "--probe-hide-triangles":
+                HideTrianglesProbes.RunHideTrianglesProbe(args.Length >= 2 ? args[1] : "uppertown");
+                return true;
             case "--probe-geometry-sweep":
                 GeometrySweepProbes.RunGeometrySweepProbe();
                 return true;

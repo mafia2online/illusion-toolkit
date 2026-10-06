@@ -129,6 +129,15 @@ public class FrameObjectModel : FrameObjectSingleMesh
     /// <see cref="ComputeSplitBlockSize"/>.</summary>
     public int SplitBlockSizeStored => physSplitSize;
 
+    /// <summary>The three stored counters as they stand — read to remember a split table exactly as it was,
+    /// written to put it back that way (an undo). Anything that BUILDS a table calls
+    /// <see cref="RecomputeSplitCounters"/> instead.</summary>
+    public (int PhysSplitSize, int HitBoxSize, short NPhysSplits) StoredSplitCounters
+    {
+        get { return SplitCounters; }
+        set { SplitCounters = value; }
+    }
+
     public int ComputeSplitBlockSize()
     {
         if (blendMeshSplits is not { Length: > 0 }) return 0;

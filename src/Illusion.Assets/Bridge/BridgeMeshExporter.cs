@@ -117,7 +117,12 @@ public static class BridgeMeshExporter
 
         return new MeshObjectPayload
         {
-            Id = MakeId(frame, document),
+            // The LEVEL is part of the identity. Both levels of a car are one frame, so sent together under
+            // the frame's id alone they were one object to the session: the push of the near level came back
+            // into the far one (whose pools do not hold its bones) and the other arrived as a brand-new mesh.
+            Id = decoded.Lod > 0
+                ? MakeId(frame, document) + "|lod" + decoded.Lod.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : MakeId(frame, document),
             BoneIndices = boneIndices,
             BoneWeights = boneWeights,
             SkeletonId = skeletonId,

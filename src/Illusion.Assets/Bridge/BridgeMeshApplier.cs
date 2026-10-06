@@ -68,6 +68,14 @@ public static class BridgeMeshApplier
         internal Vector3 OldDecompressionOffset;
         internal float OldDecompressionFactor;
 
+        /// <summary>A skinned model's pools, face ranges, hit boxes and skeleton tables before the push and
+        /// as the push leaves them. They go in and out with the buffers: old vertex bytes read through new
+        /// pools name other bones.</summary>
+        internal SkinState? SkinBefore;
+
+        /// <inheritdoc cref="SkinBefore"/>
+        internal SkinState? SkinAfter;
+
         /// <summary>Pre-push packed vertex bytes (diagnostics/probes; also the undo payload).</summary>
         public byte[] OldVertexData { get; internal set; } = null!;
 
@@ -125,6 +133,7 @@ public static class BridgeMeshApplier
         public void ApplyNew()
         {
             ApplyBuffers();
+            if (Frame is FrameObjectModel skinned) SkinAfter?.Apply(skinned);
 
             // …and the per-BONE boxes, which are derived from the vertices that just moved. Measured on 88
             // cars: a box bounds every vertex with any weight on its bone, in that bone's own space, and
@@ -194,6 +203,32 @@ public static class BridgeMeshApplier
                 Rebuild.IndexBuffer.SetData(Rebuild.OldIndexData);
                 Document?.MarkIndexBufferDirty(Rebuild.IndexBuffer.Hash);
             }
+            // …and the skin as it was, boxes included: ApplyNew rebuilt those from the new geometry, and the
+            // old geometry is entitled to the ones it had.
+            if (Frame is FrameObjectModel skinned) SkinBefore?.Apply(skinned);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="TryApply"/> for an object whose FRAME this push has already produced results for — the
+    /// other level of the same mesh. Both levels are one frame: they are packed against one quantization
+    /// lattice, share its bounds and, on a model, its pools. A result is computed against the frame as it
+    /// stands and carries "the other level as it was", so two results computed side by side each undo the
+    /// other when applied. This one is computed with the <paramref name="earlier"/> ones in place (and the
+    /// frame put back afterwards): the caller applies them in the same order and undoes them in reverse.
+    /// </summary>
+    public static ApplyResult? TryApplyAfter(IReadOnlyList<ApplyResult> earlier, IFrameNode node,
+        MeshObjectPayload payload, out string? skipReason, int lod = 0)
+    {
+        ArgumentNullException.ThrowIfNull(earlier);
+        foreach (ApplyResult applied in earlier) applied.ApplyNew();
+        try
+        {
+            return TryApply(node, payload, out skipReason, lod);
+        }
+        finally
+        {
+            for (int i = earlier.Count - 1; i >= 0; i--) earlier[i].RestoreOriginal();
         }
     }
 
@@ -218,7 +253,13 @@ public static class BridgeMeshApplier
         // remap must not have every later push refused on account of it — the question below is whether THIS
         // push breaks it, not whether it was whole to begin with.
         FrameObjectModel? skinned = node is FrameNodeAdapter { Frame: FrameObjectModel m } ? m : null;
-        bool resolvedBefore = skinned != null && SdsMeshLoader.GlobalBoneIds(skinned) != null;
+        bool resolvedBefore = skinned != null && SdsMeshLoader.GlobalBoneIds(skinned, lod) != null;
+
+        // The paths below work a skinned model's pools, face ranges and skeleton tables out by writing them.
+        // That is taken as the push's result and then taken BACK: a push that is refused must leave nothing
+        // behind, and one that is accepted is the caller's to commit — and to undo. What was written rides in
+        // the result and goes in with ApplyNew, out with RestoreOriginal.
+        SkinState? skinBefore = skinned != null ? SkinState.Take(skinned) : null;
 
         // A level left with a 32-bit index buffer — something an earlier version of this code wrote for a mesh
         // over 65535 vertices, and the game does not draw — is rebuilt whatever the push changed: the rebuild
@@ -230,6 +271,16 @@ public static class BridgeMeshApplier
         {
             result = TryApplyRebuild(node, payload, out skipReason, lod);
         }
+        if (skinned != null && skinBefore != null)
+        {
+            if (result is { Unchanged: false })
+            {
+                result.SkinBefore = skinBefore;
+                result.SkinAfter = SkinState.Take(skinned);
+            }
+            skinBefore.Apply(skinned);
+        }
+
         // A push that changed nothing has nothing to break, and its result carries no buffers to apply —
         // ApplyNew on one of those is a null reference, not a check.
         if (result == null || skinned == null || !resolvedBefore || result.Unchanged) return result;
@@ -243,15 +294,15 @@ public static class BridgeMeshApplier
         // Applied, checked and put back: the caller is the one that commits, and a push that would break the
         // skin has to be refused while the modeller is still in Blender and can split the vertex groups.
         result.ApplyNew();
-        bool resolvesAfter = SdsMeshLoader.GlobalBoneIds(skinned) != null;
+        bool resolvesAfter = SdsMeshLoader.GlobalBoneIds(skinned, result.Lod) != null;
         string broke = resolvesAfter ? "" : SdsMeshLoader.DescribeBoneRemap(skinned);
         result.RestoreOriginal();
         if (resolvesAfter) return result;
 
         skipReason = "this push would leave a skin the game cannot read, though the editor would still draw "
-            + "it: " + broke + ". A bone id has to fit the remap pool of the face group that draws it, and "
-            + "the pools are fixed at 64 entries in all. Give the affected faces one vertex group instead of "
-            + "two, or move them onto the material their bones already belong to, and push again.";
+            + "it: " + broke + ". A bone id has to fit the remap pool of the face group that draws it. "
+            + "Give the affected faces one vertex group instead of two, or move them onto the material "
+            + "their bones already belong to, and push again.";
         return null;
     }
 
@@ -307,7 +358,10 @@ public static class BridgeMeshApplier
 
     private static bool NeedsRebuild(string reason) =>
         reason.StartsWith("topology changed", StringComparison.Ordinal)
-        || reason.Contains("source vertex index out of range", StringComparison.Ordinal);
+        || reason.Contains("source vertex index out of range", StringComparison.Ordinal)
+        // A re-weight that puts one vertex under two pools keeps its vertex count only on paper: the
+        // vertex has to become two, and making vertices is the rebuild's job.
+        || reason.StartsWith(SharedAcrossPoolsReason, StringComparison.Ordinal);
 
     /// <summary>Computes the count-preserving application of <paramref name="payload"/> to
     /// <paramref name="node"/>'s mesh. Null with a reason when it cannot apply (topology changed,
@@ -588,8 +642,12 @@ public static class BridgeMeshApplier
     // whose split table and OPCODE partition the native core builds (one split + one burst per
     // material — see FrameLOD.CreateRebuilt). Lower LODs and the separate collision resource keep
     // their old shape — the caller warns the user once.
+    //
+    // poolOfSlot is the second pass of a skinned rebuild: the pool each surviving material slot was
+    // planned to draw from. A corner then belongs to its pool as much as to its normal and UV, so a
+    // vertex two pools would have shared comes out as one vertex per pool.
     private static ApplyResult? TryApplyRebuild(IFrameNode node, MeshObjectPayload payload,
-        out string? skipReason, int lod = 0)
+        out string? skipReason, int lod = 0, int[]? poolOfSlot = null)
     {
         skipReason = null;
         // A skinned model may be re-topologised: below, its remap pools AND its per-bone face ranges
@@ -676,7 +734,7 @@ public static class BridgeMeshApplier
         // agree on pos/normal/uv0 can still differ in channels Blender never saw (colors, extra UV
         // sets, damage groups), and merging them would corrupt those. Only Blender-born corners
         // (orig −1) deduplicate purely by attributes.
-        var keyToSplit = new Dictionary<(int Orig, uint Welded, int NormalKey, uint UvKey), int>(loops);
+        var keyToSplit = new Dictionary<(int Orig, uint Welded, int NormalKey, uint UvKey, int Pool), int>(loops);
         var positions = new List<Vector3>();
         var normals = new List<Vector3>();
         var uvs = new List<Vector2>();
@@ -696,7 +754,9 @@ public static class BridgeMeshApplier
                 ? payload.LoopOrigIndex[i] : -1;
             Vector3 normal = payload.LoopNormals[i];
             Vector2 uv = new(payload.LoopUvs[i].X, 1f - payload.LoopUvs[i].Y);
-            var key = (orig, welded, PackNormalKey(normal), PackUvKey(uv));
+            int keptSlot = slotRemap[payload.FaceMaterials[i / 3]];
+            int pool = poolOfSlot != null && keptSlot >= 0 && keptSlot < poolOfSlot.Length ? poolOfSlot[keptSlot] : 0;
+            var key = (orig, welded, PackNormalKey(normal), PackUvKey(uv), pool);
             if (!keyToSplit.TryGetValue(key, out int split))
             {
                 split = positions.Count;
@@ -931,6 +991,30 @@ public static class BridgeMeshApplier
         SkeletonData? renderRig = null;
         if (newGlobal != null && frame is FrameObjectModel rebuiltModel)
         {
+            // The pools FIRST, and only as a plan: everything below writes into the model, and a push the
+            // pools cannot answer for has to be refused before any of it has.
+            PoolPlan? pools = PlanPools(rebuiltModel, outVerts, newGlobal, newIndexData, newMats, existingMats,
+                decoded.Lod, out string? blendReason);
+            if (pools == null)
+            {
+                skipReason = blendReason;
+                return null;
+            }
+            if (pools.SharedAcrossPools)
+            {
+                // A vertex on the seam between two face groups that read different pools. It used to be the
+                // modeller's job to cut the mesh there; the cut is mechanical, so it is made here — the same
+                // push again, with each corner keyed by the pool its face draws from.
+                if (poolOfSlot != null)
+                {
+                    skipReason = SharedAcrossPoolsReason + ", and giving each its own copy did not separate "
+                        + "them — split the mesh along that material boundary and push again";
+                    return null;
+                }
+                return TryApplyRebuild(node, payload, out skipReason, lod,
+                    [.. pools.Groups.Select(g => (int)g.AssignedPoolIndex)]);
+            }
+
             // The per-bone face ranges are ONE table on the model — there is no copy per level, and the
             // ranges it holds address LOD0's index buffer. Rebuilding it from a coarser level's indices
             // would point the physics splits at triangles of the wrong mesh, so a push into any other
@@ -952,12 +1036,9 @@ public static class BridgeMeshApplier
                 for (int k = 0; k < 4; k++) renderWeights[(v * 4) + k] = outVerts[v].BoneWeights[k];
             renderRig = SdsMeshLoader.RigOf(rebuiltModel);
 
-            if (!RemapBlendInfo(rebuiltModel, outVerts, newGlobal, newIndexData, newMats, existingMats,
-                    decoded.Lod, out string? blendReason))
-            {
-                skipReason = blendReason;
-                return null;
-            }
+            // Last, once nothing can refuse any more: the face ranges above were matched against the table
+            // as it shipped, and this is what moves the table.
+            CommitPools(rebuiltModel, pools);
         }
 
         byte[] newData = VertexCompressor.CompressBuffer(
@@ -1491,62 +1572,144 @@ public static class BridgeMeshApplier
     }
 
     /// <summary>
-    /// Re-points a re-topologised skinned model's vertices at the remap pools it already ships with, and says
-    /// which pool each new face group draws from. Returns false with a reason when the pools cannot answer for
-    /// the geometry that came back.
-    /// <para>
-    /// The pools themselves are NOT rebuilt. A car does not put its whole rig in one pool — shubert_38 ships
-    /// 59 bones in pool 0 and 33 in pool 1 for 83 bones total (<c>--probe-skinning</c>) — and replacing that
-    /// with a single pool over every bone is what tore a repacked car apart: a draw can only reach so far into
-    /// the palette, so ids past the end came back as garbage transforms. Keeping the shipped pools also keeps
-    /// the skin channel byte-identical for every vertex that kept its material, which is the common case.
-    /// </para>
+    /// What one level's remap pools have to be for the geometry that came back: the pools, which of them each
+    /// face group draws from, and where every entry of the old table has moved to. Worked out without
+    /// touching the model, so a push that turns out not to fit leaves it exactly as it was.
+    /// </summary>
+    private sealed class PoolPlan
+    {
+        internal int Level;
+        internal byte[] Sizes = [];
+        internal byte[] Remap = [];
+        internal FrameBlendInfo.SkinnedMaterialInfo[] Groups = [];
+
+        /// <summary>The table before and after, pool by pool — an old entry keeps its pool and its place in
+        /// it, so its new index is the pool's new start plus the same offset.</summary>
+        internal int[] OldStart = [];
+        internal byte[] OldSizes = [];
+        internal int[] NewStart = [];
+
+        /// <summary>A pool was made longer, or a new one opened: the table moved and everything that
+        /// describes it has to follow.</summary>
+        internal bool Grew;
+
+        /// <summary>Some vertex is drawn by two face groups that read their bones from different pools. It
+        /// carries one set of ids, so it has to become two vertices before the plan can be carried out.</summary>
+        internal bool SharedAcrossPools;
+
+        internal int Reindex(int oldIndex)
+        {
+            for (int p = 0; p < OldSizes.Length; p++)
+            {
+                if (oldIndex >= OldStart[p] && oldIndex < OldStart[p] + OldSizes[p])
+                    return NewStart[p] + (oldIndex - OldStart[p]);
+            }
+            return oldIndex;
+        }
+    }
+
+    private const string SharedAcrossPoolsReason =
+        "a vertex is shared by two materials that read their bones from different pools";
+
+    /// <summary>
+    /// Re-points a skinned model's vertices at its remap pools and writes the pools back — the count-preserving
+    /// path's whole answer, where no vertex can be added. False with a reason when the pools cannot be made to
+    /// answer for the weights that came back; a vertex that would have to be split says so in a form the
+    /// caller turns into a rebuild.
     /// </summary>
     private static bool RemapBlendInfo(
+        FrameObjectModel model, Vertex[] vertices, byte[] globalOf, uint[] indices,
+        MaterialStruct[] newMats, MaterialStruct[] oldMats, int lod, out string? reason)
+    {
+        PoolPlan? plan = PlanPools(model, vertices, globalOf, indices, newMats, oldMats, lod, out reason);
+        if (plan == null) return false;
+        if (plan.SharedAcrossPools)
+        {
+            reason = SharedAcrossPoolsReason + " — the mesh has to be rebuilt to give each its own copy";
+            return false;
+        }
+        CommitPools(model, plan);
+        return true;
+    }
+
+    /// <summary>
+    /// Works out the remap pools a re-topologised (or re-weighted) level needs, and localizes the vertices'
+    /// bone ids against them. Null with a reason when no arrangement of pools the game is known to read can
+    /// answer for the geometry.
+    /// <para>
+    /// The shipped pools are the starting point and are never reshuffled: a car does not put its whole rig in
+    /// one pool — shubert_38 ships 59 bones in pool 0 and 33 in pool 1 for 83 bones total — and replacing that
+    /// with one pool over every bone is what tore a repacked car apart. A face group that fits a shipped pool
+    /// keeps it, which leaves the skin channel byte-identical wherever nothing moved.
+    /// </para>
+    /// <para>
+    /// A face group whose bones no shipped pool holds together GROWS the pool that is missing fewest of them,
+    /// by appending — so every id already written against that pool still means the same bone — or, when no
+    /// pool has the room, opens a new one. What that asks of the rest of the file is measured
+    /// (<c>--probe-remap-pools</c>, 353 models, 650 levels, no exception): the skeleton's count per level, its
+    /// usage and reference arrays and its level masks are all derived from the pools and are derived again by
+    /// <see cref="Frames.BlendPoolTables.Sync"/>, and a split's <c>BlendIndex</c> is a position in level 0's
+    /// table and moves with the entry it names. The ceilings are the shipped ones: no pool anywhere holds more
+    /// than <see cref="MaxBonesPerPool"/> bones, no table more than <see cref="MaxBlendIds"/> entries.
+    /// </para>
+    /// </summary>
+    private static PoolPlan? PlanPools(
         FrameObjectModel model, Vertex[] vertices, byte[] globalOf, uint[] indices,
         MaterialStruct[] newMats, MaterialStruct[] oldMats, int lod, out string? reason)
     {
         reason = null;
         FrameBlendInfo blend;
         try { blend = model.GetBlendInfoObject(); }
-        catch (Exception) { reason = "the model's blend info cannot be read"; return false; }
+        catch (Exception) { reason = "the model's blend info cannot be read"; return null; }
 
         FrameBlendInfo.BoneIndexInfo[] lods = blend.BoneIndexInfos ?? [];
-        if (lods.Length == 0) { reason = "the model carries no remap pools"; return false; }
+        if (lods.Length == 0) { reason = "the model carries no remap pools"; return null; }
         // The edited level's own pools — each level has its own palette and its own face groups.
         int level = Math.Clamp(lod, 0, lods.Length - 1);
         FrameBlendInfo.BoneIndexInfo edited = lods[level];
-        byte[] sizes = edited.BonesPerRemapPool ?? [];
-        byte[] remap = edited.BoneRemapIDs ?? [];
+        byte[] oldSizes = edited.BonesPerRemapPool ?? [];
+        byte[] oldRemap = edited.BoneRemapIDs ?? [];
         FrameBlendInfo.SkinnedMaterialInfo[] oldGroups = edited.SkinnedMaterialInfo ?? [];
 
         // Pool p is a run of sizes[p] ids in the flat remap table.
-        var poolStart = new int[sizes.Length];
+        var oldStart = new int[oldSizes.Length];
         int poolCount = 0, at = 0;
-        for (int p = 0; p < sizes.Length; p++)
+        for (int p = 0; p < oldSizes.Length; p++)
         {
-            poolStart[p] = at;
-            at += sizes[p];
-            if (sizes[p] > 0) poolCount = p + 1;
+            oldStart[p] = at;
+            at += oldSizes[p];
+            if (oldSizes[p] > 0) poolCount = p + 1;
         }
-        if (at > remap.Length) { reason = "the model's remap pools overrun its remap table"; return false; }
-        if (poolCount == 0) { reason = "the model carries no remap pools"; return false; }
+        if (at > oldRemap.Length) { reason = "the model's remap pools overrun its remap table"; return null; }
+        if (poolCount == 0) { reason = "the model carries no remap pools"; return null; }
 
-        var localOf = new Dictionary<byte, byte>[poolCount];
-        sizes = (byte[])sizes.Clone();
-        for (int p = 0; p < poolCount; p++)
+        var pools = new List<byte>[oldSizes.Length];
+        var localOf = new Dictionary<byte, byte>[oldSizes.Length];
+        for (int p = 0; p < oldSizes.Length; p++)
         {
-            var map = new Dictionary<byte, byte>(sizes[p]);
-            for (int i = 0; i < sizes[p]; i++) map.TryAdd(remap[poolStart[p] + i], (byte)i);
+            pools[p] = [.. oldRemap.AsSpan(oldStart[p], oldSizes[p])];
+            var map = new Dictionary<byte, byte>(oldSizes[p]);
+            for (int i = 0; i < pools[p].Count; i++) map.TryAdd(pools[p][i], (byte)i);
             localOf[p] = map;
         }
 
         // A slot that kept its material keeps that material's pool — draw order is what ties a face group to
-        // a pool, so the shipped answer is the right one wherever it still applies.
+        // a pool, so the shipped answer is the right one wherever it still applies. A material drawn by two
+        // slots (279 shipped levels do that) is matched occurrence for occurrence.
         var groups = new FrameBlendInfo.SkinnedMaterialInfo[newMats.Length];
+        var seen = new Dictionary<ulong, int>();
         for (int slot = 0; slot < newMats.Length; slot++)
         {
-            int was = Array.FindIndex(oldMats, m => m.MaterialHash == newMats[slot].MaterialHash);
+            ulong hash = newMats[slot].MaterialHash;
+            int nth = seen.GetValueOrDefault(hash);
+            seen[hash] = nth + 1;
+            int was = -1;
+            for (int old = 0, hit = 0; old < oldMats.Length; old++)
+            {
+                if (oldMats[old].MaterialHash != hash) continue;
+                was = old;
+                if (hit++ == nth) break;
+            }
             FrameBlendInfo.SkinnedMaterialInfo donor = was >= 0 && was < oldGroups.Length
                 ? oldGroups[was]
                 : new FrameBlendInfo.SkinnedMaterialInfo { AssignedPoolIndex = 0, NumWeightsPerVertex = 1 };
@@ -1558,10 +1721,10 @@ public static class BridgeMeshApplier
         }
 
         // Which bones each slot actually draws, and how many influences its heaviest vertex carries.
-        var bonesOfSlot = new HashSet<byte>[newMats.Length];
+        bool grew = false;
         for (int slot = 0; slot < newMats.Length; slot++)
         {
-            HashSet<byte> set = bonesOfSlot[slot] = [];
+            var set = new HashSet<byte>();
             int influences = 1;
             int from = newMats[slot].StartIndex;
             int to = Math.Min(from + (newMats[slot].NumFaces * 3), indices.Length);
@@ -1583,52 +1746,86 @@ public static class BridgeMeshApplier
 
             // A slot whose bones its inherited pool cannot name (Blender moved faces between materials, or
             // the slot is new) takes any pool that can.
-            if (set.All(b => localOf[groups[slot].AssignedPoolIndex].ContainsKey(b))) continue;
+            int inherited = groups[slot].AssignedPoolIndex;
+            if (set.All(b => localOf[inherited].ContainsKey(b))) continue;
             int fit = -1;
             for (int p = 0; p < poolCount && fit < 0; p++) if (set.All(b => localOf[p].ContainsKey(b))) fit = p;
             if (fit >= 0) { groups[slot].AssignedPoolIndex = (byte)fit; continue; }
 
-            // No pool has them all — so GROW one. A pool is just "the bones this face group may name", and a
-            // vertex addresses it with a byte; the shipped data says the engine's real limit is per pool and
-            // not on the total, since cars run their totals to 108 entries while no single pool anywhere
-            // exceeds 60 (--probe-bullets). So the bones that are missing get appended to the pool that is
-            // missing fewest, and only a pool that would pass 60 is refused.
-            //
-            // This is what a cube weighted to a bonnet AND its deform bone needs: the two are not in one
-            // pool on any car, and until this existed the push either refused or — worse, before the guard —
-            // wrote an id past the end of the pool, which the editor drew correctly and the game placed
-            // somewhere else entirely.
-            // NOT YET. Growing a pool is more than lengthening the remap table: the SKELETON carries the same
-            // total — measured on 173 of 173 LODs, its blend-id count equals the sum of the pool sizes and
-            // its usage array is exactly that long — and what belongs in the new usage entries has not been
-            // measured. Writing the longer table alone leaves the two halves disagreeing, and that is worse
-            // than refusing: the editor reads the pools directly and shows the part in its right place while
-            // the game reads through the skeleton's mapping and puts it somewhere else. That was reported
-            // twice, and the second time it was this code that caused it.
-            // A model has dozens of groups and the refusal is about ONE material, so saying only that a pool
-            // cannot cover it leaves the modeller hunting blind. Name the material, its bones, and the pool
-            // each bone does sit in — that is the whole fix: drop the bones that sit apart, or split the
-            // faces onto a material whose bones share a pool.
+            // No pool has them all — so one is made to. A pool is just "the bones this face group may name";
+            // the missing ones are appended to the pool that lacks fewest (its own first, on a tie), and a
+            // pool that would pass the shipped ceiling is left alone in favour of a new one.
             string material = MafiaMaterials.GetMaterialName(newMats[slot].MaterialHash)
                 ?? $"0x{newMats[slot].MaterialHash:X16}";
-            string[] boneNames = BoneNamesOf(model);
-            IEnumerable<string> told = set.Order().Select(b =>
+            if (set.Count > MaxBonesPerPool)
             {
-                string name = b < boneNames.Length ? boneNames[b] : $"bone{b}";
-                string pools = string.Join("/", Enumerable.Range(0, poolCount)
-                    .Where(p => localOf[p].ContainsKey(b)));
-                return pools.Length == 0 ? $"{name} (in no pool)" : $"{name} (pool {pools})";
-            });
-            reason = $"material '{material}' is weighted to bones that no single remap pool of the model "
-                + "covers: " + string.Join(", ", told) + ". "
-                + "A pool CAN be made longer — no shipped pool exceeds " + MaxBonesPerPool + " and the "
-                + "totals run past a hundred — but the rig stores that same total in its own blend-id count "
-                + "and usage array, and what goes in the new entries has not been measured yet. Growing one "
-                + "half alone gives a car that looks right in the editor and lands the part somewhere else "
-                + "in game, so it is refused instead. For now: give those faces ONE vertex group, or move "
-                + "them onto a material whose bones already sit in one pool.";
-            return false;
+                reason = $"material '{material}' is weighted to {set.Count} different bones, and one face group "
+                    + $"can name at most {MaxBonesPerPool} (no shipped model goes past it). Split those faces "
+                    + "over two material slots — the same material may be used by both — so that each half "
+                    + "stays under the limit.";
+                return null;
+            }
+
+            int best = -1, bestMissing = int.MaxValue;
+            for (int step = 0; step <= poolCount; step++)
+            {
+                int p = step == 0 ? inherited : step - 1;
+                if (step > 0 && p == inherited) continue;
+                int missing = set.Count(b => !localOf[p].ContainsKey(b));
+                if (pools[p].Count + missing > MaxBonesPerPool) continue;
+                if (missing < bestMissing) { best = p; bestMissing = missing; }
+            }
+            if (best < 0)
+            {
+                if (poolCount >= pools.Length)
+                {
+                    string[] boneNames = BoneNamesOf(model);
+                    reason = $"material '{material}' needs bones that no remap pool of the model has room "
+                        + $"for (" + string.Join(", ", set.Order().Select(b => b < boneNames.Length
+                            ? boneNames[b] : $"bone{b}")) + $"): every pool would pass {MaxBonesPerPool} "
+                        + $"bones and all {pools.Length} pools are in use. Weight those faces to fewer bones.";
+                    return null;
+                }
+                best = poolCount++;
+            }
+            foreach (byte bone in set.Order())
+            {
+                if (localOf[best].ContainsKey(bone)) continue;
+                localOf[best][bone] = (byte)pools[best].Count;
+                pools[best].Add(bone);
+            }
+            groups[slot].AssignedPoolIndex = (byte)best;
+            grew = true;
         }
+
+        var sizes = new byte[oldSizes.Length];
+        var newStart = new int[oldSizes.Length];
+        var remap = new List<byte>(oldRemap.Length + 16);
+        for (int p = 0; p < pools.Length; p++)
+        {
+            newStart[p] = remap.Count;
+            sizes[p] = (byte)pools[p].Count;
+            remap.AddRange(pools[p]);
+        }
+        if (remap.Count > MaxBlendIds)
+        {
+            reason = $"this push needs a remap table of {remap.Count} entries, and the longest any shipped "
+                + $"model carries is {MaxBlendIds} — past that nothing is known about what the game does. "
+                + "Weight the new geometry to bones its material already uses.";
+            return null;
+        }
+
+        var plan = new PoolPlan
+        {
+            Level = level,
+            Sizes = sizes,
+            Remap = [.. remap],
+            Groups = groups,
+            OldStart = oldStart,
+            OldSizes = oldSizes,
+            NewStart = newStart,
+            Grew = grew,
+        };
 
         // A vertex carries one set of ids, so every group drawing it must read them against the same pool.
         var poolOfVertex = new int[vertices.Length];
@@ -1644,27 +1841,34 @@ public static class BridgeMeshApplier
                 if (v < 0 || v >= vertices.Length) continue;
                 if (poolOfVertex[v] >= 0 && poolOfVertex[v] != pool)
                 {
-                    reason = "a vertex is shared by two materials that read their bones from different "
-                        + "pools — split the mesh along that material boundary and push again";
-                    return false;
+                    plan.SharedAcrossPools = true;
+                    return plan;
                 }
                 poolOfVertex[v] = pool;
             }
         }
 
         // Ids back to pool-local. A zero-weight slot keeps the donor's byte: it names nothing, and rewriting
-        // it would move bytes for no reason.
+        // it would move bytes for no reason — UNLESS that byte points past the end of this vertex's pool. It
+        // does when the vertex took its unused ids from a neighbour drawn through a bigger pool (a new corner
+        // copies the nearest old vertex before its own weights land), and although the weight is zero the
+        // id is still read: a skin with any id past the table does not resolve at all, here or on the next
+        // pull. Such a slot is pointed at the pool's first entry, which is always there.
         for (int v = 0; v < vertices.Length; v++)
         {
             int pool = poolOfVertex[v];
             if (pool < 0) continue; // nothing draws this vertex
             for (int k = 0; k < 4; k++)
             {
-                if (vertices[v].BoneWeights[k] <= 0f) continue;
+                if (vertices[v].BoneWeights[k] <= 0f)
+                {
+                    if (vertices[v].BoneIDs[k] >= sizes[pool]) vertices[v].BoneIDs[k] = 0;
+                    continue;
+                }
                 if (!localOf[pool].TryGetValue(globalOf[(v * 4) + k], out byte local))
                 {
                     reason = "a vertex came back weighted to a bone its material's remap pool does not name";
-                    return false;
+                    return null;
                 }
                 vertices[v].BoneIDs[k] = local;
             }
@@ -1686,24 +1890,54 @@ public static class BridgeMeshApplier
             for (int k = 0; k < 4; k++)
             {
                 if (vertices[v].BoneWeights[k] <= 0f) continue;
-                int slot = poolStart[pool] + vertices[v].BoneIDs[k];
-                if (slot < remap.Length && remap[slot] == globalOf[(v * 4) + k]) continue;
+                int slot = newStart[pool] + vertices[v].BoneIDs[k];
+                if (vertices[v].BoneIDs[k] < sizes[pool] && slot < plan.Remap.Length
+                    && plan.Remap[slot] == globalOf[(v * 4) + k])
+                {
+                    continue;
+                }
                 reason = "the rebuilt skin does not read back — a vertex's bone id resolves to the wrong "
                     + "bone through its own remap pool. Nothing was written; the mesh is as it was.";
-                return false;
+                return null;
             }
         }
 
+        return plan;
+    }
+
+    /// <summary>
+    /// Writes a plan into the model: the edited level's pools and face groups, and — when the table moved —
+    /// everything else in the file that describes it.
+    /// </summary>
+    private static void CommitPools(FrameObjectModel model, PoolPlan plan)
+    {
+        FrameBlendInfo blend = model.GetBlendInfoObject();
+        FrameBlendInfo.BoneIndexInfo[] lods = blend.BoneIndexInfos ?? [];
+
         // The edited level only: the other levels keep their own vertex buffers and the pools that go with
         // them.
-        lods[level] = new FrameBlendInfo.BoneIndexInfo
+        lods[plan.Level] = new FrameBlendInfo.BoneIndexInfo
         {
-            BonesPerRemapPool = sizes,
-            BoneRemapIDs = remap,
-            SkinnedMaterialInfo = groups,
+            BonesPerRemapPool = plan.Sizes,
+            BoneRemapIDs = plan.Remap,
+            SkinnedMaterialInfo = plan.Groups,
         };
         blend.BoneIndexInfos = lods;
-        return true;
+        if (!plan.Grew) return;
+
+        // A split names its bone by POSITION in level 0's table. A pool that grew pushed every later pool
+        // along, so the positions are moved with it — same pool, same place in the pool, same bone.
+        if (plan.Level == 0)
+        {
+            foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+            {
+                split.BlendIndex = (ushort)plan.Reindex(split.BlendIndex);
+            }
+        }
+
+        // …and the skeleton's own account of the table: the count per level, the usage and reference arrays,
+        // the level masks. All derived from the pools, so derived again.
+        Frames.BlendPoolTables.Sync(model);
     }
 
     /// <summary>
@@ -1932,6 +2166,13 @@ public static class BridgeMeshApplier
     /// format itself could hold 256; 60 is what the game's own data says a draw call reaches.
     /// </summary>
     private const int MaxBonesPerPool = 60;
+
+    /// <summary>
+    /// The most entries one level's remap table may hold — all its pools together. The longest shipped table
+    /// is 115 entries (<c>--probe-remap-pools</c>, 353 skinned models); the format would hold 255, since the
+    /// skeleton files table positions in a byte, but nothing is known about the game past what it ships.
+    /// </summary>
+    private const int MaxBlendIds = 115;
 
     /// <summary>How many bones the model's rig has, or 0 when it cannot be read.</summary>
     private static int BoneCountOf(FrameObjectModel model)
