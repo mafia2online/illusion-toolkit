@@ -240,9 +240,10 @@
             </Setter>
         </Style>
 
-        <!-- Archive tile: a square of empty space with a big type icon in it, the name, and the size. No
-             thumbnail — an .sds is not opened to build this pane, so there is no picture to show; the icon
-             carries the type instead.
+        <!-- Archive tile: a square of empty space with a big type icon in it, the name, and the size. An
+             .sds is not opened to build this pane, so the icon is what a tile starts with; the archives that
+             hold one figure — people, clothes — then get its picture, drawn in the background and kept on
+             disk (see ArchiveThumb).
              No card: a hundred filled, outlined boxes read as a wall rather than as a hundred things, so the
              tile is nothing until the pointer or the selection is on it. What separates one from the next is
              the gap, not a border.
@@ -503,12 +504,23 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <Path Grid.Row="0" Width="40" Height="40" Stretch="Uniform"
+                                        <!-- The type icon, until the archive's picture arrives — and for good
+                                             on the kinds that get none (see ArchiveThumbnailRenderer.Draws).
+                                             The picture reaches out of the tile's inset: it is the content, a
+                                             face at icon size says nothing. -->
+                                        <Path x:Name="Glyph" Grid.Row="0" Width="40" Height="40" Stretch="Uniform"
                                               Fill="Transparent" StrokeThickness="1.5" StrokeLineJoin="Round"
                                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                               Data="{Binding Resource, Converter={StaticResource Glyph}}"
                                               Stroke="{Binding Resource, Converter={StaticResource Tint}}"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Visibility="Collapsed" />
+                                        <Border Grid.Row="0" Margin="-5,-9,-5,0" CornerRadius="5" ClipToBounds="True">
+                                            <Image x:Name="Thumb" Stretch="Uniform"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                                   v:ArchiveThumb.Entry="{Binding}" />
+                                        </Border>
                                         <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
                                                    FontSize="11" TextAlignment="Center"
                                                    TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
@@ -516,6 +528,11 @@
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Size, Converter={StaticResource ByteSize}}" />
                                     </Grid>
+                                    <DataTemplate.Triggers>
+                                        <Trigger SourceName="Thumb" Property="Source" Value="{x:Null}">
+                                            <Setter TargetName="Glyph" Property="Visibility" Value="Visible" />
+                                        </Trigger>
+                                    </DataTemplate.Triggers>
                                 </DataTemplate>
 
                                 <!-- One resource inside an opened archive. Same square as an archive tile,

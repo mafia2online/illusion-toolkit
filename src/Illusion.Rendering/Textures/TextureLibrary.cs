@@ -85,6 +85,22 @@ public sealed unsafe class TextureLibrary : IDisposable
     }
 
     /// <summary>
+    /// Forgets every registered folder — for a renderer that shows one thing after another, each with
+    /// folders of its own: a texture is taken from the FIRST folder that has its name, so folders left from
+    /// what was shown before would lend their textures to what is shown next. Textures already acquired stay
+    /// as they are until their leases are returned.
+    /// </summary>
+    public void ClearFolders()
+    {
+        lock (_sync)
+        {
+            if (_folders.Count == 0) return;
+            _folders.Clear();
+            _foldersVersion++;
+        }
+    }
+
+    /// <summary>
     /// Forgets a cached texture whose FILE was rewritten, so the next <see cref="Acquire"/> reads it again.
     /// Meshes that already hold the old view keep drawing with it until they rebind or are disposed — the
     /// view stays alive for exactly as long as their leases do.
