@@ -40,6 +40,7 @@ public partial class MainWindow : Window
 
         // Catalog ready → populate the area selector.
         Viewport.CatalogReady += () => Dispatcher.Invoke(PopulateAreas);
+        Viewport.ZonePicked += OnZonePicked;
 
         // Live camera position output to the bottom panel (per-frame, already on the UI thread).
         Viewport.CameraMoved += UpdateCameraReadout;
@@ -818,7 +819,10 @@ public partial class MainWindow : Window
 
     private void Zones_Changed(object sender, RoutedEventArgs e)
     {
-        if (Viewport != null) Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        if (Viewport == null) return;
+        Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        // a zone picked while the layer was up is not left picked - and under the gizmo - with nothing drawn
+        if (!Viewport.ShowZones) Viewport.Catalogs.SelectZone(null);
     }
 
     // Shading mode (Blender-style): the checked radio drives the viewport render mode.

@@ -1,5 +1,7 @@
 using System.Numerics;
+using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
+using Illusion.Formats.Archive;
 using Illusion.Formats.CityAreas;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -25,11 +27,21 @@ public sealed class LoadZones
     private readonly Dictionary<string, FrameObjectArea> _volumes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyList<string>> _districts = new(StringComparer.OrdinalIgnoreCase);
 
-    private LoadZones(FileInfo archive, FrameResource frame)
+    // Asked about a point: the volumes in name order, and each one's way from the world into its own space.
+    // Worked out once - a plan of a district asks about tens of thousands of points - and dropped when a
+    // volume is moved.
+    private (string Name, FrameObjectArea Zone)[]? _ordered;
+    private readonly Dictionary<FrameObjectArea, Matrix4x4?> _toLocal = [];
+
+    private LoadZones(FileInfo archive, FrameResource frame, string sceneFile)
     {
         Archive = archive;
         Frame = frame;
+        SceneFile = sceneFile;
     }
+
+    /// <summary>The file of the working copy the scene was read from, and <see cref="Save"/> writes.</summary>
+    public string SceneFile { get; }
 
     /// <summary>The archive the zones live in: a copy of <c>city_univers.sds</c> (see <see cref="Copies"/>).</summary>
     public FileInfo Archive { get; }
@@ -78,6 +90,12 @@ public sealed class LoadZones
     /// <summary>Every volume, by name.</summary>
     public IReadOnlyDictionary<string, FrameObjectArea> Volumes => _volumes;
 
+    private readonly HashSet<string> _ambiguous = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Names that more than one volume of the scene carries. Such a volume is listed (the first of
+    /// them) but not moved: a name is all a caller has to say which one is meant.</summary>
+    public IReadOnlyCollection<string> AmbiguousNames => _ambiguous;
+
     /// <summary>The districts a volume keeps loaded, as resolved archive names; none for a volume the table does
     /// not list (shop zones are bound elsewhere).</summary>
     public IReadOnlyList<string> DistrictsOf(string zone) =>
@@ -95,12 +113,25 @@ public sealed class LoadZones
         if (!archive.Exists) throw new FileNotFoundException("city_univers.sds is not in the game folder", archive.FullName);
 
         string extracted = ensureExtracted(archive);
-        FrameResource frame = ExtractedSds.Load(extracted).FrameResource
-            ?? throw new InvalidDataException("city_univers.sds has no scene");
-        var zones = new LoadZones(archive, frame);
-        foreach (FrameObjectArea area in frame.FrameObjects.Values.OfType<FrameObjectArea>())
+        // The scene alone. A zone is a matrix, a box and planes; the archive's vertex and index pools have
+        // nothing to say about it, and reading them all cost every click on a zone a full load of the archive.
+        IReadOnlyList<string> scenes;
+        try
         {
-            if (area.Name?.ToString() is { Length: > 0 } name) zones._volumes[name] = area;
+            scenes = SdsManifest.Load(extracted).GetFiles("FrameResource");
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            throw new InvalidDataException("the working copy of city_univers.sds has a contents list that cannot be read: " + ex.Message, ex);
+        }
+        if (scenes.Count == 0) throw new InvalidDataException("city_univers.sds has no scene");
+        var zones = new LoadZones(archive, new FrameResource(scenes[0]), scenes[0]);
+        foreach (FrameObjectArea area in zones.Frame.FrameObjects.Values.OfType<FrameObjectArea>())
+        {
+            if (area.Name?.ToString() is not { Length: > 0 } name) continue;
+            // Two volumes under one name could not be told apart by the table that names them, nor by a
+            // caller that names one to move: the first is kept, and the name is remembered as ambiguous.
+            if (!zones._volumes.TryAdd(name, area)) zones._ambiguous.Add(name);
         }
 
         string table = Path.Combine(extracted, "missions", "CITY", "cityareas.bin");
@@ -127,7 +158,12 @@ public sealed class LoadZones
     {
         ArgumentNullException.ThrowIfNull(zone);
         outsideBy = 0f;
-        if (!Matrix4x4.Invert(zone.WorldTransform, out Matrix4x4 toLocal)) return false;
+        return Matrix4x4.Invert(zone.WorldTransform, out Matrix4x4 toLocal) && Contains(zone, toLocal, world, out outsideBy);
+    }
+
+    private static bool Contains(FrameObjectArea zone, Matrix4x4 toLocal, Vector3 world, out float outsideBy)
+    {
+        outsideBy = 0f;
         Vector3 local = Vector3.Transform(world, toLocal);
         if (zone.Planes is not { Length: > 0 } planes)
         {
@@ -165,9 +201,16 @@ public sealed class LoadZones
     /// <summary>The volumes that hold a point, or come within <paramref name="near"/> metres of holding it.</summary>
     public IEnumerable<(string Name, FrameObjectArea Zone, bool Inside, float OutsideBy)> At(Vector3 world, float near = 0f)
     {
-        foreach ((string name, FrameObjectArea zone) in _volumes.OrderBy(v => v.Key, StringComparer.Ordinal))
+        _ordered ??= [.. _volumes.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => (v.Key, v.Value))];
+        foreach ((string name, FrameObjectArea zone) in _ordered)
         {
-            bool inside = Contains(zone, world, out float outsideBy);
+            if (!_toLocal.TryGetValue(zone, out Matrix4x4? toLocal))
+            {
+                toLocal = Matrix4x4.Invert(zone.WorldTransform, out Matrix4x4 inverse) ? inverse : null;
+                _toLocal[zone] = toLocal;
+            }
+            if (toLocal is not { } into) continue;
+            bool inside = Contains(zone, into, world, out float outsideBy);
             if (inside || outsideBy <= near) yield return (name, zone, inside, outsideBy);
         }
     }
@@ -190,6 +233,7 @@ public sealed class LoadZones
     {
         move = null;
         if (!_volumes.TryGetValue(zone ?? "", out FrameObjectArea? area)) return $"no load zone named '{zone}'";
+        if (_ambiguous.Contains(zone!)) return $"more than one volume of the scene is named '{zone}' - which one is meant cannot be told";
         if (face is not { Length: 2 } || (face[0] != '+' && face[0] != '-') || "xyz".IndexOf(char.ToLowerInvariant(face[1])) < 0)
             return "face is one of +x, -x, +y, -y, +z, -z";
         if (!float.IsFinite(to)) return "the coordinate must be a finite number";
@@ -243,6 +287,96 @@ public sealed class LoadZones
         (Vector3 min, Vector3 max) = WorldBox(area);
         move = new LoadZoneFaceMove(area.Name.ToString(), face.ToLowerInvariant(), found, from, to, min, max);
         return null;
+    }
+
+    /// <summary>
+    /// The faces of a volume that <see cref="MoveFace"/> can move: those with a plane square to their axis, on a
+    /// volume that stands square to the map. A corner sliced off by a slanted plane leaves its side without one.
+    /// </summary>
+    public IReadOnlySet<string> SquareFaces(string zone)
+    {
+        var faces = new HashSet<string>(StringComparer.Ordinal);
+        if (!_volumes.TryGetValue(zone ?? "", out FrameObjectArea? area)) return faces;
+        Matrix4x4 world = area.WorldTransform;
+        if (MathF.Abs(world.M11 - 1f) > 1e-3f || MathF.Abs(world.M22 - 1f) > 1e-3f || MathF.Abs(world.M33 - 1f) > 1e-3f) return faces;
+        foreach (Vector4 plane in area.Planes)
+        {
+            float[] n = [plane.X, plane.Y, plane.Z];
+            for (int axis = 0; axis < 3; axis++)
+            {
+                bool square = MathF.Abs(MathF.Abs(n[axis]) - 1f) < 1e-3f && Enumerable.Range(0, 3).All(k => k == axis || MathF.Abs(n[k]) <= 1e-3f);
+                // the face on the upper side has its normal pointing DOWN the axis (see MoveFace)
+                if (square) faces.Add((n[axis] < 0 ? "+" : "-") + "xyz"[axis]);
+            }
+        }
+        return faces;
+    }
+
+    /// <summary>
+    /// Moves a whole volume by a world offset, IN MEMORY: its place changes, its planes and its box - which are
+    /// in its own space - do not, so this works for a volume of any shape. <see cref="Save"/> writes it.
+    /// </summary>
+    /// <returns>Null on success, otherwise why not.</returns>
+    public string? Move(string zone, Vector3 by)
+    {
+        if (!_volumes.TryGetValue(zone ?? "", out FrameObjectArea? area)) return $"no load zone named '{zone}'";
+        if (_ambiguous.Contains(zone!)) return $"more than one volume of the scene is named '{zone}' - which one is meant cannot be told";
+        if (!float.IsFinite(by.X) || !float.IsFinite(by.Y) || !float.IsFinite(by.Z)) return "the offset must be finite numbers";
+        // A volume's place in the world is its local place put through its parent (FrameObjectBase works the
+        // world transform out the same way), so the offset is taken into the parent's space before it is added.
+        // Only the parent's turn and scale are used: a frame matrix is not kept as a full 4 x 4, and inverting
+        // one as it stands fails.
+        Matrix4x4 parent = (area.Parent ?? area.Root)?.WorldTransform ?? Matrix4x4.Identity;
+        var turn = new Matrix4x4(
+            parent.M11, parent.M12, parent.M13, 0f,
+            parent.M21, parent.M22, parent.M23, 0f,
+            parent.M31, parent.M32, parent.M33, 0f,
+            0f, 0f, 0f, 1f);
+        if (!Matrix4x4.Invert(turn, out Matrix4x4 unTurn)) return $"{zone} hangs on a frame whose transform cannot be inverted";
+        Matrix4x4 local = area.LocalTransform;
+        local.Translation += Vector3.TransformNormal(by, unTurn);
+        area.LocalTransform = local;
+        _toLocal.Clear();          // its own way into its space, and that of anything hanging on it
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a scene an open editor holds has this volume exactly as this one has it - its place, its box and
+    /// its planes. It has not when the volume was changed in that editor and not saved: a write made from the
+    /// disk's copy would then be made from a state the editor is about to replace. A scene without the volume
+    /// has nothing to disagree with.
+    /// </summary>
+    public bool InStepWith(SceneDocumentAdapter document, string zone)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!_volumes.TryGetValue(zone ?? "", out FrameObjectArea? mine) || ReferenceEquals(document.Frame, Frame)) return true;
+        FrameObjectArea? theirs = document.Frame.FrameObjects.Values.OfType<FrameObjectArea>()
+            .FirstOrDefault(a => string.Equals(a.Name?.ToString(), zone, StringComparison.OrdinalIgnoreCase));
+        return theirs == null
+            || (theirs.LocalTransform == mine.LocalTransform && theirs.Bounds.Min == mine.Bounds.Min && theirs.Bounds.Max == mine.Bounds.Max
+                && (theirs.Planes ?? []).SequenceEqual(mine.Planes ?? []));
+    }
+
+    /// <summary>
+    /// Brings the same volume in a scene an open editor holds in step with this one: its place, its box and its
+    /// planes. An editor that has the archive loaded (the map editor in Whole map mode does) writes its own copy
+    /// of the scene whole on its next save, and without this that save would put the volume back where it stood.
+    /// </summary>
+    /// <returns>False when that scene has no volume of this name.</returns>
+    public bool MirrorInto(SceneDocumentAdapter document, string zone)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!_volumes.TryGetValue(zone ?? "", out FrameObjectArea? mine) || ReferenceEquals(document.Frame, Frame)) return false;
+        FrameObjectArea? theirs = document.Frame.FrameObjects.Values.OfType<FrameObjectArea>()
+            .FirstOrDefault(a => string.Equals(a.Name?.ToString(), zone, StringComparison.OrdinalIgnoreCase));
+        if (theirs == null) return false;
+        theirs.Planes = [.. mine.Planes];
+        var box = theirs.Bounds;
+        box.Min = mine.Bounds.Min;
+        box.Max = mine.Bounds.Max;
+        theirs.Bounds = box;
+        theirs.LocalTransform = mine.LocalTransform;
+        return true;
     }
 
     /// <summary>Writes the scene into the working copy of <c>city_univers.sds</c>; a Build of that archive

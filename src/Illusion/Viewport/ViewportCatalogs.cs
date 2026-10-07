@@ -125,14 +125,83 @@ internal sealed class ViewportCatalogs
         {
             Zones = AreaZones.Load(f => SdsMeshLoader.EnsureExtracted(f), Map.Areas.Select(a => a.BaseName).ToList());
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
-                                       or Formats.FileFormatException)
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
         {
             Debug.WriteLine("Zone reload error: " + ex);
             return false;
         }
+        _preview = null;
+        SelectedZoneFaces = FacesOf(SelectedZone);
         BuildZoneBoxes();
+        _host.RaiseBoxGizmoChanged();
+        ZonesChanged?.Invoke();
         return true;
+    }
+
+    /// <summary>Raised when the zones were read again from the working copy - after any write to one, by the
+    /// gizmo, the Loading zones window, an undo or the <c>zone_move_face</c> tool. For whoever shows them.</summary>
+    public event Action? ZonesChanged;
+
+    /// <summary>The zone picked - by a click on the scene with the layer up, or in the Loading zones window. It is
+    /// drawn bright and the others are dimmed, so that among boxes lying two and three deep it is plain which one
+    /// is being looked at.</summary>
+    public string? SelectedZone { get; private set; }
+
+    /// <summary>Picks a zone by name, or none (null); the boxes are redrawn.</summary>
+    public void SelectZone(string? name)
+    {
+        if (string.Equals(SelectedZone, name, StringComparison.Ordinal)) return;
+        SelectedZone = name;
+        _preview = null;
+        SelectedZoneFaces = FacesOf(name);
+        if (_host.Rnd != null) BuildZoneBoxes();
+        _host.RaiseBoxGizmoChanged();
+    }
+
+    /// <summary>The faces of the picked zone that can be pulled ("+x", "-z", ...): a zone with a corner sliced off
+    /// has a side with no face square to its axis, and that side gets no arrow.</summary>
+    public IReadOnlySet<string> SelectedZoneFaces { get; private set; } = new HashSet<string>();
+
+    private IReadOnlySet<string> FacesOf(string? zone)
+    {
+        if (zone == null) return new HashSet<string>();
+        try
+        {
+            return LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), DistrictNames).SquareFaces(zone);
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            Debug.WriteLine("Zone faces error: " + ex);
+            return new HashSet<string>();
+        }
+    }
+
+    private (Vector3 Min, Vector3 Max)? _preview;
+
+    /// <summary>The picked zone's box - the one a gizmo drag has reached while one is in progress.</summary>
+    public (Vector3 Min, Vector3 Max)? SelectedZoneBox =>
+        SelectedZone != null && Zones?.FirstOrDefault(z => z.Name == SelectedZone) is { } zone ? _preview ?? (zone.Min, zone.Max) : null;
+
+    /// <summary>Draws the picked zone as the box given instead of its own, until a null puts it back: what a
+    /// drag shows before it is let go. Nothing is written.</summary>
+    public void PreviewZone((Vector3 Min, Vector3 Max)? box)
+    {
+        _preview = box;
+        if (_host.Rnd != null) BuildZoneBoxes();
+        _host.RaiseBoxGizmoChanged();
+    }
+
+    /// <summary>The zones whose drawn box holds a world point, the smallest first: a click picks the most
+    /// particular zone there, and the next click at the same spot the next one out.</summary>
+    public IReadOnlyList<AreaZone> ZonesHolding(Vector3 point)
+    {
+        if (Zones == null) return [];
+        const float Slack = 0.3f;      // a point ON the ground of a zone whose floor is that ground
+        static float Volume(AreaZone z) => (z.Max.X - z.Min.X) * (z.Max.Y - z.Min.Y) * (z.Max.Z - z.Min.Z);
+        return [.. Zones.Where(z => point.X >= z.Min.X - Slack && point.X <= z.Max.X + Slack
+                                    && point.Y >= z.Min.Y - Slack && point.Y <= z.Max.Y + Slack
+                                    && point.Z >= z.Min.Z - Slack && point.Z <= z.Max.Z + Slack)
+            .OrderBy(Volume).ThenBy(z => z.Name, StringComparer.Ordinal)];
     }
 
     // Zone boxes for the debug overlay: world AABB of the zone + color by its (first) district.
@@ -145,11 +214,19 @@ internal sealed class ViewportCatalogs
         int count = Math.Max(1, hue.Count);
 
         var boxes = new List<(Vector3 Min, Vector3 Max, Vector4 Color)>(Zones.Count);
+        AreaZone? picked = SelectedZone == null ? null : Zones.FirstOrDefault(z => z.Name == SelectedZone);
         foreach (AreaZone z in Zones)
         {
+            if (ReferenceEquals(z, picked)) continue;
             string? d = z.Districts.Count > 0 ? z.Districts[0] : null;
             float h = d != null && hue.TryGetValue(d, out int i) ? (float)i / count : 0.5f;
-            boxes.Add((z.Min, z.Max, HueToColor(h, 0.16f)));
+            boxes.Add((z.Min, z.Max, HueToColor(h, picked == null ? 0.16f : 0.05f)));
+        }
+        // last, so it is laid over the rest (the pass has no depth): the accent the editor selects with
+        if (picked != null)
+        {
+            (Vector3 min, Vector3 max) = _preview ?? (picked.Min, picked.Max);
+            boxes.Add((min, max, new Vector4(0.91f, 0.53f, 0.24f, 0.45f)));
         }
         _host.Rnd!.SetZoneBoxes(boxes);
     }

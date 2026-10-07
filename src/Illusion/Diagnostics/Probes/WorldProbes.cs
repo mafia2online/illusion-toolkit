@@ -342,6 +342,67 @@ internal static class WorldProbes
                     Check("the changed scene reads back as it was written", differ == 0 && new FileInfo(trial).Length == original.Length,
                         $"{differ} zone(s) differ, {new FileInfo(trial).Length} bytes");
                     File.Delete(trial);
+
+                    // What the box gizmo does: a zone moved whole goes by its place, a pulled face by its plane,
+                    // and a side sliced off by a slanted plane offers no face to pull.
+                    const string Slanted = "AREA341_GREENFIELD_KINGSTONE";
+                    FrameObjectArea cut = zones.Volumes[Slanted];
+                    IReadOnlySet<string> faces = zones.SquareFaces(Slanted);
+                    Check("a zone with a corner sliced off offers the faces square to an axis, and not the sliced side",
+                        faces.Contains("+y") && faces.Contains("+z") && faces.Contains("-z") && faces.Count < 6
+                        && new[] { "+x", "-x", "+y", "-y", "+z", "-z" }.All(f => faces.Contains(f) == (zones.MoveFace(Slanted, f, FaceAt(cut, f), out _) == null)),
+                        string.Join(" ", faces.Order()));
+                    Check("the zone moved under it has all six", zones.SquareFaces(South).Count == 6, string.Join(" ", zones.SquareFaces(South).Order()));
+
+                    (Vector3 cutMin, Vector3 cutMax) = LoadZones.WorldBox(cut);
+                    Vector4[] cutPlanes = [.. cut.Planes];
+                    Vector3 inside = (cutMin + cutMax) * 0.5f;
+                    var by = new Vector3(450f, -7.25f, 3f);          // further than the zone is wide: it leaves where it stood
+                    bool held = LoadZones.Contains(cut, inside, out _) && !LoadZones.Contains(cut, inside + by, out _);
+                    string? unmoved = zones.Move(Slanted, by);
+                    (Vector3 movedMin, Vector3 movedMax) = LoadZones.WorldBox(cut);
+                    Check("a zone moves whole: its box goes by the offset and its planes are not touched",
+                        unmoved == null && Vector3.Distance(movedMin, cutMin + by) < 0.01f && Vector3.Distance(movedMax, cutMax + by) < 0.01f
+                        && cut.Planes.SequenceEqual(cutPlanes), unmoved ?? $"{movedMin - cutMin} / {movedMax - cutMax}");
+                    Check("…and what it held, it holds where it went, and no longer where it was",
+                        held && LoadZones.Contains(cut, inside + by, out _) && !LoadZones.Contains(cut, inside, out _));
+                    Check("an offset that is not a number is refused", zones.Move(Slanted, new Vector3(float.NaN, 0, 0)) != null);
+                    File.WriteAllBytes(trial, zones.Frame.WriteToStream());
+                    FrameObjectArea? reread = new FrameResource(trial).FrameObjects.Values.OfType<FrameObjectArea>().FirstOrDefault(a => a.Name.ToString() == Slanted);
+                    Check("the moved zone reads back where it was put", reread != null && Vector3.Distance(LoadZones.WorldBox(reread).Min, movedMin) < 0.01f
+                        && Vector3.Distance(LoadZones.WorldBox(reread).Max, movedMax) < 0.01f);
+                    File.Delete(trial);
+                    Check("…and moves back", zones.Move(Slanted, -by) == null && Vector3.Distance(LoadZones.WorldBox(cut).Min, cutMin) < 0.01f);
+
+                    Check("no two volumes of the scene share a name", zones.AmbiguousNames.Count == 0, string.Join(", ", zones.AmbiguousNames.Take(8)));
+
+                    // An editor that holds city_univers (the map editor in Whole map mode) has a scene of its own
+                    // and writes it whole on its next save. A zone written from the disk's copy is carried into
+                    // that scene, or the save would put the zone back - and a zone the editor changed and has
+                    // not saved is not written over at all.
+                    {
+                        LoadZones disk = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), districts, which);
+                        var editor = new Assets.Adapters.SceneDocumentAdapter(new FrameResource(file), zones.Archive);
+                        Check("a scene an editor holds starts in step with the disk", disk.InStepWith(editor, South) && disk.InStepWith(editor, Slanted));
+                        (Vector3 lo0, Vector3 hi0) = LoadZones.WorldBox(disk.Volumes[South]);
+                        bool faceMoved = disk.MoveFace(South, "+y", hi0.Y + 37.5f, out _) == null;
+                        bool carried = disk.Move(Slanted, new Vector3(5f, -3f, 0f)) == null;
+                        Check("a zone changed on disk is out of step with the editor's copy", faceMoved && carried
+                            && !disk.InStepWith(editor, South) && !disk.InStepWith(editor, Slanted));
+                        Check("…and is carried into it", disk.MirrorInto(editor, South) && disk.MirrorInto(editor, Slanted)
+                            && disk.InStepWith(editor, South) && disk.InStepWith(editor, Slanted));
+                        Check("…so that the editor's own save writes the scene the zone write wrote",
+                            editor.Frame.WriteToStream().AsSpan().SequenceEqual(disk.Frame.WriteToStream()));
+                        Check("a zone the scene does not have is nothing to disagree about", disk.InStepWith(editor, "no such zone") && !disk.MirrorInto(editor, "no such zone"));
+                    }
+
+                    static float FaceAt(FrameObjectArea zone, string face)
+                    {
+                        (Vector3 lo, Vector3 hi) = LoadZones.WorldBox(zone);
+                        Vector3 side = face[0] == '+' ? hi : lo;
+                        return face[1] == 'x' ? side.X : face[1] == 'y' ? side.Y : side.Z;
+                    }
+
                     Plan(zones, "greenfield", -1760, 1120, -1380, 1600, 20, 5);
                 }
                 return;

@@ -23,6 +23,7 @@ public partial class ViewportToolShelf : UserControl
 {
     private D3DImageHost _viewport = null!;
     private TransformGizmo? _gizmo;
+    private BoxGizmo? _zoneGizmo;
     private ViewportGizmo? _navigation;
 
     public ViewportToolShelf() => InitializeComponent();
@@ -68,6 +69,18 @@ public partial class ViewportToolShelf : UserControl
             _gizmo = new TransformGizmo();
             host.Children.Insert(host.Children.IndexOf(viewport) + 1, _gizmo);
             _gizmo.Attach(viewport);
+
+            // The picked loading zone's own gizmo, on the same two tools: Move moves the zone, Scale pulls one
+            // of its faces. Only one of the two gizmos ever has something to stand on - a click with the
+            // Loading zones layer up picks a zone and no object.
+            _zoneGizmo = new BoxGizmo();
+            host.Children.Insert(host.Children.IndexOf(_gizmo) + 1, _zoneGizmo);
+            _zoneGizmo.Attach(viewport);
+            _zoneGizmo.MouseWheel += (_, e) =>
+            {
+                if (!_zoneGizmo.IsDragging) viewport.Zoom(e.Delta / (float)Mouse.MouseWheelDeltaForOneLine);
+                e.Handled = true;
+            };
 
             // The overlay sits on top of the render surface, so a wheel notch over a handle (or anywhere at
             // all while a modal transform holds the pointer) never reaches the viewport on its own. Hand it
@@ -131,6 +144,14 @@ public partial class ViewportToolShelf : UserControl
             return true;
         }
 
+        // A zone being dragged owns the keyboard as a modal transform does: Esc drops the drag, and nothing
+        // else is let through - an Undo taken in the middle of it would change the zone under the drag.
+        if (_zoneGizmo is { IsDragging: true })
+        {
+            if (key == HotkeyMap.Current[HotkeyId.ModalCancel].Key) _zoneGizmo.CancelDrag();
+            return true;
+        }
+
         // Everything below either starts or toggles something, so a held-down key must not repeat it.
         if (isRepeat) return false;
         if (_gizmo.HandleModalKey(key, modifiers)) return true;
@@ -179,6 +200,7 @@ public partial class ViewportToolShelf : UserControl
     {
         _viewport.GizmoMode = mode;
         _gizmo?.InvalidateVisual();
+        _zoneGizmo?.InvalidateVisual();
     }
 
     private void BlenderTool_Click(object sender, RoutedEventArgs e) => BlenderRequested?.Invoke();

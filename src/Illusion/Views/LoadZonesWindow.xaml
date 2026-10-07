@@ -97,7 +97,7 @@
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="450"
                            TextWrapping="Wrap" VerticalAlignment="Center"
-                           Text="A district streams in where a zone naming two districts holds the player; a zone naming one does not load it by itself. A moved face is written to city_univers at once (no Undo - move it back), Build packs it, and every player of a server needs that archive." />
+                           Text="A district streams in where a zone naming two districts holds the player; a zone naming one does not load it by itself. A moved face is written to city_univers at once (Undo in the editor takes it back), Build packs it, and every player of a server needs that archive." />
                 <Button DockPanel.Dock="Right" Style="{StaticResource NeutralButton}" MinWidth="80" Height="32"
                         Content="Close" Click="Close_Click" />
             </DockPanel>

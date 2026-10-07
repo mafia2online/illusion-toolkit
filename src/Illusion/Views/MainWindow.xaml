@@ -165,7 +165,7 @@
                                                               Opacity="0.5" />
                                         </Border.Effect>
                                         <StackPanel x:Name="LayerRows">
-                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district">
+                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district. With this on a click picks the zone that spot is in (again for the next one there); Move then moves it and Scale pulls its faces">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
