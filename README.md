@@ -268,7 +268,15 @@ over the same job the matching tool runs, so a result does not depend on who ask
   camera's, or one typed in), says which districts a player who appears there gets, and moves one
   face of a zone. A district streams in where a zone naming two districts holds the player; a zone
   naming one does not load it by itself. A moved face is written at once, redrawn in the Loading
-  zones layer and queued for Build.
+  zones layer, queued for Build, and is one step of the editor's Undo.
+  The zones are also edited in the viewport, with no window: with the **Loading zones** layer on, a
+  click picks the zone that spot is in (the same spot again takes the next one there) and the tool
+  shelf works on it - **Move** puts three arrows at the zone's centre and moves it whole, **Scale**
+  puts an arrow at the centre of each face and pulls that face alone. A side sliced off by a slanted
+  plane has no arrow. Letting go writes `city_univers` and queues it for Build; the right button or
+  Esc drops a drag, and Undo / Redo take back exactly what the drag changed. With **Whole map** on the
+  editor holds `city_univers` itself; a zone write is carried into that scene too, so the editor's own
+  save does not put the zone back.
 - **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
   line and group names), with every string it would change listed before anything is written and a
   backup kept beside the file.
