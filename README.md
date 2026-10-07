@@ -41,13 +41,6 @@ The map editor currently supports visualizing district streaming zones, collisio
 
 ## Download
 
-> **This is the `raighen` fork's release line.** It carries work that is still under review in the
-> original project (pull requests #3 to #9 of `mafia2online/illusion-toolkit`) and work that has not
-> been proposed there yet. Its builds are on
-> [this fork's Releases](https://github.com/raighen/illusion-toolkit/releases). The built-in updater
-> checks the original project's releases: taking an official version it offers replaces the fork's
-> build with it.
-
 Grab the latest archive from [Releases](https://github.com/mafia2online/illusion-toolkit/releases), unpack
 it anywhere and run `Illusion.exe`. It carries no runtime of its own, so the machine needs the
 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) - Windows offers
