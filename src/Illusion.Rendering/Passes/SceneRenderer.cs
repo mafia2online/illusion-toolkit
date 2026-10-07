@@ -505,8 +505,21 @@ public sealed unsafe class SceneRenderer : IDisposable
         DrawnInstances = 0;
 
         // Opaque pass: everything not ghosted, then its instanced counterpart.
-        drawn += DrawMeshPass(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false);
+        drawn += DrawMeshPass(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false, PartFilter.Solid);
         drawn += RenderInstanced(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false);
+
+        // Blended pass: the parts whose material the game alpha-blends (glass), over everything opaque —
+        // depth-tested so walls still hide them, never written so one pane does not hide the next. Not sorted:
+        // panes seen through panes may composite in the wrong order, which reads as slightly darker glass.
+        if (AnyBlended())
+        {
+            ctx.OMSetBlendState(_blendGhost, (float*)null, 0xFFFFFFFF);
+            ctx.OMSetDepthStencilState(_depthReadOnly, 0);
+            _shader.Bind(ctx);
+            DrawMeshPass(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false, PartFilter.Blended);
+            ctx.OMSetBlendState((ID3D11BlendState*)null, (float*)null, 0xFFFFFFFF);
+            ctx.OMSetDepthStencilState(_depthState, 0);
+        }
 
         // Ghost pass (bridge edit mode): meshes NOT open in Blender — alpha-blended, depth-read-only,
         // shading selector offset by +4 (the shader's ghost marker).
@@ -519,7 +532,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             ctx.OMSetBlendState(_blendGhost, (float*)null, 0xFFFFFFFF);
             ctx.OMSetDepthStencilState(_depthReadOnly, 0);
             _shader.Bind(ctx);
-            drawn += DrawMeshPass(ctx, viewProj, frustum, lightDir, ghostColor, lighting, ghostPass: true);
+            drawn += DrawMeshPass(ctx, viewProj, frustum, lightDir, ghostColor, lighting, ghostPass: true, PartFilter.All);
             drawn += RenderInstanced(ctx, viewProj, frustum, lightDir, ghostColor, lighting, ghostPass: true);
             ctx.OMSetBlendState((ID3D11BlendState*)null, (float*)null, 0xFFFFFFFF);
             ctx.OMSetDepthStencilState(_depthState, 0);
@@ -632,9 +645,36 @@ public sealed unsafe class SceneRenderer : IDisposable
         return framedAt * framedAt / MathF.Max(1e-3f, Camera.Far * Camera.Near);
     }
 
+    // Which parts of a mesh a pass draws: the alpha-blended ones go in a pass of their own, after the rest.
+    private enum PartFilter
+    {
+        All,
+        Solid,
+        Blended,
+    }
+
+    private bool AnyBlended()
+    {
+        foreach (GpuMesh mesh in _meshes)
+        {
+            if (!mesh.Visible || mesh.Instanced || mesh.Ghost) continue;
+            foreach (GpuPart part in mesh.Parts)
+                if (part.Blended) return true;
+        }
+        return false;
+    }
+
+    private static bool HasPart(GpuMesh mesh, PartFilter filter)
+    {
+        if (filter == PartFilter.All) return true;
+        foreach (GpuPart part in mesh.Parts)
+            if (part.Blended == (filter == PartFilter.Blended)) return true;
+        return false;
+    }
+
     // One pass over the regular (non-instanced) meshes matching the ghost filter.
     private int DrawMeshPass(ComPtr<ID3D11DeviceContext> ctx, Matrix4x4 viewProj, in Frustum frustum,
-        Vector3 lightDir, Vector4 baseColor, in LightingConstants lighting, bool ghostPass)
+        Vector3 lightDir, Vector4 baseColor, in LightingConstants lighting, bool ghostPass, PartFilter filter)
     {
         uint stride = (uint)sizeof(MeshVertex);
         uint offset = 0;
@@ -650,6 +690,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             if (!mesh.Visible || mesh.Instanced) continue;             // instanced ones — separate pass
             if (mesh.Ghost != ghostPass) continue;
             if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // frustum culling
+            if (!HasPart(mesh, filter)) continue;
             drawn++;
 
             var consts = new FrameConstants
@@ -697,6 +738,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             foreach (GpuPart part in mesh.Parts)
             {
+                if (filter != PartFilter.All && part.Blended != (filter == PartFilter.Blended)) continue;
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
                 srvs[2] = part.SpecSrv.Handle;     // t2 specular level
@@ -707,13 +749,15 @@ public sealed unsafe class SceneRenderer : IDisposable
                 }
                 // Almost every part is untinted, so this rewrite costs nothing on a district: the buffer is
                 // touched again only where a material paints itself (a car body) and once more to put white
-                // back for the parts after it.
-                if (part.Tint != boundTint)
+                // back for the parts after it. The fourth component is the shader's alpha mode (see
+                // MafiaLitPs): 2 for a part this pass draws blended.
+                Vector4 tint = filter == PartFilter.Blended ? part.Tint with { W = 2f } : part.Tint;
+                if (tint != boundTint)
                 {
-                    consts.Tint = part.Tint;
+                    consts.Tint = tint;
                     if (mesh.IsSkinned) _skinnedShader.UpdateConstants(ctx, ref consts);
                     else _shader.UpdateConstants(ctx, ref consts);
-                    boundTint = part.Tint;
+                    boundTint = tint;
                 }
                 ctx.DrawIndexed(part.IndexCount, part.StartIndex, 0);
                 DrawCalls++;

@@ -60,6 +60,10 @@ public interface IEditorSession
     /// complete nothing is packed, and <see cref="BuildOutcome.NotSaved"/> says what stood in the way.</summary>
     BuildOutcome Build();
 
+    /// <summary>Saves, then carries the loaded district's edits into its winter archive's working copy and
+    /// queues that archive for a Build. Null on success.</summary>
+    string? MirrorToWinter(out SeasonMirrorOutcome? outcome);
+
     CameraInfo Camera();
 
     /// <summary>Looks at <paramref name="target"/> from the direction <paramref name="fromAxis"/> points
@@ -86,6 +90,20 @@ public interface IEditorSession
     /// <summary>Copies an actor out of another archive's pack (<paramref name="sourceActFile"/>) into the
     /// loaded area, under <paramref name="newName"/>, at a world position. Undoable. Null on success.</summary>
     string? ImportActor(string sourceActFile, string actorName, string newName, float[] position);
+
+    /// <summary>
+    /// Copies an object out of another archive into the loaded area — its frames, geometry, textures and
+    /// collision descriptions — under <paramref name="newName"/>, at a world position. <paramref name="name"/>
+    /// is an actor of the source archive (then the actor comes too, with the object it places and its prefab
+    /// entry) or, failing that, a frame object of its scene (then it arrives as plain scenery). Undoable.
+    /// Null on success.
+    /// </summary>
+    /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
+    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's rotation; null keeps
+    /// the rotation the original has.</param>
+    /// <param name="collision">For scenery: auto (its own hulls, else its convex hull), convex, box, mesh or none.</param>
+    string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
+        string? collision, int occurrence, out ObjectImportOutcome? outcome);
 
     /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
     string? DuplicateSelected(out IReadOnlyList<string> copies);

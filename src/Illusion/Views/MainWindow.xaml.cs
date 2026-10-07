@@ -115,6 +115,20 @@ public partial class MainWindow : Window
         // clicked object's archive when it hit one). Built in code — the target depends on the hit.
         Viewport.ViewportContextMenuRequested += ShowViewportContextMenu;
 
+        // Props: tiles of the Props tab are dragged onto the viewport (or double-clicked) to bring a stock
+        // object into the loaded district.
+        PropsPanel.PlaceRequested += PlaceProp;
+        Viewport.AllowDrop = true;
+        Viewport.DragOver += (_, e) =>
+        {
+            e.Effects = e.Data.GetDataPresent(PropsTabView.DragFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+        };
+        Viewport.Drop += (_, e) =>
+        {
+            if (e.Data.GetData(PropsTabView.DragFormat) is Assets.Library.PropEntry entry) PlaceProp(entry, e.GetPosition(Viewport));
+        };
+
         // Blender bridge notices arrive on protocol/background threads; NoticeBanner.Post marshals itself.
         // These used to be modal dialogs — the only notice channel the app had — which meant a dialog to
         // dismiss for every push outcome, and would have meant one per refused gizmo drag once collision
@@ -512,6 +526,100 @@ public partial class MainWindow : Window
 
         menu.Items.Add(restore);
         menu.IsOpen = true;
+    }
+
+    // The Props button: the left column folds away to nothing and comes back at the width it had.
+    private double _propsWidth = 330;
+
+    private void PropsToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        bool show = PropsToggle.IsChecked == true;
+        if (!show && PropsColumn.ActualWidth > 40) _propsWidth = PropsColumn.ActualWidth;
+        PropsColumn.Width = new GridLength(show ? _propsWidth : 0);
+        PropsPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        PropsSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // A prop from the Props tab: carried into the loaded district (the season on screen), standing where the
+    // drop landed on the scene — or, for a double-click, on whatever is in the middle of the view. Named after
+    // what it is, made unique in the archive.
+    private void PlaceProp(Assets.Library.PropEntry entry, Point? at)
+    {
+        if (WholeMapCheck.IsChecked == true || AreaCombo.SelectedItem is not MapArea area)
+        {
+            Viewport.RaiseNotice("Load one district first — a prop needs one archive to go into", isError: true);
+            return;
+        }
+        FileInfo destination = area.FileFor(WinterToggle.IsChecked == true);
+        Point where = at ?? new Point(Viewport.ActualWidth / 2, Viewport.ActualHeight * 0.6);
+        System.Numerics.Vector3 position = Viewport.PickWorldPoint(where);
+
+        // A card that comes from the district itself cannot be carried into it — it is already there. A copy
+        // of it, made in place and moved to where the card was dropped, is what the drop asked for.
+        var source = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+        if (string.Equals(source.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            DuplicatePropInPlace(entry, position);
+            return;
+        }
+        string stem = new string(entry.Label.Select(c => char.IsAsciiLetterOrDigit(c) || c == '_' ? c : '_').ToArray());
+        string name = Viewport.ObjectImporting.FreeName(destination, stem.Length > 0 ? stem : "prop");
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            if (Viewport.ObjectImporting.Import(destination, entry.Archive, entry.Name, name, position, null,
+                    out _, PropsPanel.Collision) is { } refused)
+            {
+                Viewport.RaiseNotice($"{entry.Label} not placed — {refused}", isError: true);
+            }
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    // The in-district half of PlaceProp: the object (the actor, for one an actor places) is duplicated the way the
+    // Duplicate command does it and the copy is moved onto the drop point through the gizmo's own path, so the
+    // copy and the move are ordinary undoable edits.
+    private void DuplicatePropInPlace(Assets.Library.PropEntry entry, System.Numerics.Vector3 position)
+    {
+        SceneNode? original = FindNode(Viewport.Roots, n => n.Name == entry.Name
+            && (n.Source is Assets.Adapters.ActorNodeAdapter || (entry.Kind == "Scenery" && n.Source is Domain.IFrameNode)));
+        if (original == null)
+        {
+            Viewport.RaiseNotice($"{entry.Label} not placed — it is no longer in the loaded district", isError: true);
+            return;
+        }
+        Viewport.Select(original);
+        if (!Viewport.CanDuplicateSelection())
+        {
+            Viewport.RaiseNotice($"{entry.Label} cannot be duplicated", isError: true);
+            return;
+        }
+        Viewport.DuplicateSelected();
+        if (Viewport.SelectedNodes is not [{ Source: Domain.IFrameNode copy }] || ReferenceEquals(Viewport.SelectedNodes[0], original))
+        {
+            return; // the duplicate refused and said why in a notice of its own
+        }
+        System.Numerics.Vector3 delta = position - copy.WorldTransform.Translation;
+        Viewport.GizmoBeginDrag(Rendering.Gizmos.GizmoMode.Move);
+        Viewport.GizmoApplyWorldDelta(System.Numerics.Matrix4x4.CreateTranslation(delta));
+        Viewport.GizmoEndDrag();
+    }
+
+    private static SceneNode? FindNode(IEnumerable<SceneNode> roots, Func<SceneNode, bool> match)
+    {
+        var stack = new Stack<SceneNode>(roots);
+        while (stack.Count > 0)
+        {
+            SceneNode node = stack.Pop();
+            if (match(node)) return node;
+            foreach (SceneNode child in node.Children) stack.Push(child);
+        }
+        return null;
     }
 
     // Pick a prop from the loaded crash table and drop a copy where the right-click landed.

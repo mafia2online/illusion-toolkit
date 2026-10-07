@@ -1033,7 +1033,7 @@ public static class BridgeMeshApplier
             // The hash rides with the part, as it does on a mesh loaded from disk: it is what a later
             // material edit (or a texture rewritten by a push) finds this part by to re-resolve it.
             parts[slot] = new MeshPart(newMats[slot].StartIndex, newMats[slot].NumFaces * 3,
-                tex.Diffuse, tex.Normal, tex.Specular, newMats[slot].MaterialHash, tex.Tint);
+                tex.Diffuse, tex.Normal, tex.Specular, newMats[slot].MaterialHash, tex.Tint, tex.Blended);
         }
         result.NewMesh = new MeshData
         {

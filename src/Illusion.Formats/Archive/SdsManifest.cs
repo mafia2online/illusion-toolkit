@@ -161,7 +161,11 @@ public sealed class SdsManifest
         }
         if (dropped.Count == 0) return false;
         foreach (System.Xml.XmlNode entry in dropped) entry.ParentNode?.RemoveChild(entry);
-        document.Save(path);
+        // Through a temp file, as AddEntry does: this now runs on every save of a scene with carried textures,
+        // and a manifest cut short by a crash is an archive that can be neither packed nor re-extracted.
+        string temp = path + ".tmp";
+        document.Save(temp);
+        File.Move(temp, path, overwrite: true);
 
         _entries.RemoveAll(e => string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase));
         return true;

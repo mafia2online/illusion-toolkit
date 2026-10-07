@@ -9,6 +9,7 @@ using Illusion.Bridge.Payload;
 using Illusion.Domain;
 using Illusion.Formats;
 using Illusion.Formats.Archive;
+using Illusion.Formats.Materials;
 
 namespace Illusion.Diagnostics.Probes;
 
@@ -302,6 +303,51 @@ internal static class BridgeMaterialProbes
             Check("a plain material that gains a normal map is replaced under the same hash",
                 upgraded && gained.Hash == slot.Hash && MafiaMaterials.GetMaterialTextures(createdHash).Normal != null
                 && MafiaMaterials.Collection?.FindByHash(createdHash)?.ShaderID == 5159568776351604322, reason ?? gained.Hash);
+
+            // ── Alpha ──
+            // DXT5 on its own first: the alpha block has to give back the ramp it was handed.
+            byte[] ramp = Gradient(w, h, 0);
+            for (int i = 0; i < w * h; i++) ramp[i * 4 + 3] = (byte)(i % w * 255 / (w - 1));
+            byte[] dxt5 = DdsEncoder.EncodeDxt5(ramp, w, h);
+            Check("a texture with alpha is DXT5: twice the block bytes under the same header",
+                BitConverter.ToUInt32(dxt5, 84) == 0x35545844 && dxt5.Length == 128 + (dds.Length - 128) * 2
+                && BitConverter.ToUInt32(dxt5, 8) == 0x21007 && BitConverter.ToInt32(dxt5, 28) == 7,
+                $"{dxt5.Length} bytes");
+            double alphaError = MeanAlphaError(ramp, dxt5, w, h);
+            Check("its alpha decodes close to the source", alphaError < 3.0, $"mean abs error {alphaError:F2}/255");
+            Check("and its colour is the DXT1 colour", MeanError(ramp, DecodeTopLevel(dxt5, w, h, 16)) < 4.0);
+
+            // The flags are the whole difference between an opaque, a cut-out and a translucent material on
+            // these shaders; the values are the ones most stock materials of each kind carry.
+            const MaterialFlags stockOpaque = (MaterialFlags)0x1E01000;
+            Check("the three alpha modes land on the flag words stock materials carry",
+                (uint)AuthoredAlphaFlags.Apply(stockOpaque, AuthoredAlpha.Cutout) == 0x1E01002
+                && (uint)AuthoredAlphaFlags.Apply(stockOpaque, AuthoredAlpha.Blend) == 0x1E00010
+                && AuthoredAlphaFlags.Apply(AuthoredAlphaFlags.Apply(stockOpaque, AuthoredAlpha.Blend), AuthoredAlpha.Opaque) == stockOpaque
+                && AuthoredAlphaFlags.Read((MaterialFlags)0x1E01002) == AuthoredAlpha.Cutout
+                && AuthoredAlphaFlags.Read((MaterialFlags)0x1E00010) == AuthoredAlpha.Blend
+                && AuthoredAlphaFlags.Read(stockOpaque) == AuthoredAlpha.Opaque);
+
+            foreach ((string? mode, uint managed, uint fourcc, string what) in new[]
+                     {
+                         ("clip", 0x1002u, 0x35545844u, "a cut-out keeps its alpha in DXT5, tests it and still casts a shadow"),
+                         ("blend", 0x0010u, 0x35545844u, "a translucent one keeps its alpha in DXT5 and stops writing depth"),
+                         ((string?)null, 0x1000u, 0x31545844u, "sent opaque again it goes back to DXT1 and the plain flags"),
+                     })
+            {
+                var container = new ExchangeContainer();
+                MeshMaterialInfo sent = NewSlot(container, ramp, w, h);
+                sent.Hash = slot.Hash;
+                sent.AlphaMode = mode;
+                bool ok = new AuthoredMaterialResolver(container, catalogHost).TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { sent } }, document, out reason);
+                string? file = MafiaMaterials.GetMaterialTextures(createdHash).Diffuse;
+                uint flags = (uint)(catalog.GetFlags(createdHash) ?? 0);
+                byte[] written = ok && file != null ? File.ReadAllBytes(Path.Combine(extracted, file)) : [];
+                Check("the same material: " + what,
+                    ok && written.Length > 128 && BitConverter.ToUInt32(written, 84) == fourcc && (flags & 0x1012) == managed,
+                    reason ?? $"{file}, flags 0x{flags:X}");
+            }
 
             // ════ Review of #4 ════
 
@@ -772,14 +818,15 @@ internal static class BridgeMaterialProbes
         }
     }
 
-    private static byte[] DecodeTopLevel(byte[] dds, int w, int h)
+    // blockSize 16 reads the colour half of DXT5 blocks, which is the DXT1 block after eight bytes of alpha.
+    private static byte[] DecodeTopLevel(byte[] dds, int w, int h, int blockSize = 8)
     {
         var rgba = new byte[w * h * 4];
-        int offset = 128;
+        int offset = 128 + blockSize - 8;
         Span<int> palette = stackalloc int[12];
         for (int by = 0; by < h / 4; by++)
         {
-            for (int bx = 0; bx < w / 4; bx++, offset += 8)
+            for (int bx = 0; bx < w / 4; bx++, offset += blockSize)
             {
                 ushort c0 = BitConverter.ToUInt16(dds, offset), c1 = BitConverter.ToUInt16(dds, offset + 2);
                 uint indices = BitConverter.ToUInt32(dds, offset + 4);
@@ -802,6 +849,35 @@ internal static class BridgeMaterialProbes
             }
         }
         return rgba;
+    }
+
+    // Mean absolute error of the top level's alpha against the source, decoding the DXT5 alpha blocks.
+    private static double MeanAlphaError(byte[] rgba, byte[] dds, int w, int h)
+    {
+        long sum = 0;
+        int offset = 128;
+        Span<int> palette = stackalloc int[8];
+        for (int by = 0; by < h / 4; by++)
+        {
+            for (int bx = 0; bx < w / 4; bx++, offset += 16)
+            {
+                int a0 = dds[offset], a1 = dds[offset + 1];
+                palette[0] = a0;
+                palette[1] = a1;
+                for (int k = 1; k <= 6; k++)
+                {
+                    palette[k + 1] = a0 > a1 ? ((7 - k) * a0 + k * a1) / 7 : k <= 4 ? ((5 - k) * a0 + k * a1) / 5 : k == 5 ? 0 : 255;
+                }
+                ulong indices = 0;
+                for (int b = 0; b < 6; b++) indices |= (ulong)dds[offset + 2 + b] << (b * 8);
+                for (int i = 0; i < 16; i++)
+                {
+                    int value = palette[(int)((indices >> (i * 3)) & 7)];
+                    sum += Math.Abs(value - rgba[((by * 4 + (i >> 2)) * w + bx * 4 + (i & 3)) * 4 + 3]);
+                }
+            }
+        }
+        return (double)sum / (w * h);
     }
 
     private static void Expand(ushort c, Span<int> rgb)

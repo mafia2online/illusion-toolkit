@@ -168,7 +168,9 @@ public class FrameObjectBase : FrameEntry
 
     public FrameObjectBase(FrameObjectBase other) : base(other)
     {
-        name = new HashName(other.name.String);
+        // Hash and string both: a frame can be named by hash alone — a weapon's parts carry a slot id and an
+        // empty string — and a name rebuilt from the string would come out as zero.
+        name = new HashName(other.name);
         secondaryFlags = other.secondaryFlags;
         localTransform = other.localTransform;
         worldTransform = other.worldTransform;

@@ -311,16 +311,30 @@ public sealed class ActorsFile
     /// that does.
     ///
     /// <para>
-    /// Only an actor that is whole in its record and its row can travel: one whose linked frame is not an
+    /// An actor that is whole in its record and its row travels as it is: one whose linked frame is not an
     /// object of its own archive's scene. That is what a light or a sound is — the entity makes that frame
     /// itself, under the name the record gives — and it is why the copy is linked to a frame named after
     /// itself rather than to the original's. An actor that places a scene object would arrive pointing at an
-    /// object this archive does not have, and is refused.
+    /// object this archive does not have, and is refused — unless the caller has carried that object across
+    /// first and says where it is (the overload taking an <see cref="ActorPlacedFrame"/>).
     /// </para>
     /// </summary>
     /// <param name="from">The pack <paramref name="actor"/> belongs to. Both packs must be stored the same way
     /// (compressed or not): the record's tail and the row's blob are carried as bytes.</param>
-    public ActorEntry? Import(ActorsFile from, ActorEntry actor, string name, Vector3 position, out string? skipReason)
+    public ActorEntry? Import(ActorsFile from, ActorEntry actor, string name, Vector3 position, out string? skipReason) =>
+        Import(from, actor, name, position, rotation: null, placed: null, out skipReason);
+
+    /// <summary>
+    /// The same, for an actor that PLACES an object — a door, a prop, a breakable — once that object has been
+    /// copied into this archive's scene. The copy is linked to it by its own name and given a scene reference
+    /// of its own, exactly as <see cref="Duplicate(ActorEntry, ActorPlacedFrame?, out string?)"/> does for a
+    /// copy made inside one archive.
+    /// </summary>
+    /// <param name="rotation">Which way the copy faces, or null to face the way the original does.</param>
+    /// <param name="placed">The object's copy in this archive's scene: its name, which the link hashes, and
+    /// its position in the frame resource's object list. Null for an actor that places nothing.</param>
+    public ActorEntry? Import(ActorsFile from, ActorEntry actor, string name, Vector3 position,
+        Quaternion? rotation, ActorPlacedFrame? placed, out string? skipReason)
     {
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(actor);
@@ -342,9 +356,17 @@ public sealed class ActorsFile
             skipReason = "the two packs are stored differently (version or compression), so a record of one is not a record of the other";
             return null;
         }
-        if (actor.FrameHash != 0 && from.SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+        ActorSceneReference? sourceReference = actor.FrameHash == 0
+            ? null
+            : from.SceneReferences.FirstOrDefault(r => r.FrameHash == actor.FrameHash);
+        if (sourceReference != null && placed == null)
         {
             skipReason = "it places an object of its own archive's scene, which this archive does not have";
+            return null;
+        }
+        if (sourceReference == null && placed != null)
+        {
+            skipReason = "it places no object in its own archive, so there is nothing to link the copied object to";
             return null;
         }
         if (string.IsNullOrEmpty(name) || ActorList.Any(a => a.EntityName == name))
@@ -376,6 +398,26 @@ public sealed class ActorsFile
         }
 
         ulong hash = Hashing.Fnv64.Hash(name);
+
+        // What the copy is linked to. An actor that makes its own frame is linked to a frame named after
+        // itself; one that places an object is linked to that object's copy, by the copy's name, through a
+        // reference row of its own. The row's name string is whatever this pack's rows already carry — the
+        // shipped packs give every reference of an archive the same one, so it names nothing and only the
+        // hash resolves.
+        string linkedFrame = name;
+        ulong frameHash = hash;
+        if (placed is { } target)
+        {
+            linkedFrame = target.Name;
+            frameHash = Hashing.Fnv64.Hash(target.Name);
+            if (ActorList.Any(a => a.FrameHash == frameHash) || SceneReferences.Any(r => r.FrameHash == frameHash))
+            {
+                skipReason = $"an actor of this pack already places an object named '{target.Name}'";
+                return null;
+            }
+        }
+
+        Quaternion facing = rotation ?? actor.Rotation;
         var item = new Native.Model.ActorItemW
         {
             Typed = source.Typed,
@@ -385,14 +427,14 @@ public sealed class ActorsFile
             Name1 = source.Name1,
             SceneSector = "",
             LinkedDefinition = source.LinkedDefinition,
-            LinkedFrame = name,
+            LinkedFrame = linkedFrame,
             EntityHash = hash,
-            FrameHash = hash,
+            FrameHash = frameHash,
             Position = position,
-            RotationX = source.RotationX,
-            RotationY = source.RotationY,
-            RotationZ = source.RotationZ,
-            RotationW = source.RotationW,
+            RotationX = rotation?.X ?? source.RotationX,
+            RotationY = rotation?.Y ?? source.RotationY,
+            RotationZ = rotation?.Z ?? source.RotationZ,
+            RotationW = rotation?.W ?? source.RotationW,
             Scale = source.Scale,
             Flags = source.Flags,
             InitPropId = propId,
@@ -408,15 +450,27 @@ public sealed class ActorsFile
             Name1 = actor.Name1,
             SceneSector = "",
             LinkedDefinition = actor.LinkedDefinition,
-            LinkedFrame = name,
+            LinkedFrame = linkedFrame,
             EntityHash = hash,
-            FrameHash = hash,
+            FrameHash = frameHash,
             Position = position,
-            Rotation = actor.Rotation,
+            Rotation = facing,
             Scale = actor.Scale,
             Flags = actor.Flags,
             InitPropId = propId,
         };
+
+        if (placed is { } anchor)
+        {
+            AddSceneReference(new ActorSceneReference
+            {
+                FrameHash = frameHash,
+                Unk0 = sourceReference?.Unk0 ?? 0,
+                NamePos = SceneReferences.Count > 0 ? SceneReferences[0].NamePos : (ushort)0,
+                FrameIndex = anchor.Index,
+                Name = SceneReferences.Count > 0 ? SceneReferences[0].Name : string.Empty,
+            });
+        }
 
         ActorList.Add(copy);
         Binary.Items.Add(item);

@@ -13,11 +13,12 @@ namespace Illusion.Assets.Bridge;
 /// <see cref="BridgeObjectFactory"/>) stays as it was.
 /// <para>
 /// A new material binds by NAME when the game already has one called that — the rule the file import
-/// follows. Otherwise its images are encoded to DXT1 in the layout the game stores a texture of that size
-/// in and written into the archive the object lives in (files + manifest entries): the Base Color image as
-/// the diffuse texture, and a normal and/or specular image packed into ONE combined texture (see
+/// follows. Otherwise its images are encoded in the layout the game stores a texture of that size in and
+/// written into the archive the object lives in (files + manifest entries): the Base Color image as the
+/// diffuse texture — DXT1, or DXT5 when the material uses its alpha (see <see cref="AuthoredAlpha"/>) —
+/// and a normal and/or specular image packed into ONE combined texture (see
 /// <see cref="NormalSpecularPacker"/>). The material is then created on the shader that fits — plain
-/// diffuse, or diffuse + normal/specular.
+/// diffuse, or diffuse + normal/specular — with the flags its alpha calls for.
 /// A material an earlier push created comes back with its hash and, when anything about it changed, all of
 /// its images: the textures are rewritten in place, and a material that gained or lost its normal map is
 /// replaced under the same name.
@@ -350,6 +351,7 @@ public sealed class AuthoredMaterialResolver
         // Everything is read and checked BEFORE the first file is touched. The diffuse texture used to be on
         // disk before the normal map had been looked at, so a material refused over a bad normal map had
         // already had its picture replaced — reported as skipped, and changed.
+        AuthoredAlpha alpha = AuthoredAlphaFlags.Parse(info.AlphaMode);
         byte[]? diffusePixels = Pixels(info.DiffuseImage!, out reason);
         if (diffusePixels == null) return null;
         byte[]? packed = null;
@@ -367,8 +369,10 @@ public sealed class AuthoredMaterialResolver
 
         // …and whatever does get written before a later file fails is put back.
         int mark = TextureChanges.Count;
-        string? diffuse = Write(document, dir, "d:" + info.DiffuseImage!.Block, info.DiffuseImage.Name, currentDiffuse,
-            diffusePixels, info.DiffuseImage.Width, info.DiffuseImage.Height, out reason);
+        // The same image can be one material's opaque diffuse and another's cut-out: two different files.
+        string? diffuse = Write(document, dir, (alpha == AuthoredAlpha.Opaque ? "d:" : "da:") + info.DiffuseImage!.Block,
+            info.DiffuseImage.Name, currentDiffuse, diffusePixels, info.DiffuseImage.Width, info.DiffuseImage.Height,
+            alpha != AuthoredAlpha.Opaque, out reason);
         if (diffuse == null) return null;
 
         string? normalSpecular = null;
@@ -376,7 +380,7 @@ public sealed class AuthoredMaterialResolver
         {
             // One combined texture per material: it is made of two images and belongs to neither.
             normalSpecular = Write(document, dir, $"ns:{info.NormalImage?.Block}:{info.SpecularImage?.Block}",
-                name.Replace('.', '_') + "_ns", currentNormalSpecular, packed, packedWidth, packedHeight, out reason);
+                name.Replace('.', '_') + "_ns", currentNormalSpecular, packed, packedWidth, packedHeight, false, out reason);
             if (normalSpecular == null)
             {
                 Rollback(mark);
@@ -389,7 +393,7 @@ public sealed class AuthoredMaterialResolver
         float roughness = Math.Clamp(info.Roughness ?? 0.5f, 0f, 1f);
         float power = 4f + 48f * (1f - roughness) * (1f - roughness);
         float level = Math.Clamp((info.SpecularLevel ?? 0.5f) * 0.6f, 0f, 2f);
-        return new AuthoredMaterial(name, diffuse, normalSpecular, MathF.Round(power, 1), MathF.Round(level, 2));
+        return new AuthoredMaterial(name, diffuse, normalSpecular, MathF.Round(power, 1), MathF.Round(level, 2), alpha);
     }
 
     private byte[]? Pixels(MaterialImageRef image, out string? reason)
@@ -412,13 +416,13 @@ public sealed class AuthoredMaterialResolver
     }
 
     private string? Write(ISceneDocument document, string dir, string key, string imageName, string? reuse,
-        byte[] rgba, int width, int height, out string? reason)
+        byte[] rgba, int width, int height, bool alpha, out string? reason)
     {
         reason = null;
         if (_written.TryGetValue((dir, key), out string? done)) return done;
         try
         {
-            (byte[] texture, byte[]? topLevel) = DdsEncoder.Encode(rgba, width, height);
+            (byte[] texture, byte[]? topLevel) = DdsEncoder.Encode(rgba, width, height, alpha);
             string file = ArchiveTextureWriter.PickName(dir, imageName, reuse, texture, topLevel);
             ArchiveTextureWriter.TextureState before = ArchiveTextureWriter.Read(dir, file);
             // The same picture under the same name is nothing to write, undo or reload.

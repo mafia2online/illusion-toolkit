@@ -170,14 +170,25 @@ public sealed class ActorPlacements
     }
 
     /// <summary>
-    /// Registers an actor brought in from another archive's pack. It places nothing of this scene — that is
-    /// the condition for importing it — so it is one of the invisible ones and gets a glyph.
+    /// Registers an actor brought in from another archive's pack. One that makes its own frame — a light, a
+    /// sound — places nothing of this scene and gets a glyph. One that places an object arrives with that
+    /// object's copy as <paramref name="target"/>, and gets a glyph only when the copy carries no mesh — the
+    /// same rule the initial resolve uses.
     /// </summary>
-    public void AddImported(ActorEntry actor, ActorsFile pack)
+    public void AddImported(ActorEntry actor, ActorsFile pack, FrameObjectBase? target = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        _allList.Add(actor);
+        if (!_allList.Contains(actor)) _allList.Add(actor);
         _packByActor[actor] = pack;
+
+        if (target != null)
+        {
+            _targetByActor[actor] = target;
+            _actorByTarget[target] = actor;
+            Claim(target, actor, _actorByCoveredFrame);
+            Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
+            if (HasMesh(target, new HashSet<FrameObjectBase>())) return;
+        }
         if (_invisibleSet.Add(actor)) _invisibleList.Add(actor);
     }
 

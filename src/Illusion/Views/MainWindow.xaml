@@ -75,16 +75,25 @@
             </StatusBarItem>
         </StatusBar>
 
-        <!-- Work area: viewport | splitter | scene panel (right) -->
+        <!-- Work area: props (left) | splitter | viewport | splitter | scene panel (right) -->
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="PropsColumn" Width="330" MinWidth="0" />
+                <ColumnDefinition x:Name="PropsSplitterColumn" Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="200" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="380" MinWidth="220" />
             </Grid.ColumnDefinitions>
 
+            <!-- Props: the stock game's doors, furniture and plants, dragged from here into the viewport. A column
+                 of its own beside the viewport rather than a tab under the tree: it is used WITH the viewport, and
+                 wants the height. Shown and hidden from the toolbar's Props button; the splitter sizes it. -->
+            <v:PropsTabView x:Name="PropsPanel" Grid.Column="0" />
+            <GridSplitter x:Name="PropsSplitter" Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource Splitter}" />
+
             <!-- Viewport column: toolbar on top (only above the viewport, up to the hierarchy panel) -->
-            <DockPanel Grid.Column="0">
+            <DockPanel Grid.Column="2">
                 <!-- Toolbar row: tool tray · action bar · shading modes, in that child order. The action bar is
                      centred on the row and slides aside instead of overlapping when the tray reaches it —
                      see ToolbarRowPanel; the groups used to share one Grid cell and drew on top of each
@@ -111,6 +120,11 @@
                                           Content="❄" FontSize="15"
                                           ToolTip="Winter (_z district variants + ground_zima)"
                                           Checked="Winter_Changed" Unchecked="Winter_Changed" />
+                            <ToggleButton x:Name="PropsToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                          HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                          FontFamily="Segoe MDL2 Assets" Content="&#xE7B8;" FontSize="15" IsChecked="True"
+                                          ToolTip="Props — stock doors, furniture and plants to drag into the scene"
+                                          Checked="PropsToggle_Changed" Unchecked="PropsToggle_Changed" />
                             <Separator Margin="2,6" />
 
                             <!-- Layers: everything that only changes what the viewport DRAWS lives behind this
@@ -339,12 +353,12 @@
                 </Grid>
             </DockPanel>
 
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
                           Background="{StaticResource Splitter}" />
 
             <!-- Scene panel: stats · search · tree · splitter · property tabs. Shared with the resource
                  editor — see ScenePanel; the viewport it reports on is handed over in the constructor. -->
-            <v:ScenePanel x:Name="Scene" Grid.Column="2"
+            <v:ScenePanel x:Name="Scene" Grid.Column="4"
                           HeaderHeight="{Binding ActualHeight, ElementName=ToolbarRow}" />
         </Grid>
     </DockPanel>

@@ -7,7 +7,7 @@ public readonly struct MeshPart
 {
     public MeshPart(int startIndex, int indexCount, string? diffuseTexture,
         string? normalTexture = null, string? specularTexture = null, ulong materialHash = 0,
-        Vector4? tint = null)
+        Vector4? tint = null, bool blended = false)
     {
         StartIndex = startIndex;
         IndexCount = indexCount;
@@ -16,6 +16,7 @@ public readonly struct MeshPart
         SpecularTexture = specularTexture;
         MaterialHash = materialHash;
         Tint = tint ?? Vector4.One;
+        Blended = blended;
     }
 
     public int StartIndex { get; }
@@ -31,4 +32,8 @@ public readonly struct MeshPart
     /// <summary>Multiplies the sampled albedo. White for anything with a diffuse map; a car body has none —
     /// its paint is the material's own colour parameter, and this is how it reaches the shader.</summary>
     public Vector4 Tint { get; }
+
+    /// <summary>Whether the material's alpha is how much of the surface shows (glass) rather than a mask that
+    /// cuts texels out (a fence). A blended part is drawn after the opaque ones, without writing depth.</summary>
+    public bool Blended { get; }
 }
