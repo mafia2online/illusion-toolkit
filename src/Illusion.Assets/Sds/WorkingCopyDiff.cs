@@ -70,12 +70,28 @@ public static partial class WorkingCopyDiff
         // A file the manifest does not name is not packed, whatever lies in the folder (a note, a copy kept
         // "just in case"): it is not something a Build puts into the game, and is not listed as one.
         string manifest = File.ReadAllText(Path.Combine(workingDir, "SDSContent.xml"));
+        // As a whole name - the text of an element, or the end of a path in one - and not as a piece of a longer
+        // one: with "a.dds" unsaid and "ba.dds" still listed, a search for the letters found it listed.
+        bool Says(string name)
+        {
+            for (int at = manifest.IndexOf(name, StringComparison.OrdinalIgnoreCase); at >= 0;
+                 at = manifest.IndexOf(name, at + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                char before = at == 0 ? '>' : manifest[at - 1];
+                int end = at + name.Length;
+                if (before is '>' or '/' or '\\' && (end >= manifest.Length || manifest[end] == '<')) return true;
+            }
+            return false;
+        }
         bool Named(string path)
         {
             string name = Path.GetFileName(path);
             return path.Equals("SDSContent.xml", StringComparison.OrdinalIgnoreCase)
-                || manifest.Contains(name, StringComparison.OrdinalIgnoreCase)
-                || (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && manifest.Contains(name[..^4], StringComparison.OrdinalIgnoreCase));
+                || Says(name)
+                // a texture's top level lies beside it as "MIP_<name>", under the texture's own entry
+                || (name.StartsWith("MIP_", StringComparison.OrdinalIgnoreCase) && Says(name[4..]))
+                // an XML resource is named without the extension it is unpacked with
+                || (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && Says(name[..^4]));
         }
         sds.Refresh();
         if (!sds.Exists)
@@ -128,6 +144,11 @@ public static partial class WorkingCopyDiff
         // the manifest is the list of the files, not one of them: an entry added or dropped shows as its file
         mine.Remove("SDSContent.xml");
         theirs.Remove("SDSContent.xml");
+        // A file the manifest does not name is not in the working copy as far as a Build goes, even when it lies
+        // there byte for byte as the archive has it: that is what deleting a resource leaves (the entry is
+        // unsaid, the payload stays). Left in, it was paired with the archive's copy below as "the same" and
+        // the deletion was not listed - with nothing else changed, the archive came up as "nothing differs".
+        foreach (string path in mine.Keys.Where(path => !named(path)).ToList()) mine.Remove(path);
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string Hash(FileInfo file)
         {
@@ -188,7 +209,7 @@ public static partial class WorkingCopyDiff
         }
         foreach ((string path, FileInfo file) in mine)                                  // 5
         {
-            if (named(path)) changes.Add(new WorkingCopyChange(path, WorkingCopyChangeKind.Added, file.Length, file.LastWriteTime));
+            changes.Add(new WorkingCopyChange(path, WorkingCopyChangeKind.Added, file.Length, file.LastWriteTime));
         }
         foreach ((string path, FileInfo file) in theirs)
         {

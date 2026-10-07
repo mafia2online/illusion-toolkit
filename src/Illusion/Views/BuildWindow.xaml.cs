@@ -133,7 +133,10 @@ public sealed partial class BuildWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             return host.BuildArchives(window.Chosen, createBackup: true);   // backups are always kept (versioned in a "backups" folder)
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Formats.FileFormatException)
+        // Everything: this runs straight off a menu click, with nothing above it but the program's end, and a
+        // working copy changed by hand can fail in ways no list of exception types names (a contents list that
+        // is no longer XML, for one). A Build that fails says so; it does not take the editor with it.
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Mouse.OverrideCursor = null;
             AppDialog.Show(owner, new DialogOptions { Title = "Build", Icon = DialogIcon.Error, Heading = "Build failed", Text = ex.Message });
@@ -167,7 +170,9 @@ public sealed partial class BuildWindow : Window
         {
             found = await Task.Run(() => WorkingCopyDiff.Compare(row.Archive));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException or Formats.SdsFormatException)
+        // Whatever it is: a comparison that ended in an exception nobody caught left its row on "Comparing…"
+        // for good, and with it the Build button for every archive in the list.
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             error = ex.Message;
         }

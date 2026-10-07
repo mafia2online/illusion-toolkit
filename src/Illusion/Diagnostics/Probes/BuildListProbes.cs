@@ -112,6 +112,28 @@ internal static class BuildListProbes
                     !edited.Changes.Any(c => c.Path.Contains("note to self")));
                 Check($"{sds.Name}: the changed file carries its size and the time it was written",
                     edited.Changes.FirstOrDefault(c => c.Kind == WorkingCopyChangeKind.Changed) is { Size: > 0 } c1 && (DateTime.Now - c1.Modified).TotalMinutes < 5);
+
+                // A resource deleted in the content browser: its entry is unsaid and its payload stays where it
+                // lay, byte for byte what the archive has. The pack leaves it out, so it is a removal - and was
+                // once paired with the archive's copy as "the same", which made the deletion invisible.
+                if (plain.Count >= 3)
+                {
+                    string unsaid = plain[1];
+                    string entry = Path.GetExtension(unsaid).Equals(".xml", StringComparison.OrdinalIgnoreCase) ? unsaid[..^4] : unsaid;
+                    var manifest = Formats.Archive.SdsManifest.Load(scratch);
+                    string? listed = manifest.Entries.Select(e => e.File).FirstOrDefault(f => f.TrimStart('/', '\\').Equals(entry, StringComparison.OrdinalIgnoreCase));
+                    if (listed != null && manifest.RemoveEntry(listed))
+                    {
+                        WorkingCopyComparison dropped = WorkingCopyDiff.Compare(sds, scratch);
+                        Check($"{sds.Name}: a resource unsaid in the list, its file still lying there, is listed as removed",
+                            dropped.Changes.Any(c => c.Kind == WorkingCopyChangeKind.Removed && c.Path.Equals(unsaid, StringComparison.OrdinalIgnoreCase))
+                            && dropped.Changes.Count == edited.Changes.Count + 1, string.Join(", ", dropped.Changes.Select(c => $"{c.Kind} {c.Path}")));
+                    }
+                    else
+                    {
+                        sb.AppendLine($"({sds.Name}: {unsaid} is not a plain entry of the list - the unsaid-resource check is skipped)");
+                    }
+                }
             }
 
             // an archive the game does not have yet: everything the manifest names is an addition
