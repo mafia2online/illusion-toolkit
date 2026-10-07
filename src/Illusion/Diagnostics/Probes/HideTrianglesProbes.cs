@@ -56,6 +56,8 @@ internal static class HideTrianglesProbes
                 sb.AppendLine($"INFO {district}: {all.Count} mesh frames; {Shared(m => m.Geometry)} on a geometry block another frame uses, "
                     + $"{Shared(m => m.Material)} on a material block another frame uses ({materialAcrossGeometry} material block(s) under frames "
                     + $"of different geometry); {blocksOfBuffer.Count(b => b.Value.Count > 1)} of {blocksOfBuffer.Count} index buffers drawn by more than one geometry block");
+                sb.AppendLine("INFO frames on a shared material block: " + string.Join(", ", all.Where(m => m.Refs.ContainsKey(FrameEntryRefTypes.Material))
+                    .GroupBy(m => (object)m.Material, ReferenceEqualityComparer.Instance).Where(g => g.Count() > 1).SelectMany(g => g).Take(12).Select(m => m.Name.ToString())));
             }
 
             // The mesh with the most levels of detail and materials the district has, so both are exercised
