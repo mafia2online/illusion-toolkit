@@ -220,7 +220,12 @@ public static class BridgeMeshApplier
         FrameObjectModel? skinned = node is FrameNodeAdapter { Frame: FrameObjectModel m } ? m : null;
         bool resolvedBefore = skinned != null && SdsMeshLoader.GlobalBoneIds(skinned) != null;
 
-        ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason, lod);
+        // A level left with a 32-bit index buffer — something an earlier version of this code wrote for a mesh
+        // over 65535 vertices, and the game does not draw — is rebuilt whatever the push changed: the rebuild
+        // is what writes the buffer and the level's index width back as 16-bit.
+        ApplyResult? result = HasWideIndices(node, lod)
+            ? TryApplyRebuild(node, payload, out skipReason, lod)
+            : TryApplyCountPreserving(node, payload, out skipReason, lod);
         if (result == null && skipReason != null && NeedsRebuild(skipReason))
         {
             result = TryApplyRebuild(node, payload, out skipReason, lod);
@@ -716,6 +721,16 @@ public static class BridgeMeshApplier
         }
 
         int newCount = positions.Count;
+        // The game does not draw a mesh whose index buffer is 32-bit. This toolkit can write one and its own
+        // viewport draws it, so nothing here looks wrong — in the game every triangle is stitched from the
+        // wrong corners and the object smears across the district (seen on a 65 981-vertex interior). Refused
+        // with the count, which is what the modeller needs to split the object.
+        if (newCount > ushort.MaxValue)
+        {
+            skipReason = $"the mesh needs {newCount} vertices once split along sharp edges and UV seams — "
+                + "the game takes at most 65535 per mesh; split it into several objects";
+            return null;
+        }
         Vector3[] newPositions = positions.ToArray();
         Vector3[] newNormals = normals.ToArray();
         Vector2[] newUvs = uvs.ToArray();
@@ -958,7 +973,9 @@ public static class BridgeMeshApplier
             skipReason = "no material slot survived the push";
             return null;
         }
-        int newFormat = newCount > 65535 ? 2 : indexBuffer.IndexFormat;
+        // Always 16-bit: a mesh that would need more was refused above, and one that carried a wide buffer
+        // from before is here precisely to lose it.
+        const int newFormat = 1;
         var slots = new Formats.Frames.Resources.FrameLOD.RebuiltMaterialSlot[newMats.Length];
         for (int slot = 0; slot < newMats.Length; slot++)
         {
@@ -968,7 +985,7 @@ public static class BridgeMeshApplier
         }
         Formats.Frames.Resources.FrameLOD newLod = Formats.Frames.Resources.FrameLOD.CreateRebuilt(
             oldLod.Distance, oldLod.IndexBufferRef, oldLod.VertexBufferRef,
-            oldLod.VertexDeclaration, newCount, newFormat == 2 ? 4 : 2, faces, slots);
+            oldLod.VertexDeclaration, newCount, 2, faces, slots);
 
         (Vector3 meshMin, Vector3 meshMax) = Aabb(newPositions);
         var result = new ApplyResult
@@ -1013,8 +1030,10 @@ public static class BridgeMeshApplier
         for (int slot = 0; slot < newMats.Length; slot++)
         {
             MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(newMats[slot].MaterialHash);
+            // The hash rides with the part, as it does on a mesh loaded from disk: it is what a later
+            // material edit (or a texture rewritten by a push) finds this part by to re-resolve it.
             parts[slot] = new MeshPart(newMats[slot].StartIndex, newMats[slot].NumFaces * 3,
-                tex.Diffuse, tex.Normal, tex.Specular);
+                tex.Diffuse, tex.Normal, tex.Specular, newMats[slot].MaterialHash, tex.Tint);
         }
         result.NewMesh = new MeshData
         {
@@ -1063,6 +1082,13 @@ public static class BridgeMeshApplier
         }
         return (min, max);
     }
+
+    // Read off the level's index buffer and nothing else. This runs on every push, ahead of a path that
+    // decodes the mesh anyway — asking a full decode (every vertex channel unpacked, the skin with it) just
+    // to learn the index width paid for the whole mesh twice.
+    private static bool HasWideIndices(IFrameNode node, int lod) =>
+        node is FrameNodeAdapter { Frame: FrameObjectSingleMesh { Geometry.LOD.Length: > 0 } frame }
+        && frame.GetIndexBuffer(SdsMeshLoader.ClampLod(frame, lod)) is { IndexFormat: 2 };
 
     private static bool FaceSetMatches(DecodedMesh decoded, MeshObjectPayload payload, out string? reason)
     {
@@ -1150,7 +1176,7 @@ public static class BridgeMeshApplier
         return true;
     }
 
-    private static bool TryParseMaterialHash(string? text, out ulong hash)
+    internal static bool TryParseMaterialHash(string? text, out ulong hash)
     {
         hash = 0;
         if (string.IsNullOrEmpty(text)) return false;

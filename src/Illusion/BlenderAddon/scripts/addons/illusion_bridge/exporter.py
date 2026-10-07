@@ -13,7 +13,7 @@ import uuid
 import bpy
 import numpy as np
 
-from . import importer, payload, protocol, server
+from . import importer, materials, payload, protocol, server
 
 
 def _guess_kind(obj) -> str:
@@ -114,11 +114,15 @@ def export_scene(reason):
     objects = []
     blocks = []
     pushed_ids = []
+    # One block per image however many slots and objects use it, and the signatures to stamp once the
+    # toolkit confirms it took the pixels.
+    image_refs = {}
+    signatures = {}
     try:
         for obj in survivors:
             try:
                 server.log(f"export_scene: exporting {obj.name}")
-                entry = _export_object(obj, depsgraph, blocks)
+                entry = _export_object(obj, depsgraph, blocks, image_refs, signatures)
             except Exception as exc:
                 server.log(f"push: failed to export '{obj.get(importer.ID_PROP, obj.name)}': {exc}")
                 continue
@@ -151,6 +155,7 @@ def export_scene(reason):
     server.log("export_scene: writing container")
     payload.write_container(path, session, objects, blocks)
     server.log("export_scene: container written, sending push")
+    server.state["pending_signatures"] = signatures
 
     server.send(protocol.make(
         protocol.PUSH,
@@ -285,7 +290,69 @@ def _export_skin(obj, me, n_verts, blocks, arrays):
     arrays["boneWeights"] = _add_block(blocks, "f32", 4, n_verts, weights)
 
 
-def _export_object(obj, depsgraph, blocks):
+def _describe_authored(material, entry, blocks, image_refs, signatures):
+    """Add what the toolkit needs to turn a material made in Blender into a game material.
+
+    A material the toolkit handed out is identified by its hash and nothing else. One made here has no
+    hash until a push creates it, and afterwards keeps the right to replace its own textures — so its
+    images ride along the first time, and again whenever anything about it changed. They travel
+    TOGETHER: the toolkit packs the normal and the specular map into one texture and picks the shader
+    by which maps exist, so it needs the whole material, not the part that moved.
+    """
+    game_hash = material.get("illusion_hash")
+    if game_hash and not material.get(materials.AUTHORED_PROP):
+        return
+    entry["authored"] = True
+    diffuse = materials.base_color_image(material)
+    if diffuse is None:
+        return
+    normal = materials.normal_map_image(material)
+    specular = materials.specular_image(material)
+    level = materials.specular_level(material)
+    roughness = materials.roughness(material)
+
+    # A Normal Map node in Object or World space is not something the game can use, and it is said
+    # rather than dropped: the toolkit refuses the material by name, where a silently missing normal
+    # map would only show as "the lighting is off". Sent on every push — whether the images changed
+    # or not — so the refusal stays until the node is put back to Tangent.
+    space = materials.normal_map_space(material)
+    if space is not None and space != 'TANGENT':
+        entry["normalSpace"] = space
+
+    # Unsaved paint on any image has no cheap identity, so it resends every time (signature None).
+    parts = [materials.image_signature(i) for i in (diffuse, normal, specular) if i is not None]
+    signature = None if any(p is None for p in parts) else "|".join(
+        parts + [f"n={normal is not None}", f"s={specular is not None}", f"level={level}", f"rough={roughness}"])
+    if game_hash and signature is not None and signature == material.get(materials.SIGNATURE_PROP):
+        return
+
+    for key, image in (("diffuseImage", diffuse), ("normalImage", normal), ("specularImage", specular)):
+        if image is None:
+            continue
+        ref = image_refs.get(image.name)
+        if ref is None:
+            packed = materials.image_rgba8(image)
+            if packed is None:
+                if key == "diffuseImage":
+                    return
+                continue
+            pixels, width, height = packed
+            ref = {
+                "name": image.name,
+                "width": width,
+                "height": height,
+                "block": _add_block(blocks, "u8", 4, width * height, pixels),
+            }
+            image_refs[image.name] = ref
+        entry[key] = ref
+    if level is not None:
+        entry["specularLevel"] = level
+    if roughness is not None:
+        entry["roughness"] = roughness
+    signatures[material.name] = signature
+
+
+def _export_object(obj, depsgraph, blocks, image_refs, signatures):
     """Read one evaluated mesh into payload arrays; appends blocks, returns the header entry."""
     if obj.mode == 'EDIT':
         obj.update_from_editmode()  # commit the live BMesh before evaluating
@@ -375,6 +442,8 @@ def _export_object(obj, depsgraph, blocks):
         raw_id = material.get("illusion_collision_raw_id") if material else None
         if raw_id is not None:
             entry["rawId"] = int(raw_id)
+        elif material is not None:
+            _describe_authored(material, entry, blocks, image_refs, signatures)
         slot_materials.append(entry)
     if slot_materials:
         meta["materials"] = slot_materials

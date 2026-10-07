@@ -82,10 +82,24 @@ public class Material_v57 : IMaterial
 
         if (Preset == MaterialPreset.Default)
         {
+            // The two fields a zero-initialised material gets wrong, measured over the 1929 stock materials
+            // on this preset's shader: Unk0 is 128 on 1837 of them, and the diffuse sampler's TexType is 2
+            // on 1947 of 1951 samplers (0 on four). A material created with both at 0 drew BLACK in game.
+            Unk0 = 128;
+
             MaterialSampler_v57 NewSampler = new MaterialSampler_v57();
             NewSampler.ID = "S000";
+            NewSampler.TexType = 2;
 
             Samplers.Add(NewSampler);
+        }
+        else if (Preset == MaterialPreset.DiffuseNormal)
+        {
+            // Same two fields, same majority on this shader: Unk0 128 on 1152 of 1209, TexType 2 on every
+            // bound sampler (a sampler reads 0 only where its texture name is empty).
+            Unk0 = 128;
+            Samplers.Add(new MaterialSampler_v57 { ID = "S000", TexType = 2 });
+            Samplers.Add(new MaterialSampler_v57 { ID = "S001", TexType = 2 });
         }
     }
 

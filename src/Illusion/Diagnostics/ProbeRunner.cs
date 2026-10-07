@@ -465,6 +465,17 @@ internal static class ProbeRunner
             case "--probe-bridge-newobj":
                 BridgeProbes.RunNewObjectProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Blender bridge: a material made in Blender — DXT1 encoder, the texture landing in the archive
+            // folder and manifest, the hash-less slot resolved to a new game material, re-push, bind-by-name.
+            // Blender bridge: the same road through the live viewport and a live bridge session — needs
+            // someone on the Blender side to make and push the object (see the probe's summary).
+            case "--probe-bridge-material-live":
+                BridgeMaterialLiveProbe.Run(args.Length >= 2 ? args[1] : "eastside");
+                return true;
+            case "--probe-bridge-material":
+                BridgeMaterialProbes.RunAuthoredMaterialProbe(
+                    args.Length >= 2 ? args[1] : "eastside", args.Length >= 3 ? args[2] : null);
+                return true;
             // Collision: cooked-mesh scaler over the whole corpus — quantized tree bytes bit-identical,
             // vertices and coefficients moved by exactly s, root box lands on the scaled original.
             // Collision: modelCode census — how many shipped cooked meshes carry no serialized tree.
@@ -618,6 +629,17 @@ internal static class ProbeRunner
             // HTTP, and a busy port is reported rather than thrown.
             case "--probe-mcp":
                 McpProbes.RunMcpProbe();
+                return true;
+            // The same tools against the editor itself: a real window with a district loaded. Nothing is saved.
+            // Output: %TEMP%\illusion_editor_tools_live.txt
+            case "--probe-editor-tools-live":
+                EditorToolLiveProbes.Run(args.Length >= 2 ? args[1] : "hill");
+                return true;
+            // The MCP editor tools against a scripted editor: what a save, a build and an area load tell
+            // the caller when the editor could not do it, and which property values are refused. No game
+            // install needed. Output: %TEMP%\illusion_editor_tools.txt
+            case "--probe-editor-tools":
+                EditorToolProbes.RunEditorToolProbe();
                 return true;
             // Material editor: preview sphere generator, MTL catalog browse/edit/create/delete (in-memory
             // only), SetTextureFor file roundtrip on a TEMP copy of default.mtl, mesh-slot reassignment,

@@ -1,0 +1,827 @@
+using System.IO;
+using System.Text;
+using Illusion.Assets;
+using Illusion.Assets.Bridge;
+using Illusion.Assets.Materials;
+using Illusion.Assets.Sds;
+using Illusion.Assets.Textures;
+using Illusion.Bridge.Payload;
+using Illusion.Domain;
+using Illusion.Formats;
+using Illusion.Formats.Archive;
+
+namespace Illusion.Diagnostics.Probes;
+
+/// <summary>Probes of the path a material MADE in Blender takes into the game: the DXT1 encoder, the
+/// texture landing in an archive's folder and manifest, and the resolver that turns a hash-less slot into
+/// a game material before the mesh path sees it.</summary>
+internal static class BridgeMaterialProbes
+{
+    private const string ProbeMaterial = "illusion_probe_material";
+    private const string ProbeImage = "illusion_probe_image.png";
+
+    // A Blender-made material becomes a game material; a second push replaces its texture in place; a
+    // name the game already has binds without touching anything. The district's folder, manifest and the
+    // in-memory material library are put back. Output: %TEMP%\illusion_bridge_material.txt
+    //
+    // With a second argument — a push container the ADDON wrote — the same path is walked from Blender's
+    // side of the wire: its objects are read, their materials resolved and each becomes a frame object.
+    // The texture it produced is kept as %TEMP%\illusion_bridge_material_pushed.dds for a look.
+    internal static void RunAuthoredMaterialProbe(string district, string? pushedContainer = null)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_bridge_material.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        string? manifestPath = null;
+        byte[]? manifestBytes = null;
+        var writtenFiles = new List<string>();
+        var pushedHashes = new List<ulong>();
+        HashSet<string>? folderBefore = null;
+        string? extractedDir = null;
+        string? otherDir = null;
+        byte[]? otherManifest = null;
+        HashSet<string>? otherBefore = null;
+        ulong createdHash = 0;
+        try
+        {
+            // ── The encoder, on its own ──
+            const int w = 64, h = 32;
+            byte[] gradient = Gradient(w, h, 0);
+            byte[] dds = DdsEncoder.EncodeDxt1(gradient, w, h);
+            int expected = 128;
+            for (int lw = w, lh = h; ; lw = Math.Max(1, lw / 2), lh = Math.Max(1, lh / 2))
+            {
+                expected += Math.Max(1, (lw + 3) / 4) * Math.Max(1, (lh + 3) / 4) * 8;
+                if (lw == 1 && lh == 1) break;
+            }
+            Check("encoded size is header + the full MIP chain", dds.Length == expected, $"{dds.Length} vs {expected}");
+            Check("header matches the stock DXT1 shape",
+                BitConverter.ToUInt32(dds, 0) == 0x20534444 && BitConverter.ToUInt32(dds, 8) == 0x21007
+                && BitConverter.ToInt32(dds, 12) == h && BitConverter.ToInt32(dds, 16) == w
+                && BitConverter.ToInt32(dds, 28) == 7 && BitConverter.ToUInt32(dds, 84) == 0x31545844
+                && BitConverter.ToUInt32(dds, 108) == 0x401000,
+                $"flags 0x{BitConverter.ToUInt32(dds, 8):X} mips {BitConverter.ToInt32(dds, 28)}");
+            double error = MeanError(gradient, DecodeTopLevel(dds, w, h));
+            Check("top level decodes close to the source", error < 4.0, $"mean abs error {error:F2}/255");
+
+            // From 256×256 up the game stores a texture split; one written whole came out black in game.
+            (byte[] wholeEntry, byte[]? noTop) = DdsEncoder.Encode(gradient, w, h);
+            Check("a texture with a side under 256 stays one file", noTop == null && wholeEntry.Length == dds.Length);
+            (byte[] halfEntry, byte[]? topLevel) = DdsEncoder.Encode(Gradient(256, 256, 0), 256, 256);
+            Check("a 256×256 texture is split: the top level alone in its own file",
+                topLevel != null && topLevel.Length == 128 + 256 * 256 / 2
+                && BitConverter.ToUInt32(topLevel, 8) == 0x1007 && BitConverter.ToInt32(topLevel, 28) == 1
+                && BitConverter.ToUInt32(topLevel, 108) == 0x1000
+                && BitConverter.ToInt32(topLevel, 12) == 256 && BitConverter.ToInt32(topLevel, 16) == 256);
+            Check("...and the entry itself starts at half resolution with the rest of the chain",
+                BitConverter.ToInt32(halfEntry, 12) == 128 && BitConverter.ToInt32(halfEntry, 16) == 128
+                && BitConverter.ToInt32(halfEntry, 28) == 8 && BitConverter.ToUInt32(halfEntry, 8) == 0x21007);
+
+            // ── The resolver, against a real district ──
+            if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            var sds = new FileInfo(Path.Combine(MafiaEnvironment.CityFolder, district + ".sds"));
+            if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
+            string extracted = SdsMeshLoader.EnsureExtracted(sds);
+            (_, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(sds);
+            if (document == null) { sb.AppendLine("no document"); return; }
+
+            manifestPath = Path.Combine(extracted, "SDSContent.xml");
+            manifestBytes = File.ReadAllBytes(manifestPath);
+            MafiaMaterials.EnsureLoaded();
+            MafiaMaterialCatalog catalog = MafiaMaterialCatalog.Instance;
+            string library = catalog.Libraries.FirstOrDefault(
+                l => l.Equals("default.mtl", StringComparison.OrdinalIgnoreCase)) ?? catalog.Libraries[0];
+            Check("probe material name is free", MafiaMaterials.FindHashByName(ProbeMaterial) == null);
+
+            var catalogHost = new CatalogAuthoredMaterials(catalog, library);
+            folderBefore = new HashSet<string>(Directory.GetFiles(extracted), StringComparer.OrdinalIgnoreCase);
+            extractedDir = extracted;
+
+            // First push: no hash, pixels attached.
+            var first = new ExchangeContainer();
+            MeshMaterialInfo slot = NewSlot(first, gradient, w, h);
+            var payload = new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { slot } };
+            var resolver = new AuthoredMaterialResolver(first, catalogHost);
+            bool resolved = resolver.TryResolve(payload, document, out string? reason);
+            Check("a hash-less slot with an image resolves", resolved, reason ?? "");
+            if (!resolved) return;
+
+            ulong.TryParse(slot.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out createdHash);
+            string? texture = MafiaMaterials.GetMaterialTextures(createdHash).Diffuse;
+            Check("the slot now carries a game-material hash", createdHash != 0 && MafiaMaterials.KnowsMaterial(createdHash),
+                slot.Hash);
+            Check("the material is named after the Blender one", MafiaMaterials.GetMaterialName(createdHash) == ProbeMaterial);
+            Check("its diffuse slot names the new texture", texture == "illusion_probe_image.dds", texture ?? "(none)");
+
+            // A created material has to look like the stock ones on its shader in EVERY field, not only
+            // the ones the editor shows: one left at zero in Unk0 and the sampler's TexType drew black in
+            // game. The reference is whatever most stock materials on that shader carry.
+            if (MafiaMaterials.Collection?.FindByHash(createdHash) is Formats.Materials.Versions.Material_v57 fresh)
+            {
+                var peers = MafiaMaterials.Collection.Libraries.Values
+                    .SelectMany(l => l.Materials.Values).OfType<Formats.Materials.Versions.Material_v57>()
+                    .Where(m => m.ShaderID == fresh.ShaderID && !ReferenceEquals(m, fresh) && m.Samplers.Count > 0).ToList();
+                byte commonUnk0 = peers.GroupBy(m => m.Unk0).OrderByDescending(g => g.Count()).First().Key;
+                byte commonType = peers.GroupBy(m => m.Samplers[0].TexType).OrderByDescending(g => g.Count()).First().Key;
+                Check("the created material matches the stock record on its shader (Unk0, sampler TexType)",
+                    fresh.Unk0 == commonUnk0 && fresh.Samplers[0].TexType == commonType,
+                    $"Unk0 {fresh.Unk0} vs {commonUnk0}, TexType {fresh.Samplers[0].TexType} vs {commonType}, over {peers.Count} stock materials");
+            }
+            string texturePath = Path.Combine(extracted, texture ?? "?");
+            if (texture != null) writtenFiles.Add(texturePath);
+            Check("the texture is on disk in the object's archive", File.Exists(texturePath));
+            Check("the manifest lists it as a Texture without a MIP companion",
+                SdsManifest.Load(extracted).EntryFields(texture ?? "?") is { } fields
+                && fields.Select(f => f.Name).SequenceEqual(new[] { "Type", "File", "HasMIP", "Version" })
+                && fields[0].Value == "Texture" && fields[2].Value == "0" && fields[3].Value == "2");
+            Check("the ack reports the material as authored",
+                resolver.Resolved.Count == 1 && resolver.Resolved[0].Authored && resolver.Resolved[0].Name == ProbeMaterial);
+            Check("the archive is queued for a rebuild", resolver.TouchedArchives.ContainsKey(sds.FullName));
+            Check("the folder still packs", Packs(extracted, out string? packError), packError ?? "");
+
+            // The stock archives charge a split texture's top level to its TEXTURE entry (the Mipmap entry
+            // carries zero). A packer that leaves it out under-reports the archive's video memory.
+            SdsArchive packed = SdsArchive.Pack(extracted, GameProfile.MafiaII);
+            int textureType = packed.ResourceTypes.FindIndex(t => t.Name == "Texture");
+            long charged = packed.Entries.Where(e => e.TypeId == textureType).Sum(e => (long)e.SlotVramRequired);
+            long expectedVram = 0;
+            foreach (string file in SdsManifest.Load(extracted).GetFiles("Texture"))
+            {
+                expectedVram += new FileInfo(file).Length - 128;
+                var companion = new FileInfo(Path.Combine(extracted, "MIP_" + Path.GetFileName(file)));
+                if (companion.Exists) expectedVram += companion.Length - 128;
+            }
+            Check("packing charges every texture its own payload plus its MIP companion's",
+                charged == expectedVram, $"{charged} vs {expectedVram}");
+
+            // A rooted resource name ("/missions/…") must not be mistaken for a missing file and unsaid.
+            string pruneDir = Path.Combine(Path.GetTempPath(), "illusion_prune_probe");
+            if (Directory.Exists(pruneDir)) Directory.Delete(pruneDir, recursive: true);
+            Directory.CreateDirectory(Path.Combine(pruneDir, "missions", "probe"));
+            File.WriteAllBytes(Path.Combine(pruneDir, "missions", "probe", "sectors.bin"), new byte[4]);
+            File.WriteAllText(Path.Combine(pruneDir, "SDSContent.xml"),
+                "<SDSResource><ResourceEntry><Type>AudioSectors</Type><File>/missions/probe/sectors.bin</File>"
+                + "<Version>6</Version></ResourceEntry><ResourceEntry><Type>Texture</Type><File>gone.dds</File>"
+                + "<HasMIP>0</HasMIP><Version>2</Version></ResourceEntry></SDSResource>");
+            List<string> dropped = SdsWriter.PruneMissingEntries(pruneDir);
+            Check("pruning keeps a present resource with a rooted name and drops only the missing one",
+                dropped.Count == 1 && dropped[0] == "gone.dds"
+                && SdsManifest.Load(pruneDir).HasFile("/missions/probe/sectors.bin"), string.Join(", ", dropped));
+            Directory.Delete(pruneDir, recursive: true);
+
+            // Second push: the same material, now by hash, with different pixels.
+            byte[] before = File.ReadAllBytes(texturePath);
+            var second = new ExchangeContainer();
+            MeshMaterialInfo again = NewSlot(second, Gradient(w, h, 128), w, h);
+            again.Hash = slot.Hash;
+            var repush = new AuthoredMaterialResolver(second, catalogHost);
+            bool reresolved = repush.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { again } }, document, out reason);
+            Check("a re-push with new pixels resolves", reresolved, reason ?? "");
+            Check("it rewrites the same texture instead of adding one",
+                repush.Rewritten.Count == 1 && repush.Rewritten[0].Texture == texture
+                && !File.ReadAllBytes(texturePath).AsSpan().SequenceEqual(before)
+                && !File.Exists(Path.Combine(extracted, "illusion_probe_image_2.dds")));
+
+            // A name the game already has binds to it and writes nothing.
+            string? stockName = catalog.GetMaterials(library).Select(m => m.Name)
+                .FirstOrDefault(n => !string.IsNullOrEmpty(n) && n != ProbeMaterial);
+            if (stockName != null)
+            {
+                var third = new ExchangeContainer();
+                MeshMaterialInfo byName = NewSlot(third, gradient, w, h);
+                byName.Name = stockName;
+                var bind = new AuthoredMaterialResolver(third, catalogHost);
+                bool bound = bind.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { byName } }, document, out reason);
+                Check("a name the game already has binds to that material",
+                    bound && !string.IsNullOrEmpty(byName.Hash) && bind.TouchedArchives.Count == 0
+                    && bind.Resolved.Count == 1 && !bind.Resolved[0].Authored, reason ?? stockName);
+            }
+
+            // No image, no material: refused in words, nothing created.
+            var fourth = new ExchangeContainer();
+            var bare = new MeshMaterialInfo { Hash = "", Name = "illusion_probe_bare", Authored = true };
+            var refuse = new AuthoredMaterialResolver(fourth, catalogHost);
+            bool refused = !refuse.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { bare } }, document, out reason);
+            Check("a new material without an image is refused with a reason",
+                refused && reason != null && MafiaMaterials.FindHashByName("illusion_probe_bare") == null, reason ?? "");
+
+            // Blender remembers a material the library has lost (undone, or never saved). With pixels it is
+            // made again; without them the push is refused and the ack tells the datablock to forget.
+            var fifth = new ExchangeContainer();
+            var lost = new MeshMaterialInfo { Hash = "0x00000000DEADBEEF", Name = "illusion_probe_lost", Authored = true };
+            var forget = new AuthoredMaterialResolver(fifth, catalogHost);
+            bool forgotten = !forget.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { lost } }, document, out reason);
+            Check("a remembered material the library lost, sent without pixels, is refused and forgotten",
+                forgotten && forget.Resolved.Count == 1 && forget.Resolved[0].Hash == ""
+                && forget.Resolved[0].Name == "illusion_probe_lost", reason ?? "");
+            ulong recreated = 0;
+            MeshMaterialInfo stale = NewSlot(fifth, gradient, w, h);
+            stale.Name = "illusion_probe_lost";
+            stale.Hash = "0x00000000DEADBEEF";
+            var remake = new AuthoredMaterialResolver(fifth, catalogHost);
+            bool remade = remake.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { stale } }, document, out reason)
+                && ulong.TryParse(stale.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out recreated)
+                && recreated != 0xDEADBEEF && MafiaMaterials.KnowsMaterial(recreated);
+            Check("the same material sent WITH pixels is created anew", remade, reason ?? stale.Hash);
+            if (recreated != 0 && recreated != 0xDEADBEEF) pushedHashes.Add(recreated);
+            foreach (string file in Directory.GetFiles(extracted, "illusion_probe_image*.dds"))
+                if (!writtenFiles.Contains(file)) writtenFiles.Add(file);
+
+            // ── A normal and a specular map ──
+            byte[] packedMaps = NormalSpecularPacker.Pack(
+                Solid(8, 8, 200, 60, 255), 8, 8, Solid(4, 4, 90, 90, 90), 4, 4, out int packedW, out int packedH);
+            Check("packing keeps normal X in red, inverts green, and puts the specular level in blue",
+                packedW == 8 && packedH == 8 && packedMaps[0] == 200 && packedMaps[1] == 195 && packedMaps[2] == 90
+                && packedMaps[3] == 255, $"{packedMaps[0]},{packedMaps[1]},{packedMaps[2]}");
+            byte[] flatMaps = NormalSpecularPacker.Pack(null, 0, 0, Solid(4, 4, 40, 40, 40), 4, 4, out _, out _);
+            Check("a specular map alone rides a flat normal", flatMaps[0] == 128 && flatMaps[1] == 128 && flatMaps[2] == 40);
+
+            const string mappedName = "illusion_probe_mapped";
+            var sixth = new ExchangeContainer();
+            MeshMaterialInfo mapped = NewSlot(sixth, gradient, w, h);
+            mapped.Name = mappedName;
+            mapped.NormalImage = Image(sixth, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+            mapped.SpecularImage = Image(sixth, "illusion_probe_spec.png", 32, 32, 70, 70, 70);
+            var withMaps = new AuthoredMaterialResolver(sixth, catalogHost);
+            ulong mappedHash = 0;
+            bool mappedOk = withMaps.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { mapped } }, document, out reason)
+                && ulong.TryParse(mapped.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out mappedHash);
+            Check("a material with a normal and a specular map resolves", mappedOk, reason ?? "");
+            if (mappedOk && MafiaMaterials.Collection?.FindByHash(mappedHash) is Formats.Materials.Versions.Material_v57 nm)
+            {
+                pushedHashes.Add(mappedHash);
+                static string Shape(Formats.Materials.Versions.Material_v57 m) =>
+                    $"{m.Unk0}|{(uint)m.Flags}|"
+                    + string.Join(",", m.Samplers.Select(x => $"{x.ID}:{x.TexType}:{Convert.ToHexString(x.SamplerStates)}"))
+                    + "|" + string.Join(",", m.Parameters.Select(x => $"{x.ID}:{x.Paramaters.Length}"));
+                var onShader = MafiaMaterials.Collection.Libraries.Values
+                    .SelectMany(l => l.Materials.Values).OfType<Formats.Materials.Versions.Material_v57>()
+                    .Where(m => m.ShaderID == nm.ShaderID && !ReferenceEquals(m, nm)).ToList();
+                string commonShape = onShader.GroupBy(Shape).OrderByDescending(g => g.Count()).First().Key;
+                Check("it is created on the normal-mapped shader, in the commonest stock shape of that shader",
+                    nm.ShaderID == 5159568776351604322 && nm.ShaderHash == 1949812732 && Shape(nm) == commonShape,
+                    $"{Shape(nm)} vs {commonShape}, over {onShader.Count} stock materials");
+                MafiaMaterials.MaterialTextures maps = MafiaMaterials.GetMaterialTextures(mappedHash);
+                string mapsPath = Path.Combine(extracted, maps.Normal ?? "?");
+                Check("diffuse in S000, the combined normal/specular texture in S001",
+                    maps.Diffuse != null && maps.Normal == mappedName + "_ns.dds" && File.Exists(mapsPath),
+                    $"{maps.Diffuse} / {maps.Normal}");
+                float[]? spec = nm.GetParameterByKey("D013")?.Paramaters;
+                Check("Blender's default roughness and specular become the commonest stock power and level",
+                    spec is [16f, 0.3f], spec == null ? "no D013" : string.Join(", ", spec));
+                if (File.Exists(mapsPath))
+                {
+                    byte[] top = DecodeTopLevel(File.ReadAllBytes(mapsPath), 64, 64);
+                    Check("the texture on disk holds a flat normal in red and green and the specular level in blue",
+                        Math.Abs(top[0] - 128) < 8 && Math.Abs(top[1] - 127) < 8 && Math.Abs(top[2] - 70) < 8,
+                        $"{top[0]},{top[1]},{top[2]}");
+                }
+            }
+
+            // A plain material that gains a normal map on a later push needs another shader: it is replaced
+            // under the same name, so the hash every mesh refers to does not move.
+            var seventh = new ExchangeContainer();
+            MeshMaterialInfo gained = NewSlot(seventh, gradient, w, h);
+            gained.Hash = slot.Hash;
+            gained.NormalImage = Image(seventh, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+            var upgrade = new AuthoredMaterialResolver(seventh, catalogHost);
+            bool upgraded = upgrade.TryResolve(
+                new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { gained } }, document, out reason);
+            Check("a plain material that gains a normal map is replaced under the same hash",
+                upgraded && gained.Hash == slot.Hash && MafiaMaterials.GetMaterialTextures(createdHash).Normal != null
+                && MafiaMaterials.Collection?.FindByHash(createdHash)?.ShaderID == 5159568776351604322, reason ?? gained.Hash);
+
+            // ════ Review of #4 ════
+
+            // ── A split texture is two files, and both are its content ──
+            // A fine checkerboard and the grey it averages to agree on everything from half resolution down,
+            // which is all the entry of a 256×256 texture holds; they differ in the top level beside it.
+            {
+                byte[] checker = new byte[256 * 256 * 4], grey = Solid(256, 256, 128, 128, 128);
+                for (int i = 0; i < 256 * 256; i++)
+                {
+                    byte v = ((i % 256) + (i / 256)) % 2 == 0 ? (byte)0 : (byte)255;
+                    checker[i * 4] = checker[(i * 4) + 1] = checker[(i * 4) + 2] = v;
+                    checker[(i * 4) + 3] = 255;
+                }
+                (byte[] checkerEntry, byte[]? checkerTop) = DdsEncoder.Encode(checker, 256, 256);
+                (byte[] greyEntry, byte[]? greyTop) = DdsEncoder.Encode(grey, 256, 256);
+                bool sameEntry = checkerEntry.AsSpan().SequenceEqual(greyEntry);
+                bool otherTop = checkerTop != null && greyTop != null && !checkerTop.AsSpan().SequenceEqual(greyTop);
+                Check("two different 256×256 pictures can share every byte of the entry and differ only in the top level",
+                    sameEntry && otherTop, $"entries equal {sameEntry}, top levels differ {otherTop}");
+
+                string stone = ArchiveTextureWriter.PickName(extracted, "illusion_probe_stone.png", null, checkerEntry, checkerTop);
+                ArchiveTextureWriter.Write(extracted, stone, checkerEntry, checkerTop);
+                string otherName = ArchiveTextureWriter.PickName(extracted, "illusion_probe_stone.jpg", null, greyEntry, greyTop);
+                Check("the second picture is NOT handed the first one's name", !otherName.Equals(stone, StringComparison.OrdinalIgnoreCase),
+                    $"{stone} / {otherName}");
+                Check("…while the same picture again still shares it",
+                    ArchiveTextureWriter.PickName(extracted, "illusion_probe_stone.jpg", null, checkerEntry, checkerTop) == stone);
+                Check("…and a picture stored whole is not the split one that has the same entry",
+                    !ArchiveTextureWriter.Read(extracted, stone).Is(checkerEntry, null));
+            }
+
+            // ── A material refused half-way leaves its pictures as they were ──
+            string held = MafiaMaterials.GetMaterialTextures(createdHash).Diffuse ?? "?";
+            byte[] heldBytes = File.ReadAllBytes(Path.Combine(extracted, held));
+            {
+                // Valid new pixels on Base Color, a normal map whose block never arrived.
+                var broken = new ExchangeContainer();
+                MeshMaterialInfo half = NewSlot(broken, Gradient(w, h, 64), w, h);
+                half.Hash = slot.Hash;
+                half.NormalImage = new MaterialImageRef { Name = "illusion_probe_missing.png", Width = 64, Height = 64, Block = 9999 };
+                var refusing = new AuthoredMaterialResolver(broken, catalogHost);
+                bool taken = refusing.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { half } }, document, out reason);
+                Check("an update whose normal map did not arrive is refused", !taken && reason != null, reason ?? "");
+                Check("…and the diffuse texture it would have replaced is untouched",
+                    File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && refusing.TextureChanges.Count == 0, $"{refusing.TextureChanges.Count} file(s) left changed");
+
+                // Everything valid, and the LIBRARY says no after the files are on disk.
+                var fine = new ExchangeContainer();
+                MeshMaterialInfo whole = NewSlot(fine, Gradient(w, h, 200), w, h);
+                whole.Hash = slot.Hash;
+                whole.NormalImage = Image(fine, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+                var unlucky = new AuthoredMaterialResolver(fine, new RefusingHost());
+                bool landed = unlucky.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { whole } }, document, out reason);
+                Check("an update the library refuses is refused", !landed, reason ?? "");
+                Check("…and the files written for it are put back",
+                    File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && unlucky.TextureChanges.Count == 0);
+
+                // An object with two slots: a valid repaint first, a material that cannot be made second.
+                // The object is skipped — and skipped has to mean the first slot's picture was not replaced.
+                var mixed = new ExchangeContainer();
+                MeshMaterialInfo good = NewSlot(mixed, Gradient(w, h, 150), w, h);
+                good.Hash = slot.Hash;
+                MeshMaterialInfo bad = NewSlot(mixed, Gradient(w, h, 151), w, h);
+                bad.Name = ProbeMaterial + "_bad";
+                bad.NormalImage = new MaterialImageRef { Name = "illusion_probe_missing.png", Width = 64, Height = 64, Block = 9999 };
+                var twoSlots = new AuthoredMaterialResolver(mixed, catalogHost);
+                bool both = twoSlots.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { good, bad } }, document, out reason);
+                Check("an object whose second material cannot be made is refused before its first material is touched",
+                    !both && File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && twoSlots.TextureChanges.Count == 0 && MafiaMaterials.FindHashByName(bad.Name) == null, reason ?? "resolved");
+
+                // The same with a second slot that is new and has no picture at all.
+                var pictureless = new ExchangeContainer();
+                MeshMaterialInfo repaintFirst = NewSlot(pictureless, Gradient(w, h, 152), w, h);
+                repaintFirst.Hash = slot.Hash;
+                var noPicture = new MeshMaterialInfo { Hash = "", Name = ProbeMaterial + "_no_picture", Authored = true };
+                var bareSecond = new AuthoredMaterialResolver(pictureless, catalogHost);
+                bool bareTaken = bareSecond.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { repaintFirst, noPicture } }, document, out reason);
+                Check("…and so is one whose second material is new and has no image, with the first left as it was",
+                    !bareTaken && reason != null && reason.Contains("no image", StringComparison.Ordinal)
+                    && File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && bareSecond.TextureChanges.Count == 0, reason ?? "resolved");
+
+                // A write that fails — the texture held open by something — is not remembered as done: the
+                // next object of the same push sharing the image is refused too, not handed a file that was
+                // never written.
+                var shared = new ExchangeContainer();
+                MeshMaterialInfo one = NewSlot(shared, Gradient(w, h, 170), w, h);
+                one.Hash = slot.Hash;
+                var sameImage = new MeshMaterialInfo
+                {
+                    Hash = slot.Hash, Name = ProbeMaterial, Authored = true, DiffuseImage = one.DiffuseImage,
+                };
+                var blocked = new AuthoredMaterialResolver(shared, catalogHost);
+                bool firstTaken, secondTaken;
+                string? firstWhy, secondWhy;
+                using (new FileStream(Path.Combine(extracted, held), FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    firstTaken = blocked.TryResolve(
+                        new MeshObjectPayload { Id = "new:probe1", Name = "probe", Materials = { one } }, document, out firstWhy);
+                    secondTaken = blocked.TryResolve(
+                        new MeshObjectPayload { Id = "new:probe2", Name = "probe", Materials = { sameImage } }, document, out secondWhy);
+                }
+                Check("a texture that cannot be written refuses the object, and the next object sharing the image as well",
+                    !firstTaken && !secondTaken && firstWhy != null && secondWhy != null, $"{firstWhy} / {secondWhy ?? "resolved"}");
+                Check("…leaving the picture as it was, no temp file beside it, and nothing on record as written",
+                    File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                    && !File.Exists(Path.Combine(extracted, held + ".tmp")) && blocked.TextureChanges.Count == 0
+                    && SdsManifest.Load(extracted).HasFile(held));
+            }
+
+            // ── What a push wrote can be taken back, and put back ──
+            {
+                var repaint = new ExchangeContainer();
+                MeshMaterialInfo painted = NewSlot(repaint, Gradient(w, h, 31), w, h);
+                painted.Hash = slot.Hash;
+                painted.NormalImage = Image(repaint, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+                var journal = new AuthoredMaterialResolver(repaint, catalogHost);
+                // A hundred objects wearing the one material: one file written, one reload asked for.
+                bool all = true;
+                for (int i = 0; i < 100 && all; i++)
+                {
+                    MeshMaterialInfo copy = i == 0 ? painted : new MeshMaterialInfo
+                    {
+                        Hash = slot.Hash, Name = ProbeMaterial, Authored = true,
+                        DiffuseImage = painted.DiffuseImage, NormalImage = painted.NormalImage,
+                    };
+                    all = journal.TryResolve(
+                        new MeshObjectPayload { Id = "new:probe" + i, Name = "probe", Materials = { copy } }, document, out reason);
+                }
+                byte[] repainted = File.ReadAllBytes(Path.Combine(extracted, held));
+                AuthoredMaterialResolver.TextureChange? change = journal.TextureChanges.FirstOrDefault(c => c.File == held);
+                Check("a repaint under the same name is recorded with what the file held before",
+                    all && change?.Before.Texture != null && change.Before.Texture.AsSpan().SequenceEqual(heldBytes)
+                    && !repainted.AsSpan().SequenceEqual(heldBytes), reason ?? $"{journal.TextureChanges.Count} change(s)");
+                Check("a hundred objects sharing the material ask for each texture to be reloaded once",
+                    journal.Rewritten.Count == journal.Rewritten.Distinct().Count()
+                    && journal.Rewritten.Count(r => r.Texture == held) == 1
+                    && journal.TextureChanges.Count(c => c.File == held) == 1,
+                    $"{journal.Rewritten.Count} reload(s), {journal.TextureChanges.Count} file change(s)");
+                if (change != null)
+                {
+                    ArchiveTextureWriter.Restore(change.Dir, change.File, change.Before);
+                    Check("undo puts the old picture back, still listed in the manifest",
+                        File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(heldBytes)
+                        && SdsManifest.Load(extracted).HasFile(held));
+                    ArchiveTextureWriter.Restore(change.Dir, change.File, change.After);
+                    Check("redo puts the new one back",
+                        File.ReadAllBytes(Path.Combine(extracted, held)).AsSpan().SequenceEqual(repainted));
+                }
+
+                // A texture a push INTRODUCED can be taken out again — file and manifest entry both. (That is
+                // what puts a refused material's files back; the push's undo entry leaves an introduced
+                // texture where it is, since the material that names it stays.)
+                var novel = new ExchangeContainer();
+                MeshMaterialInfo born = NewSlot(novel, Gradient(256, 256, 5), 256, 256);
+                born.Name = ProbeMaterial + "_born";
+                born.DiffuseImage!.Name = "illusion_probe_born.png";
+                var birth = new AuthoredMaterialResolver(novel, catalogHost);
+                bool made = birth.TryResolve(
+                    new MeshObjectPayload { Id = "new:born", Name = "probe", Materials = { born } }, document, out reason);
+                if (made && BridgeMeshApplier.TryParseMaterialHash(born.Hash, out ulong bornHash)) pushedHashes.Add(bornHash);
+                AuthoredMaterialResolver.TextureChange? introduced = birth.TextureChanges.FirstOrDefault();
+                Check("a texture a push introduces is recorded as not having been there",
+                    made && introduced != null && !introduced.Before.Exists && introduced.After.TopLevel != null, reason ?? "");
+                if (introduced != null)
+                {
+                    ArchiveTextureWriter.Restore(introduced.Dir, introduced.File, introduced.Before);
+                    SdsManifest gone = SdsManifest.Load(extracted);
+                    Check("taken back, neither file nor manifest entry is left, and the folder still packs",
+                        !File.Exists(Path.Combine(extracted, introduced.File)) && !File.Exists(Path.Combine(extracted, "MIP_" + introduced.File))
+                        && !gone.HasFile(introduced.File) && !gone.HasFile("MIP_" + introduced.File) && Packs(extracted, out _));
+                    ArchiveTextureWriter.Restore(introduced.Dir, introduced.File, introduced.After);
+                    Check("put back, it is there with its top level",
+                        ArchiveTextureWriter.Read(extracted, introduced.File).Is(introduced.After.Texture!, introduced.After.TopLevel));
+                }
+            }
+
+            // ── A material renamed in Blender keeps the hash every other mesh knows it by ──
+            {
+                bool wasMapped = MafiaMaterials.GetMaterialTextures(createdHash).Normal != null;
+                var renamed = new ExchangeContainer();
+                MeshMaterialInfo other = NewSlot(renamed, Gradient(w, h, 77), w, h);
+                other.Hash = slot.Hash;
+                other.Name = ProbeMaterial + "_renamed_in_blender";
+                if (!wasMapped) other.NormalImage = Image(renamed, "illusion_probe_normal.png", 64, 64, 128, 128, 255);
+                var rename = new AuthoredMaterialResolver(renamed, catalogHost);
+                bool swapped = rename.TryResolve(
+                    new MeshObjectPayload { Id = "new:probe", Name = "probe", Materials = { other } }, document, out reason);
+                Check("a renamed material that changes shader is rebuilt under the hash it had",
+                    swapped && other.Hash == slot.Hash && MafiaMaterials.KnowsMaterial(createdHash)
+                    && (MafiaMaterials.GetMaterialTextures(createdHash).Normal != null) != wasMapped,
+                    reason ?? $"{other.Hash} (was {slot.Hash})");
+                Check("…and the library still knows it by its own name, not by the datablock's new one",
+                    MafiaMaterials.GetMaterialName(createdHash) == ProbeMaterial
+                    && MafiaMaterials.FindHashByName(other.Name) == null);
+            }
+
+            // ── A normal map that is not in tangent space is refused in words ──
+            {
+                var spaced = new ExchangeContainer();
+                MeshMaterialInfo objectSpace = NewSlot(spaced, gradient, w, h);
+                objectSpace.Name = ProbeMaterial + "_object_space";
+                objectSpace.NormalSpace = "OBJECT";
+                var spaceCheck = new AuthoredMaterialResolver(spaced, catalogHost);
+                bool accepted = spaceCheck.TryResolve(
+                    new MeshObjectPayload { Id = "new:space", Name = "probe", Materials = { objectSpace } }, document, out reason);
+                Check("a material whose Normal Map node is in Object space is refused, naming the fix",
+                    !accepted && reason != null && reason.Contains("Tangent", StringComparison.Ordinal)
+                    && spaceCheck.TextureChanges.Count == 0 && MafiaMaterials.FindHashByName(objectSpace.Name) == null, reason ?? "");
+            }
+
+            // ── A material shared by objects of two archives has its textures in both ──
+            {
+                // The smallest other district that has a scene: all this needs of it is a folder and a manifest.
+                FileInfo? otherSds = null;
+                ISceneDocument? otherDocument = null;
+                foreach (FileInfo candidate in Directory.GetFiles(MafiaEnvironment.CityFolder, "*.sds").Select(f => new FileInfo(f))
+                             .Where(f => !f.Name.Equals(sds.Name, StringComparison.OrdinalIgnoreCase)
+                                 && !f.Name.EndsWith("_z.sds", StringComparison.OrdinalIgnoreCase)
+                                 && File.Exists(Path.Combine(MafiaEnvironment.ExtractedDir(f), "SDSContent.xml")))
+                             .OrderBy(f => f.Length).Take(6))
+                {
+                    otherDocument = SdsMeshLoader.LoadHierarchy(candidate).Document;
+                    if (otherDocument == null) continue;
+                    otherSds = candidate;
+                    break;
+                }
+                Check("a second archive was found to share a material with", otherDocument != null, otherSds?.Name ?? "none");
+                if (otherSds != null && otherDocument != null)
+                {
+                    otherDir = MafiaEnvironment.ExtractedDir(otherSds);
+                    otherManifest = File.ReadAllBytes(Path.Combine(otherDir, "SDSContent.xml"));
+                    otherBefore = new HashSet<string>(Directory.GetFiles(otherDir), StringComparer.OrdinalIgnoreCase);
+
+                    var both = new ExchangeContainer();
+                    MeshMaterialInfo here = NewSlot(both, Gradient(256, 256, 9), 256, 256);
+                    here.Name = ProbeMaterial + "_shared";
+                    here.DiffuseImage!.Name = "illusion_probe_shared.png";
+                    var there = new MeshMaterialInfo { Hash = "", Name = here.Name, Authored = true, DiffuseImage = here.DiffuseImage };
+                    var shared = new AuthoredMaterialResolver(both, catalogHost);
+                    bool firstOk = shared.TryResolve(
+                        new MeshObjectPayload { Id = "new:a", Name = "probe", Materials = { here } }, document, out reason);
+                    bool secondOk = firstOk && shared.TryResolve(
+                        new MeshObjectPayload { Id = "new:b", Name = "probe", Materials = { there } }, otherDocument, out reason);
+                    BridgeMeshApplier.TryParseMaterialHash(here.Hash, out ulong sharedHash);
+                    if (sharedHash != 0) pushedHashes.Add(sharedHash);
+                    string sharedTexture = MafiaMaterials.GetMaterialTextures(sharedHash).Diffuse ?? "?";
+                    Check("both objects resolve to the one material", firstOk && secondOk && here.Hash == there.Hash, reason ?? "");
+                    Check("its texture and top level are in BOTH archives, each listed in its manifest",
+                        ArchiveTextureWriter.Read(extracted, sharedTexture) is { Texture: not null, TopLevel: not null } a
+                        && ArchiveTextureWriter.Read(otherDir, sharedTexture).Is(a.Texture, a.TopLevel)
+                        && SdsManifest.Load(otherDir).HasFile(sharedTexture) && SdsManifest.Load(otherDir).HasFile("MIP_" + sharedTexture),
+                        sharedTexture);
+                    Check("both archives are queued for a rebuild",
+                        shared.TouchedArchives.ContainsKey(sds.FullName) && shared.TouchedArchives.ContainsKey(otherSds.FullName));
+                    Check("the second archive still packs", Packs(otherDir, out string? otherPack), otherPack ?? "");
+
+                    // …and when the material arrives with no pixels at all (nothing about it changed), an
+                    // archive that has never held its textures still gets them.
+                    ArchiveTextureWriter.Remove(otherDir, sharedTexture);
+                    var later = new AuthoredMaterialResolver(new ExchangeContainer(), catalogHost);
+                    var worn = new MeshMaterialInfo { Hash = here.Hash, Name = here.Name, Authored = true };
+                    bool carried = later.TryResolve(
+                        new MeshObjectPayload { Id = "new:c", Name = "probe", Materials = { worn } }, otherDocument, out reason);
+                    Check("an unchanged material worn in a new archive brings its textures without being re-sent",
+                        carried && File.Exists(Path.Combine(otherDir, sharedTexture)) && later.TextureChanges.Count == 1
+                        && later.TouchedArchives.ContainsKey(otherSds.FullName), reason ?? "");
+                }
+            }
+
+            // ── A part that is rebound gives back the texture it held ──
+            // The library keeps a rewritten texture alive until the last mesh drawing it lets go; a part used
+            // to let go only when its mesh was disposed, so every repaint left one more copy on the GPU.
+            {
+                string gpuFolder = Path.Combine(Path.GetTempPath(), "illusion_bridge_material_gpu");
+                Directory.CreateDirectory(gpuFolder);
+                try
+                {
+                    using var gpu = new Rendering.Gpu.GpuContext();
+                    using var textures = new Rendering.Textures.TextureLibrary(gpu);
+                    textures.AddFolder(gpuFolder);
+                    const string painted = "illusion_probe_repaint.dds";
+                    File.WriteAllBytes(Path.Combine(gpuFolder, painted), DdsEncoder.EncodeDxt1(Gradient(w, h, 0), w, h));
+                    var triangle = new MeshData
+                    {
+                        Name = "probe",
+                        World = System.Numerics.Matrix4x4.Identity,
+                        Positions = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                        Normals = [System.Numerics.Vector3.UnitZ, System.Numerics.Vector3.UnitZ, System.Numerics.Vector3.UnitZ],
+                        UVs = [new(0, 0), new(1, 0), new(0, 1)],
+                        Indices = [0, 1, 2],
+                        Parts = [new MeshPart(0, 3, painted, null, null, 0xABCDEF)],
+                    };
+                    using Rendering.Gpu.GpuMesh mesh = Rendering.Gpu.GpuMesh.Create(gpu, triangle, textures);
+                    int worst = 0;
+                    for (int i = 1; i <= 20; i++)
+                    {
+                        File.WriteAllBytes(Path.Combine(gpuFolder, painted), DdsEncoder.EncodeDxt1(Gradient(w, h, i), w, h));
+                        textures.Invalidate(painted);
+                        mesh.RebindPartTextures(0xABCDEF, painted, null, null, System.Numerics.Vector4.One);
+                        worst = Math.Max(worst, textures.RetiredCount);
+                    }
+                    Check("twenty repaints of a texture a loaded mesh draws leave no old copy alive",
+                        textures.RetiredCount == 0 && worst == 0, $"{textures.RetiredCount} retired at the end, {worst} at most");
+                }
+                finally
+                {
+                    Directory.Delete(gpuFolder, recursive: true);
+                }
+            }
+
+            // ── A container written by the addon itself ──
+            if (pushedContainer != null)
+            {
+                ExchangeContainer pushed = ExchangeReader.Read(pushedContainer);
+                var fromBlender = new AuthoredMaterialResolver(pushed, catalogHost);
+                int meshes = 0;
+                foreach (ExchangeObject obj in pushed.Objects.Where(o => o.Kind == ExchangeSchema.KindMesh))
+                {
+                    meshes++;
+                    MeshObjectPayload fromAddon = MeshPayloadCodec.Read(pushed, obj);
+                    bool ok = fromBlender.TryResolve(fromAddon, document, out reason);
+                    Check($"addon object '{fromAddon.Name}': materials resolve", ok, reason ?? "");
+                    if (!ok) continue;
+                    var made = BridgeObjectFactory.TryCreate(document, fromAddon, out reason);
+                    Check($"addon object '{fromAddon.Name}': becomes a frame object", made != null,
+                        reason ?? $"{made?.Geometry.NewMesh?.Indices.Length / 3} faces");
+                    made?.Detach();
+                }
+                Check("the addon's container carried a mesh", meshes > 0);
+                foreach (Illusion.Bridge.Protocol.PushMaterial m in fromBlender.Resolved.Where(m => m.Authored))
+                {
+                    ulong.TryParse(m.Hash.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out ulong hash);
+                    pushedHashes.Add(hash);
+                    string? tex = MafiaMaterials.GetMaterialTextures(hash).Diffuse;
+                    string path = Path.Combine(extracted, tex ?? "?");
+                    Check($"addon material '{m.Name}': texture written", File.Exists(path), tex ?? "(none)");
+                    if (!File.Exists(path)) continue;
+                    writtenFiles.Add(path);
+                    string companionPath = Path.Combine(extracted, "MIP_" + tex);
+                    bool split = DdsEncoder.IsSplit(BitConverter.ToInt32(File.ReadAllBytes(path), 16) * 2, 256)
+                        && File.Exists(companionPath);
+                    if (File.Exists(companionPath))
+                    {
+                        writtenFiles.Add(companionPath);
+                        Check($"addon material '{m.Name}': a 256+ image arrived split, with HasMIP and a Mipmap entry",
+                            split && SdsManifest.Load(extracted).EntryFields(tex!) is { } f && f[2].Value == "1"
+                            && SdsManifest.Load(extracted).HasFile("MIP_" + tex));
+                    }
+                    File.Copy(path, Path.Combine(Path.GetTempPath(), "illusion_bridge_material_pushed.dds"), overwrite: true);
+                }
+                Check("the addon's material was created", pushedHashes.Count > 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            fail++;
+            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+        }
+        finally
+        {
+            foreach (string file in writtenFiles)
+                if (File.Exists(file)) File.Delete(file);
+            if (extractedDir != null && folderBefore != null)
+            {
+                foreach (string file in Directory.GetFiles(extractedDir))
+                    if (!folderBefore.Contains(file)) File.Delete(file);
+            }
+            if (manifestPath != null && manifestBytes != null) File.WriteAllBytes(manifestPath, manifestBytes);
+            if (otherDir != null && otherBefore != null && otherManifest != null)
+            {
+                foreach (string file in Directory.GetFiles(otherDir))
+                    if (!otherBefore.Contains(file)) File.Delete(file);
+                File.WriteAllBytes(Path.Combine(otherDir, "SDSContent.xml"), otherManifest);
+            }
+            if (createdHash != 0) MafiaMaterialCatalog.Instance.RemoveMaterial(createdHash); // never saved to disk
+            foreach (ulong hash in pushedHashes) MafiaMaterialCatalog.Instance.RemoveMaterial(hash);
+            if (manifestBytes != null) sb.AppendLine("restored the manifest and removed the probe texture");
+            sb.Insert(0, $"BRIDGE MATERIAL PROBE: {pass} passed, {fail} failed\n\n");
+            File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
+    /// <summary>A library that takes nothing — what a push meets when the catalog cannot be written.</summary>
+    private sealed class RefusingHost : IAuthoredMaterialHost
+    {
+        public ulong? Create(AuthoredMaterial material) => null;
+
+        public bool Update(ulong hash, AuthoredMaterial material) => false;
+
+        public ulong? Replace(ulong hash, AuthoredMaterial material) => null;
+    }
+
+    private static MeshMaterialInfo NewSlot(ExchangeContainer container, byte[] rgba, int w, int h) => new()
+    {
+        Hash = "",
+        Name = ProbeMaterial,
+        Authored = true,
+        DiffuseImage = new MaterialImageRef
+        {
+            Name = ProbeImage,
+            Width = w,
+            Height = h,
+            Block = container.AddBlock(ExchangeSchema.DtypeU8, 4, w * h, rgba),
+        },
+    };
+
+    private static byte[] Solid(int w, int h, byte r, byte g, byte b)
+    {
+        var rgba = new byte[w * h * 4];
+        for (int i = 0; i < rgba.Length; i += 4)
+        {
+            rgba[i] = r;
+            rgba[i + 1] = g;
+            rgba[i + 2] = b;
+            rgba[i + 3] = 255;
+        }
+        return rgba;
+    }
+
+    private static MaterialImageRef Image(ExchangeContainer container, string name, int w, int h, byte r, byte g, byte b) => new()
+    {
+        Name = name,
+        Width = w,
+        Height = h,
+        Block = container.AddBlock(ExchangeSchema.DtypeU8, 4, w * h, Solid(w, h, r, g, b)),
+    };
+
+    private static byte[] Gradient(int w, int h, int shift)
+    {
+        var rgba = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int p = (y * w + x) * 4;
+                rgba[p] = (byte)((x * 255 / (w - 1) + shift) & 255);
+                rgba[p + 1] = (byte)(y * 255 / (h - 1));
+                rgba[p + 2] = (byte)((x + y) * 255 / (w + h - 2));
+                rgba[p + 3] = 255;
+            }
+        }
+        return rgba;
+    }
+
+    private static bool Packs(string folder, out string? error)
+    {
+        try
+        {
+            SdsArchive archive = SdsArchive.Pack(folder, GameProfile.MafiaII);
+            using var sink = new MemoryStream();
+            archive.Save(sink, new SdsWriteOptions());
+            error = null;
+            return sink.Length > 0;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static byte[] DecodeTopLevel(byte[] dds, int w, int h)
+    {
+        var rgba = new byte[w * h * 4];
+        int offset = 128;
+        Span<int> palette = stackalloc int[12];
+        for (int by = 0; by < h / 4; by++)
+        {
+            for (int bx = 0; bx < w / 4; bx++, offset += 8)
+            {
+                ushort c0 = BitConverter.ToUInt16(dds, offset), c1 = BitConverter.ToUInt16(dds, offset + 2);
+                uint indices = BitConverter.ToUInt32(dds, offset + 4);
+                Expand(c0, palette[..3]);
+                Expand(c1, palette.Slice(3, 3));
+                for (int c = 0; c < 3; c++)
+                {
+                    palette[6 + c] = c0 > c1 ? (2 * palette[c] + palette[3 + c]) / 3 : (palette[c] + palette[3 + c]) / 2;
+                    palette[9 + c] = c0 > c1 ? (palette[c] + 2 * palette[3 + c]) / 3 : 0;
+                }
+                for (int i = 0; i < 16; i++)
+                {
+                    int k = (int)((indices >> (i * 2)) & 3);
+                    int p = ((by * 4 + (i >> 2)) * w + bx * 4 + (i & 3)) * 4;
+                    rgba[p] = (byte)palette[k * 3];
+                    rgba[p + 1] = (byte)palette[k * 3 + 1];
+                    rgba[p + 2] = (byte)palette[k * 3 + 2];
+                    rgba[p + 3] = 255;
+                }
+            }
+        }
+        return rgba;
+    }
+
+    private static void Expand(ushort c, Span<int> rgb)
+    {
+        int r = c >> 11, g = (c >> 5) & 63, b = c & 31;
+        rgb[0] = (r << 3) | (r >> 2);
+        rgb[1] = (g << 2) | (g >> 4);
+        rgb[2] = (b << 3) | (b >> 2);
+    }
+
+    private static double MeanError(byte[] a, byte[] b)
+    {
+        long sum = 0;
+        int n = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if ((i & 3) == 3) continue;
+            sum += Math.Abs(a[i] - b[i]);
+            n++;
+        }
+        return (double)sum / n;
+    }
+}

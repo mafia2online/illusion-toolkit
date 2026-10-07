@@ -23,9 +23,10 @@ public sealed class DecodeTools
         [Description("Path to a .act file. Omit if using base64Data.")] string? filePath = null,
         [Description("Base64 of an Actors payload. Omit if using filePath.")] string? base64Data = null,
         [Description("Index of the first actor to return. Default 0.")] int offset = 0,
-        [Description("How many actors to return. Default 100.")] int limit = 0)
+        [Description("How many actors to return. Default 100.")] int limit = 0,
+        [Description("Also list each actor's behaviour fields by name (a light's colour and range, a sound's volume). Default false.")] bool includeProperties = false)
     {
-        return Run(filePath, base64Data, payload => Decoders.Actors(payload, offset, limit));
+        return Run(filePath, base64Data, payload => Decoders.Actors(payload, offset, limit, includeProperties));
     }
 
     [McpServerTool(Name = "decode_frame_resource")]

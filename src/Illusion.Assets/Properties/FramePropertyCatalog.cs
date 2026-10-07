@@ -91,10 +91,40 @@ internal static class FramePropertyCatalog
             "Index into the material table. Re-resolved by the viewport only after the district reloads."));
         c.AddType("Mesh", ByteDesc("Mesh.DeformPartIndex", "Deform part index",
             () => sm.DeformPartIndex, v => sm.DeformPartIndex = v));
+        AddDrawDistances(sm, c);
 
         c.AddTypeUnknown(ByteDesc("Mesh.Unk_18_1", "Unk_18_1", () => sm.Unk_18_1, v => sm.Unk_18_1 = v));
         c.AddTypeUnknown(ByteDesc("Mesh.Unk_18_2", "Unk_18_2", () => sm.Unk_18_2, v => sm.Unk_18_2 = v));
         c.AddTypeUnknown(ByteDesc("Mesh.Unk_18_3", "Unk_18_3", () => sm.Unk_18_3, v => sm.Unk_18_3 = v));
+    }
+
+    /// <summary>
+    /// How far each level of detail is drawn, in metres. The file keeps the SQUARE of the distance, and the last
+    /// level's is where the object stops being drawn at all — the one cost control a static object has, since
+    /// the game culls by distance and by view cone and by nothing else: a room behind a wall is drawn all the
+    /// same. An object made through the Blender bridge starts at a million metres, i.e. never culled.
+    /// <para>
+    /// The block is found through the frame's reference, not through <c>Geometry</c>: that getter builds an
+    /// empty block for a frame that has none, and a property panel must not create data by being looked at.
+    /// A block several frames share is one block — the value changes for all of them.
+    /// </para>
+    /// </summary>
+    private static void AddDrawDistances(FrameObjectSingleMesh sm, GroupCollector c)
+    {
+        if (!sm.Refs.TryGetValue(FrameEntryRefTypes.Geometry, out int id)) return;
+        if (!sm.Resource.FrameGeometries.TryGetValue(id, out Formats.Frames.Resources.FrameGeometry? geometry)) return;
+        if (geometry.LOD is not { Length: > 0 } lods) return;
+
+        for (int i = 0; i < lods.Length; i++)
+        {
+            Formats.Frames.Resources.FrameLOD lod = lods[i];
+            c.AddType("Mesh", FloatDesc($"Mesh.DrawDistance{i}", $"LOD {i} draw distance",
+                () => MathF.Sqrt(MathF.Max(lod.Distance, 0f)),
+                v => lod.Distance = MathF.Max(v, 0f) * MathF.Max(v, 0f),
+                i == lods.Length - 1
+                    ? "Metres from the camera at which the object stops being drawn. Zero means never visible."
+                    : "Metres from the camera at which this level hands over to the next."));
+        }
     }
 
     private static void AddModel(FrameObjectModel m, GroupCollector c)

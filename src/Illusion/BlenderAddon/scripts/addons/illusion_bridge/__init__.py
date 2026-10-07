@@ -55,6 +55,36 @@ def _pump():
     return 0.05
 
 
+def _stamp_materials(resolved):
+    """Record on each Blender material what the toolkit made of it.
+
+    The hash is what later pushes send instead of the pixels. "authored" marks a material the bridge
+    created — as opposed to one that merely shared its name with a game material — and the signature
+    remembers which image the toolkit already has.
+    """
+    pending = server.state.pop("pending_signatures", None) or {}
+    for entry in resolved:
+        name = entry.get("name")
+        material = bpy.data.materials.get(name) if name else None
+        if material is None:
+            continue
+        if not entry.get("hash"):
+            # The toolkit no longer has the material this datablock remembers: forget it, so the next
+            # push sends the whole thing again.
+            for key in ("illusion_hash", materials.AUTHORED_PROP, materials.SIGNATURE_PROP):
+                if key in material.keys():
+                    del material[key]
+            server.log(f"material '{name}' is gone from the toolkit; it will be sent anew")
+            continue
+        material["illusion_hash"] = entry["hash"]
+        if entry.get("authored"):
+            material[materials.AUTHORED_PROP] = True
+            signature = pending.get(name)
+            if signature is not None:
+                material[materials.SIGNATURE_PROP] = signature
+        server.log(f"material '{name}' is game material {entry['hash']}")
+
+
 def _dispatch(client, msg):
     mtype = msg.get("type")
     server.log(f"dispatch {mtype}")
@@ -90,6 +120,7 @@ def _dispatch(client, msg):
         server.state["last_push_ack"] = summary
         server.state["last_push_ok"] = ok
         _tag_redraw()
+        _stamp_materials(msg.get("materials") or [])
         for skip in skipped:
             server.log(f"push skipped {skip.get('id', '?')}: {skip.get('reason', '')}")
         for error in errors:

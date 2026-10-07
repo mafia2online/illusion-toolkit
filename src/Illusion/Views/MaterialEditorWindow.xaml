@@ -107,7 +107,7 @@
                     HorizontalAlignment="Stretch" Click="Delete_Click" />
         </Grid>
 
-        <!-- Center (widest): name/hash identity over the live preview sphere. -->
+        <!-- Center (widest): name/hash identity over the live preview sphere (or mesh shape). -->
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -121,10 +121,23 @@
                 <v:CopyableTextField Label="Hash" Value="{Binding HashHex, Mode=OneWay}" ReadOnly="True"
                                      Margin="0,4,0,0" />
             </StackPanel>
-            <Border Grid.Row="1" Background="{StaticResource SurfaceWell}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1"
-                    CornerRadius="6" ClipToBounds="True">
-                <vp:MaterialPreviewViewport x:Name="Preview" />
-            </Border>
+            <Grid Grid.Row="1">
+                <Border Background="{StaticResource SurfaceWell}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1"
+                        CornerRadius="6" ClipToBounds="True">
+                    <vp:MaterialPreviewViewport x:Name="Preview" />
+                </Border>
+                <!-- Preview mode toggle — shown only when a mesh context is available (UseMesh button
+                     becomes enabled). Floats in the top-right corner of the preview border. -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,8,8,0">
+                    <RadioButton x:Name="SphereModeBtn" Content="Sphere" IsChecked="True"
+                                 Style="{StaticResource PreviewModeToggle}"
+                                 Checked="PreviewMode_Changed" />
+                    <RadioButton x:Name="MeshModeBtn" Content="Mesh" IsEnabled="False"
+                                 Style="{StaticResource PreviewModeToggle}"
+                                 Checked="PreviewMode_Changed" />
+                </StackPanel>
+            </Grid>
         </Grid>
 
         <!-- Right: texture slots (editable, add/remove) and shader parameters (every known code is
@@ -175,10 +188,14 @@
             </ScrollViewer>
 
             <!-- Mesh-slot assignment — pinned under the sidebar, shown only when the editor was opened
-                 from a mesh's material tile. Details in the tooltip. -->
-            <Button Grid.Row="1" x:Name="AssignBtn" Style="{StaticResource AccentButton}" Height="28"
-                    Margin="0,10,8,0" HorizontalAlignment="Stretch" Visibility="Collapsed"
-                    Content="Assign" Click="Assign_Click" />
+                 from a mesh's material tile. The label identifies the target mesh and slot. -->
+            <StackPanel Grid.Row="1" x:Name="AssignPanel" Visibility="Collapsed" Margin="0,10,8,0">
+                <TextBlock x:Name="AssignContextLabel" Style="{StaticResource Caption}"
+                           TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                <Button x:Name="AssignBtn" Style="{StaticResource AccentButton}" Height="28"
+                        HorizontalAlignment="Stretch"
+                        Content="Assign" Click="Assign_Click" />
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

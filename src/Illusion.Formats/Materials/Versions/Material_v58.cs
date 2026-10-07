@@ -96,6 +96,14 @@ public class Material_v58 : IMaterial
 
             Samplers.Add(NewSampler);
         }
+        else if (Preset == MaterialPreset.DiffuseNormal)
+        {
+            // The slots only: the fields v57 had to correct (Unk0, the samplers' TexType) are left as this
+            // version's Default preset leaves them — there is no Definitive Edition library here to
+            // measure them against.
+            Samplers.Add(new MaterialSampler_v58 { ID = "S000" });
+            Samplers.Add(new MaterialSampler_v58 { ID = "S001" });
+        }
     }
 
     public override HashName? GetTextureByID(string SamplerName)

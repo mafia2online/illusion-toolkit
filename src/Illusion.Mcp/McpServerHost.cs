@@ -250,7 +250,8 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<MaterialTools>()
             .WithTools<TextureTools>()
             .WithTools<FormatTools>()
-            .WithTools<LuaTools>();
+            .WithTools<LuaTools>()
+            .WithTools<EditorTools>();
 
         _options.ConfigureServices?.Invoke(builder.Services);
 

@@ -134,6 +134,38 @@
         </Setter>
     </Style>
 
+    <!-- Small preview-mode toggle: Sphere / Mesh radio pills that float over the dark preview surface.
+         Checked = accent-blue fill; unchecked = semi-transparent dark; disabled = dim. -->
+    <Style x:Key="PreviewModeToggle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" CornerRadius="3" Padding="{TemplateBinding Padding}"
+                            Background="#44000000" BorderBrush="#33FFFFFF" BorderThickness="1">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#88FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#55FFFFFF" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#22FFFFFF" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Accent menu button: the AccentButton look as a ToggleButton (centered content + chevron),
          for full-width actions whose choices open in a popup (the material editor's "Add" slot). -->
     <Style x:Key="AccentDropButton" TargetType="ToggleButton">

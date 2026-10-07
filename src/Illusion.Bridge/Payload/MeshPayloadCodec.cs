@@ -18,6 +18,47 @@ public sealed class MeshMaterialInfo
     [JsonPropertyName("specular")] public string? Specular { get; set; }
     [JsonPropertyName("startIndex")] public int StartIndex { get; set; }
     [JsonPropertyName("numFaces")] public int NumFaces { get; set; }
+
+    /// <summary>Blender → toolkit only: the material was made in Blender, not handed out by the toolkit.
+    /// With no <see cref="Hash"/> it is new and becomes a game material; with one it is a material an
+    /// earlier push created, and <see cref="DiffuseImage"/> (when present) replaces its texture.</summary>
+    [JsonPropertyName("authored")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Authored { get; set; }
+
+    /// <summary>Blender → toolkit only: the image wired into Base Color, when it has to be (re)encoded.</summary>
+    [JsonPropertyName("diffuseImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? DiffuseImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the image behind the Normal Map node, in Blender's convention
+    /// (green up). Sent together with the other images whenever any of them changed.</summary>
+    [JsonPropertyName("normalImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? NormalImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the Space of the material's Normal Map node when it is NOT tangent
+    /// space ("OBJECT", "WORLD", …). Such a map is not sent as <see cref="NormalImage"/> — the game reads
+    /// tangent-space normals only — and the material is refused with the reason.</summary>
+    [JsonPropertyName("normalSpace")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NormalSpace { get; set; }
+
+    /// <summary>Blender → toolkit only: the image wired into the specular input.</summary>
+    [JsonPropertyName("specularImage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MaterialImageRef? SpecularImage { get; set; }
+
+    /// <summary>Blender → toolkit only: the Principled specular level (0.5 is Blender's default) and
+    /// roughness, where they are plain values rather than textures.</summary>
+    [JsonPropertyName("specularLevel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? SpecularLevel { get; set; }
+
+    /// <inheritdoc cref="SpecularLevel"/>
+    [JsonPropertyName("roughness")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? Roughness { get; set; }
 }
 
 /// <summary>

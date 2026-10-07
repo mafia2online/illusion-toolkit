@@ -17,13 +17,18 @@ public static class GameMaterialCreator
     /// Returns null when the name (or its hash) is already taken. The material dictionary is swapped
     /// copy-on-write, so concurrent readers (background mesh loaders) never observe a half-mutated map.
     /// </summary>
-    public static IMaterial? AddDefault(MaterialLibrary library, string name)
+    public static IMaterial? AddDefault(MaterialLibrary library, string name) =>
+        Add(library, name, MaterialPreset.Default);
+
+    /// <summary>The same, from any preset — how a material that arrives with a normal map gets the shader
+    /// that reads one.</summary>
+    public static IMaterial? Add(MaterialLibrary library, string name, MaterialPreset preset)
     {
         ArgumentNullException.ThrowIfNull(library);
         if (string.IsNullOrWhiteSpace(name)) return null;
 
         IMaterial material = MaterialFactory.ConstructMaterial(library.Version);
-        material.SetupFromPreset(MaterialPreset.Default);
+        material.SetupFromPreset(preset);
         material.SetName(name);
         if (library.Materials.ContainsKey(material.GetMaterialHash())) return null;
 

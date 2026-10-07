@@ -8,7 +8,10 @@ namespace Illusion.Formats.Archive.Handlers;
 
 /// <summary>Texture: the entry wraps a DDS in a small header (name hash + MIP flag). Extraction strips
 /// the wrapper and keeps the DDS; packing rebuilds it and budgets VRAM as the DDS payload minus its
-/// 128-byte header.</summary>
+/// 128-byte header — plus, for a texture with a MIP companion, that companion's payload: the stock
+/// archives charge the separately streamed top level to the TEXTURE entry and leave the Mipmap entry at
+/// zero (381 of 381 textures in italy.sds). Leaving it out under-reports the archive's video memory by the
+/// size of every top level it carries.</summary>
 internal sealed class TextureHandler : IResourceHandler
 {
     public string? Extract(ExtractContext ctx, ResourceEntry entry, string name)
@@ -44,6 +47,11 @@ internal sealed class TextureHandler : IResourceHandler
             entry.Data = stream.ToArray();
         }
         entry.SlotVramRequired = (uint)(texData.Length - 128);
+        if (hasMip != 0)
+        {
+            var companion = new FileInfo(ResourcePaths.Join(ctx.Folder, "MIP_" + file));
+            if (companion.Exists && companion.Length > 128) entry.SlotVramRequired += (uint)(companion.Length - 128);
+        }
         return entry;
     }
 }

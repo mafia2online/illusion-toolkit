@@ -37,6 +37,9 @@ public sealed unsafe class TextureLibrary : IDisposable
     private Func<string, string?>? _fallbackResolver; // name → full path when no registered folder has it
     private int _foldersVersion; // bumped by AddFolder; guards Acquire against caching a stale miss
     private readonly Dictionary<string, Entry> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // Entries dropped by Invalidate while meshes still draw with them, keyed by SRV handle: they are no
+    // longer findable by name, and die when the last lease on them is returned.
+    private readonly Dictionary<nint, Entry> _retired = new();
     private ComPtr<ID3D11ShaderResourceView> _white;      // immutable after the ctor
     private ComPtr<ID3D11ShaderResourceView> _flatNormal; // immutable after the ctor
 
@@ -79,6 +82,29 @@ public sealed unsafe class TextureLibrary : IDisposable
             var misses = _cache.Where(kv => kv.Value.Srv.Handle == _white.Handle).Select(kv => kv.Key).ToList();
             foreach (string name in misses) _cache.Remove(name);
         }
+    }
+
+    /// <summary>
+    /// Forgets a cached texture whose FILE was rewritten, so the next <see cref="Acquire"/> reads it again.
+    /// Meshes that already hold the old view keep drawing with it until they rebind or are disposed — the
+    /// view stays alive for exactly as long as their leases do.
+    /// </summary>
+    public void Invalidate(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        lock (_sync)
+        {
+            if (!_cache.Remove(name, out Entry? entry)) return;
+            if (entry.Srv.Handle == _white.Handle) return; // a cached miss — nothing to keep alive
+            _retired[(nint)entry.Srv.Handle] = entry;
+        }
+    }
+
+    /// <summary>How many rewritten textures are still held by a mesh that has not rebound — zero once every
+    /// part drawing one has taken the new picture. What a repaint leaks, if it leaks.</summary>
+    public int RetiredCount
+    {
+        get { lock (_sync) return _retired.Count; }
     }
 
     /// <summary>Resolves a texture and records the acquisition in <paramref name="leases"/> (nothing is
@@ -177,6 +203,13 @@ public sealed unsafe class TextureLibrary : IDisposable
         {
             foreach (TextureLease lease in leases)
             {
+                if (_retired.TryGetValue(lease.Handle, out Entry? retired))
+                {
+                    if (--retired.Refs > 0) continue;
+                    _retired.Remove(lease.Handle);
+                    retired.Srv.Dispose();
+                    continue;
+                }
                 if (!_cache.TryGetValue(lease.Name, out Entry? entry)) continue;
                 if ((nint)entry.Srv.Handle != lease.Handle) continue;
                 if (--entry.Refs > 0) continue;
@@ -215,6 +248,8 @@ public sealed unsafe class TextureLibrary : IDisposable
                 if (entry.Srv.Handle != _white.Handle) entry.Srv.Dispose();
             }
             _cache.Clear();
+            foreach (Entry entry in _retired.Values) entry.Srv.Dispose();
+            _retired.Clear();
         }
         _flatNormal.Dispose();
         _white.Dispose();

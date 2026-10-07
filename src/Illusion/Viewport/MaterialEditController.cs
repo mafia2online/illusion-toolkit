@@ -1,4 +1,5 @@
 using Illusion.Assets;
+using Illusion.Assets.Bridge;
 using Illusion.Assets.Materials;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
@@ -122,6 +123,78 @@ internal sealed class MaterialEditController
         _host.Editing.History.Push(new CreateEdit(this, hash.Value));
         AfterMaterialChanged(hash.Value);
         return hash;
+    }
+
+    // ── Materials made in Blender (the bridge's IAuthoredMaterialHost, with history) ──
+
+    /// <summary>
+    /// Creates a material that arrived from Blender, complete — its shader chosen by whether it carries a
+    /// normal map, its textures bound, its specular set. ONE history entry: undoing it removes the
+    /// material, bindings and all, and redo restores that same instance.
+    /// </summary>
+    public ulong? CreateAuthored(string library, AuthoredMaterial material)
+    {
+        MafiaMaterialCatalog catalog = MafiaMaterialCatalog.Instance;
+        ulong? hash = catalog.CreateMaterial(library, material.Name, material.NormalMapped);
+        if (hash == null) return null;
+        CatalogAuthoredMaterials.Apply(catalog, hash.Value, material);
+        _host.Editing.History.Push(new CreateEdit(this, hash.Value));
+        AfterMaterialChanged(hash.Value);
+        return hash;
+    }
+
+    /// <summary>Brings a Blender-made material of the same shape up to date — each change through the path
+    /// the editor itself uses, so each is its own undoable edit and a value that did not change records
+    /// nothing.</summary>
+    public bool UpdateAuthored(ulong hash, AuthoredMaterial material)
+    {
+        if (!SetTexture(hash, "S000", material.Diffuse)) return false;
+        if (material.NormalSpecular == null) return true;
+        if (!SetTexture(hash, "S001", material.NormalSpecular)) return false;
+        return SetParameter(hash, "D013", [material.SpecularPower, material.SpecularLevel]);
+    }
+
+    /// <summary>Replaces a Blender-made material that gained or lost its normal map — a different shader,
+    /// so a different record under the same name and hash. A delete and a create, both undoable.</summary>
+    public ulong? ReplaceAuthored(string library, ulong hash, AuthoredMaterial material) =>
+        DeleteMaterial(hash) ? CreateAuthored(library, material) : null;
+
+    /// <summary>
+    /// A texture FILE was rewritten under the name the material already uses: nothing in the catalog
+    /// changed, so the renderer is told to forget its copy and every part drawing the material re-reads it.
+    /// </summary>
+    public void ReloadTexture(ulong hash, string textureName) => ReloadTextureFiles([textureName]);
+
+    /// <summary>
+    /// Several texture files were rewritten under their names — by a push, or by undoing one. Each is
+    /// forgotten once, and each material that names any of them rebinds its parts once: a push of a hundred
+    /// objects sharing a material used to invalidate and rebind a hundred times over, every time across
+    /// every loaded mesh.
+    /// </summary>
+    public void ReloadTextureFiles(IEnumerable<string> textureNames)
+    {
+        var names = new HashSet<string>(textureNames, StringComparer.OrdinalIgnoreCase);
+        if (names.Count == 0 || _host.Rnd is not { } renderer) return;
+        foreach (string name in names) renderer.Textures.Invalidate(name);
+
+        var drawn = new HashSet<ulong>();
+        foreach (GpuMesh gm in renderer.Meshes)
+        {
+            foreach (GpuPart part in gm.Parts)
+            {
+                if (part.MaterialHash != 0) drawn.Add(part.MaterialHash);
+            }
+        }
+        foreach (ulong hash in drawn)
+        {
+            MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
+            if ((tex.Diffuse != null && names.Contains(tex.Diffuse)) || (tex.Normal != null && names.Contains(tex.Normal))
+                || (tex.Specular != null && names.Contains(tex.Specular)))
+            {
+                RefreshMeshesUsing(hash);
+            }
+        }
+        _host.RaiseMaterialsChanged();
     }
 
     /// <summary>Renames a material — the FNV64 hash re-derives from the name (undoable). Null when the

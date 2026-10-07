@@ -329,6 +329,94 @@ internal sealed class ActorEditController
         }
     }
 
+    // ── Import from another archive (undoable) ──
+
+    /// <summary>
+    /// Brings an actor in from another archive's pack — a light from an interior into a district that has
+    /// none — as one undoable edit, and returns its tree row. Null with a reason when the pack refuses it.
+    /// </summary>
+    /// <param name="actorsRow">The "Actors" row of the archive that receives it.</param>
+    public SceneNode? Import(SceneNode actorsRow, ActorsFile sourcePack, ActorEntry source, string name,
+        System.Numerics.Vector3 position, out string? reason)
+    {
+        reason = null;
+        if (actorsRow.Source is not ActorDocumentAdapter document || document.Placements.Packs.Count == 0)
+        {
+            reason = "this archive has no actor pack to add to";
+            return null;
+        }
+        ActorsFile pack = document.Placements.Packs[0].Pack;
+        ActorEntry? copy = pack.Import(sourcePack, source, name, position, out reason);
+        if (copy == null) return null;
+
+        ActorNodeAdapter adapter = document.ActorNode(copy);
+        var node = new SceneNode(adapter.Name, "Actor", false) { Source = adapter };
+
+        // Under the row of its own entity type, which a district that never had one of these does not have yet.
+        SceneNode? section = actorsRow.Children.FirstOrDefault(
+            c => string.Equals(c.Name, adapter.TypeName, StringComparison.OrdinalIgnoreCase));
+        bool newSection = section == null;
+        section ??= new SceneNode(adapter.TypeName, "Actors", true);
+
+        var edit = new ImportActorEdit(this, copy, node, section, newSection ? actorsRow : null, document, pack);
+        edit.Redo();
+        _host.History.Push(edit);
+        return node;
+    }
+
+    private sealed class ImportActorEdit : INodeEdit
+    {
+        private readonly ActorEditController _owner;
+        private readonly ActorEntry _actor;
+        private readonly SceneNode _node;
+        private readonly SceneNode _section;
+        private readonly SceneNode? _sectionParent;   // set when the import had to create the type's row
+        private readonly ActorDocumentAdapter _document;
+        private readonly ActorsFile _pack;
+        private ActorRemoval? _removal;               // set while undone
+
+        public ImportActorEdit(ActorEditController owner, ActorEntry actor, SceneNode node, SceneNode section,
+            SceneNode? sectionParent, ActorDocumentAdapter document, ActorsFile pack)
+        {
+            _owner = owner;
+            _actor = actor;
+            _node = node;
+            _section = section;
+            _sectionParent = sectionParent;
+            _document = document;
+            _pack = pack;
+        }
+
+        public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
+
+        public void Redo()
+        {
+            if (_removal != null)
+            {
+                _pack.Restore(_removal);
+                _removal = null;
+            }
+            _document.Placements.AddImported(_actor, _pack);
+            if (_sectionParent != null && _section.Parent == null) _sectionParent.AddChild(_section);
+            if (_node.Parent == null) _section.AddChild(_node);
+            else if (!_section.Children.Contains(_node)) _section.InsertChild(_section.Children.Count, _node);
+            _owner._host.Streamer.Actors.AddActorRow(_document.Placements, _actor, _node);
+            _owner._host.Persistence.MarkFrameModified(_node);
+            _owner.AfterChange(new[] { _node });
+        }
+
+        public void Undo()
+        {
+            // The behaviour row the import added stays in the pack: rows are addressed by position, and one
+            // nothing points at costs a few bytes rather than every later index.
+            _removal = _pack.Remove(_actor);
+            _document.Placements.Detach(_actor);
+            _section.Children.Remove(_node);
+            _owner._host.Persistence.MarkFrameModified(_section);
+            _owner.AfterChange();
+        }
+    }
+
     private static int IndexIn(IReadOnlyList<ActorEntry> list, ActorEntry actor)
     {
         for (int i = 0; i < list.Count; i++) if (ReferenceEquals(list[i], actor)) return i;
