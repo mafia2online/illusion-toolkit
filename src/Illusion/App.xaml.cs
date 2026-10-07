@@ -86,12 +86,13 @@ public partial class App : Application
             Port = settings.McpPort is > 0 and <= 65535 ? settings.McpPort : McpHostOptions.DefaultPort,
 
             // Where tools get their hands on the application: the UI marshal for anything that will
-            // touch the scene or the viewport, and the game environment the file-browsing tools
-            // report paths from. The rest of the state future tools need (the open document, the
-            // selection) is registered alongside them.
+            // touch the scene or the viewport, the game environment the file-browsing tools report
+            // paths from, and the running editor itself — the area, the selection, the camera, the
+            // Blender session — for the tools that drive it.
             ConfigureServices = services => services
                 .AddSingleton<IUiThreadMarshal>(new WpfUiThreadMarshal(Dispatcher))
-                .AddSingleton<IGameEnvironment, AppGameEnvironment>(),
+                .AddSingleton<IGameEnvironment, AppGameEnvironment>()
+                .AddSingleton<IEditorSession, AppEditorSession>(),
         });
 
         _ = McpServer.StartAsync();

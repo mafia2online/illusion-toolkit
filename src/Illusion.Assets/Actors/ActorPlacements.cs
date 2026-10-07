@@ -170,6 +170,18 @@ public sealed class ActorPlacements
     }
 
     /// <summary>
+    /// Registers an actor brought in from another archive's pack. It places nothing of this scene — that is
+    /// the condition for importing it — so it is one of the invisible ones and gets a glyph.
+    /// </summary>
+    public void AddImported(ActorEntry actor, ActorsFile pack)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        _allList.Add(actor);
+        _packByActor[actor] = pack;
+        if (_invisibleSet.Add(actor)) _invisibleList.Add(actor);
+    }
+
+    /// <summary>
     /// Re-points every scene reference at where its frame object actually sits now, just before the packs are
     /// written. A reference stores a position in the frame resource's object list, and nothing recomputes it:
     /// a copy adds an object, an undone delete puts one back in a rebuilt order, and a reference captured

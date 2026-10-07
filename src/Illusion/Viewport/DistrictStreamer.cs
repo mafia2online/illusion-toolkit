@@ -163,6 +163,11 @@ internal sealed class DistrictStreamer
     private CancellationTokenSource? _loadCts; // cancels the in-flight background load
 
     private bool _building;
+
+    /// <summary>Whether an archive is still on its way into the scene — queued, loading in the background, or
+    /// having its meshes attached. What a caller that asked for an area waits on.</summary>
+    public bool IsBusy => _building || _loadTask != null || _loadQueue.Count > 0;
+
     private Queue<(SceneNode Leaf, GpuMesh Mesh)> _buildQueue = null!; // prepared meshes awaiting attach
     private (string label, string? district, string folder, int gen, FileInfo file) _buildCtx;
     private List<GpuMesh> _buildMeshes = null!;
@@ -568,6 +573,35 @@ internal sealed class DistrictStreamer
             }
         }
     }
+
+    /// <summary>
+    /// One row of the loaded crash layer with the geometry its copies are drawn from: each prototype mesh that
+    /// keeps CPU geometry, with the matrix that stands it inside a copy. Enumerated from the placement DATA —
+    /// the tree only holds a node for a copy somebody has clicked or whose row was expanded, so anything that
+    /// has to answer for every loaded copy cannot go by the tree.
+    /// </summary>
+    public IEnumerable<(Formats.Translokator.Object Row, IReadOnlyList<(GpuMesh Mesh, Matrix4x4 Local)> Prototypes)>
+        CrashRows()
+    {
+        foreach (CrashSource src in _crashSources)
+        {
+            foreach (Formats.Translokator.Object row in src.Placements.Rows)
+            {
+                var prototypes = new List<(GpuMesh, Matrix4x4)>();
+                foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(row))
+                {
+                    if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf)) continue;
+                    if (leaf.Mesh is not { PickPositions: not null, PickIndices: not null } gm) continue;
+                    prototypes.Add((gm, src.Placements.LocalOf(mesh, row)));
+                }
+                yield return (row, prototypes);
+            }
+        }
+    }
+
+    /// <summary>Where one crash copy stands in the world — the matrix its prototype is drawn at.</summary>
+    public static Matrix4x4 CrashWorld(Instance copy) =>
+        TransformMath.Compose(copy.Quaternion, new Vector3(copy.Scale), copy.Position);
 
     // Ray-picks the nearest crash placement under a viewport ray (CPU). The props are drawn hardware-instanced,
     // so the ordinary GpuMesh pick cannot reach a single copy — it would have to stand for the whole cloud. This

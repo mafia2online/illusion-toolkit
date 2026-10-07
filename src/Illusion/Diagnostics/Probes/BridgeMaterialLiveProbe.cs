@@ -1,6 +1,5 @@
 using System.IO;
 using System.Numerics;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
@@ -12,7 +11,6 @@ using Illusion.Formats.Archive;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Materials;
 using Illusion.Formats.Materials.Versions;
-using Illusion.Rendering.Controls;
 using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 using Illusion.Viewport;
@@ -283,16 +281,11 @@ internal static unsafe class BridgeMaterialLiveProbe
     }
 
     // Draws one frame of the live scene into a target of the probe's own and saves it — the "does it look
-    // textured" question is answered by eye. The device is the viewport's own, which it keeps to itself.
+    // textured" question is answered by eye.
     private static void SaveFrame(D3DImageHost host, string path)
     {
-        if (host.Rnd is not { } renderer) return;
-        if (typeof(ViewportControl).GetField("_gpu", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(host)
-            is not GpuContext gpu) return;
         const int w = 1100, h = 760;
-        using var target = new SharedRenderTarget(gpu, w, h);
-        renderer.Render(target);
-        GpuProbes.SavePng(RenderTargetReadback.Read(gpu, target), w, h, path);
+        if (host.CaptureFrame(w, h) is { } pixels) GpuProbes.SavePng(pixels, w, h, path);
     }
 
     private static bool Pump(Func<bool> until, int seconds)

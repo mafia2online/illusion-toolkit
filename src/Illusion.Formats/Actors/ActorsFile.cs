@@ -103,7 +103,7 @@ public sealed class ActorsFile
     /// </summary>
     public IReadOnlyList<ActorPropertyRow> PropertyRows => propertyRows ??= BuildPropertyRows();
 
-    private IReadOnlyList<ActorPropertyRow>? propertyRows;
+    private List<ActorPropertyRow>? propertyRows;
 
     /// <summary>The behavior row an actor uses, or null when it has none (or points outside the table).</summary>
     public ActorPropertyRow? PropertiesOf(ActorEntry actor)
@@ -113,7 +113,7 @@ public sealed class ActorsFile
         return actor.InitPropId >= 0 && actor.InitPropId < rows.Count ? rows[actor.InitPropId] : null;
     }
 
-    private IReadOnlyList<ActorPropertyRow> BuildPropertyRows()
+    private List<ActorPropertyRow> BuildPropertyRows()
     {
         var rows = new List<ActorPropertyRow>(Binary.PropRows.Count);
         for (int i = 0; i < Binary.PropRows.Count; i++)
@@ -305,6 +305,156 @@ public sealed class ActorsFile
         return copy;
     }
 
+    /// <summary>
+    /// Copies an actor out of ANOTHER pack into this one, under a name of its own and with its own copy of the
+    /// behaviour row it points at — how a district that has no light of its own is given one from an interior
+    /// that does.
+    ///
+    /// <para>
+    /// Only an actor that is whole in its record and its row can travel: one whose linked frame is not an
+    /// object of its own archive's scene. That is what a light or a sound is — the entity makes that frame
+    /// itself, under the name the record gives — and it is why the copy is linked to a frame named after
+    /// itself rather than to the original's. An actor that places a scene object would arrive pointing at an
+    /// object this archive does not have, and is refused.
+    /// </para>
+    /// </summary>
+    /// <param name="from">The pack <paramref name="actor"/> belongs to. Both packs must be stored the same way
+    /// (compressed or not): the record's tail and the row's blob are carried as bytes.</param>
+    public ActorEntry? Import(ActorsFile from, ActorEntry actor, string name, Vector3 position, out string? skipReason)
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(actor);
+        skipReason = null;
+
+        int index = from.ActorList.IndexOf(actor);
+        if (index < 0 || index >= from.Binary.Items.Count)
+        {
+            skipReason = "the actor does not belong to the source pack";
+            return null;
+        }
+        if (!actor.IsTyped)
+        {
+            skipReason = "the actor's record could not be typed, so it cannot be rebuilt";
+            return null;
+        }
+        if (from.IsCompressed != IsCompressed || from.ActorFileVersion != ActorFileVersion)
+        {
+            skipReason = "the two packs are stored differently (version or compression), so a record of one is not a record of the other";
+            return null;
+        }
+        if (actor.FrameHash != 0 && from.SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+        {
+            skipReason = "it places an object of its own archive's scene, which this archive does not have";
+            return null;
+        }
+        if (string.IsNullOrEmpty(name) || ActorList.Any(a => a.EntityName == name))
+        {
+            skipReason = $"the name '{name}' is empty or already taken in this pack";
+            return null;
+        }
+
+        Native.Model.ActorItemW source = from.Binary.Items[index];
+        short propId = -1;
+        if (source.InitPropId >= 0)
+        {
+            if (!from.ArePropertiesTyped || !ArePropertiesTyped || source.InitPropId >= from.Binary.PropRows.Count)
+            {
+                skipReason = "its behaviour row cannot be read out of one pack or written into the other";
+                return null;
+            }
+            if (Binary.PropRows.Count >= short.MaxValue)
+            {
+                skipReason = "this pack's behaviour table is full";
+                return null;
+            }
+            Native.Model.ActorPropRowW row = CloneRow(from.Binary.PropRows[source.InitPropId]);
+            Binary.PropRows.Add(row);
+            propId = (short)(Binary.PropRows.Count - 1);
+            // The cached views are live over the wire rows and an undo entry may hold one, so the list grows
+            // rather than being rebuilt.
+            propertyRows?.Add(new ActorPropertyRow(this, row, propId));
+        }
+
+        ulong hash = Hashing.Fnv64.Hash(name);
+        var item = new Native.Model.ActorItemW
+        {
+            Typed = source.Typed,
+            TypeId = source.TypeId,
+            TypeName = source.TypeName,
+            EntityName = name,
+            Name1 = source.Name1,
+            SceneSector = "",
+            LinkedDefinition = source.LinkedDefinition,
+            LinkedFrame = name,
+            EntityHash = hash,
+            FrameHash = hash,
+            Position = position,
+            RotationX = source.RotationX,
+            RotationY = source.RotationY,
+            RotationZ = source.RotationZ,
+            RotationW = source.RotationW,
+            Scale = source.Scale,
+            Flags = source.Flags,
+            InitPropId = propId,
+            Raw = [.. source.Raw],
+        };
+        var copy = new ActorEntry
+        {
+            Index = ActorList.Count,
+            IsTyped = true,
+            TypeId = actor.TypeId,
+            TypeName = actor.TypeName,
+            EntityName = name,
+            Name1 = actor.Name1,
+            SceneSector = "",
+            LinkedDefinition = actor.LinkedDefinition,
+            LinkedFrame = name,
+            EntityHash = hash,
+            FrameHash = hash,
+            Position = position,
+            Rotation = actor.Rotation,
+            Scale = actor.Scale,
+            Flags = actor.Flags,
+            InitPropId = propId,
+        };
+
+        ActorList.Add(copy);
+        Binary.Items.Add(item);
+        Binary.ItemOffsets.Add(0); // recomputed on write
+        Reindex();
+        // A light arrives with its row still describing where it stood in the other archive. Settled now
+        // rather than at the next write, so the clip box shown for it is already the one it has here and an
+        // edit to that box is not shifted again later.
+        SyncLightFrame(copy);
+        return copy;
+    }
+
+    private static Native.Model.ActorPropRowW CloneRow(Native.Model.ActorPropRowW row)
+    {
+        var copy = new Native.Model.ActorPropRowW
+        {
+            BufferType = row.BufferType,
+            TypeName = row.TypeName,
+            Payload = [.. row.Payload],
+        };
+        foreach (Native.Model.ActorPropFieldW field in row.Fields)
+        {
+            copy.Fields.Add(new Native.Model.ActorPropFieldW
+            {
+                Kind = field.Kind,
+                Offset = field.Offset,
+                Size = field.Size,
+                Name = field.Name,
+                Num = field.Num,
+                F0 = field.F0,
+                F1 = field.F1,
+                F2 = field.F2,
+                Text = field.Text,
+            });
+        }
+        return copy;
+    }
+
     /// <summary>Drops a copy made by <c>Duplicate</c> (undo). Returns the same token <see cref="Restore"/>
     /// takes, so a redo puts back the very row that was undone — copying again would mint a different record
     /// under a different name, leaving the tree pointing at one the pack never got.</summary>
@@ -422,7 +572,165 @@ public sealed class ActorsFile
 
     public void Write(Stream output)
     {
+        SyncLightFrames();
         output.WriteBytes(Native.Misc.NativeMiscFiles.ActorsToBytes(this));
+    }
+
+    // Where a light's behaviour blob keeps the transform of the frame the entity makes for itself: a 3x4
+    // matrix, row by row with the translation as each row's fourth value, right after the flags word.
+    private const int LightMatrixOffset = 18;
+    private const int LightMatrixSize = 48;
+
+    // How far a stored inverse may be from the true one and still count as one. Shipped lights sit below
+    // 3e-4 (float rounding at world coordinates); a tail that holds something else is off by hundreds.
+    private const double LightInverseTolerance = 1e-2;
+
+    /// <summary>
+    /// A light says where it is four times: in its actor record, in the transform at the head of its behaviour
+    /// blob (the one the frame it spawns is built from), in the INVERSE of that transform at the blob's tail,
+    /// and in the world-space box its glow is clipped to. The record is what the editor moves, so when it has
+    /// moved the rest follows it here — when a light is imported, and just before the pack is written.
+    /// <para>
+    /// The inverse is the one that matters most and shows least: the game works a light out in the light's own
+    /// space, so a light whose inverse still describes the archive it was brought from is placed correctly,
+    /// reads correctly in every field, and lights nothing.
+    /// </para>
+    /// <para>
+    /// A light that has NOT moved is never touched, so a pack nobody edited still writes byte for byte. That
+    /// rule is narrower than "make the tail right" on purpose. Measured over the 4265 light rows of the
+    /// install's 1050 packs: 4193 hold the exact inverse (worst error 2.7e-4), and the 72 lights of three
+    /// Joe's Adventures archives hold zeroes or noise there instead — shipped that way, so whatever the game
+    /// does with them is not this code's to correct. For the same reason a moved light gets a new inverse
+    /// only if the one it had was a true inverse of where it stood; a tail that never was one is left as it
+    /// is. The box is carried along by the distance the light moved, keeping whatever shape it was given.
+    /// A row shared by several lights cannot hold more than one place and is left alone — give each light a
+    /// row of its own.
+    /// </para>
+    /// </summary>
+    private void SyncLightFrames()
+    {
+        foreach (ActorEntry actor in ActorList) SyncLightFrame(actor);
+    }
+
+    private void SyncLightFrame(ActorEntry actor)
+    {
+        if (!ArePropertiesTyped) return;
+        if (!actor.IsTyped || actor.Type != EntityType.LightEntity) return;
+        if (actor.InitPropId < 0 || actor.InitPropId >= Binary.PropRows.Count) return;
+        if (CountSharersOf(actor.InitPropId) != 1) return;
+        Native.Model.ActorPropRowW row = Binary.PropRows[actor.InitPropId];
+        byte[] blob = row.Payload;
+        if (blob.Length < LightMatrixOffset + LightMatrixSize) return;
+
+        var was = new Vector3(
+            BitConverter.ToSingle(blob, LightMatrixOffset + 12),
+            BitConverter.ToSingle(blob, LightMatrixOffset + 28),
+            BitConverter.ToSingle(blob, LightMatrixOffset + 44));
+        if (Vector3.DistanceSquared(was, actor.Position) < 1e-8f) return;
+
+        // The tail is found from the blob's own length word (which does not count itself): the inverse
+        // matrix is the last thing in it, and the clip box sits before it behind one flag byte. Whether the
+        // tail holds an inverse at all is asked of the matrix as it was, before the move.
+        int inverseAt = BitConverter.ToInt32(blob, 0) + 4 - LightMatrixSize;
+        int boxAt = inverseAt - 1 - 24;
+        bool hasTail = boxAt >= LightMatrixOffset + LightMatrixSize && inverseAt + LightMatrixSize <= blob.Length;
+        bool hadInverse = hasTail
+            && LightMatrixDrift(ReadLightMatrix(blob, LightMatrixOffset), ReadLightMatrix(blob, inverseAt))
+                < LightInverseTolerance;
+
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 12, 4), actor.Position.X);
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 28, 4), actor.Position.Y);
+        BitConverter.TryWriteBytes(blob.AsSpan(LightMatrixOffset + 44, 4), actor.Position.Z);
+        if (!hasTail) return;
+
+        Vector3 by = actor.Position - was;
+        for (int corner = 0; corner < 2; corner++)
+        {
+            int at = boxAt + corner * 12;
+            BitConverter.TryWriteBytes(blob.AsSpan(at, 4), BitConverter.ToSingle(blob, at) + by.X);
+            BitConverter.TryWriteBytes(blob.AsSpan(at + 4, 4), BitConverter.ToSingle(blob, at + 4) + by.Y);
+            BitConverter.TryWriteBytes(blob.AsSpan(at + 8, 4), BitConverter.ToSingle(blob, at + 8) + by.Z);
+        }
+        // The box is also a NAMED field of the row, and on write the core pokes every named field's value back
+        // over the blob — so a field left holding the old corners would put them straight back.
+        AdoptFloatFields(row, boxAt, 24);
+
+        if (!hadInverse) return;
+        if (!TryInvertLightMatrix(ReadLightMatrix(blob, LightMatrixOffset), out double[] inverse)) return;
+        for (int i = 0; i < 12; i++)
+        {
+            BitConverter.TryWriteBytes(blob.AsSpan(inverseAt + i * 4, 4), (float)inverse[i]);
+        }
+        AdoptFloatFields(row, inverseAt, LightMatrixSize);
+    }
+
+    // Re-reads the float and vector fields lying inside [at, at + length) from the blob, after the blob was
+    // written to directly. Only those two kinds: nothing else is ever written that way.
+    private static void AdoptFloatFields(Native.Model.ActorPropRowW row, int at, int length)
+    {
+        foreach (Native.Model.ActorPropFieldW field in row.Fields)
+        {
+            if (field.Offset < at || field.Offset >= at + length) continue;
+            var kind = (ActorPropertyKind)field.Kind;
+            if (kind is not (ActorPropertyKind.Float or ActorPropertyKind.Vector3)) continue;
+            int offset = (int)field.Offset;
+            field.F0 = BitConverter.ToSingle(row.Payload, offset);
+            if (kind != ActorPropertyKind.Vector3) continue;
+            field.F1 = BitConverter.ToSingle(row.Payload, offset + 4);
+            field.F2 = BitConverter.ToSingle(row.Payload, offset + 8);
+        }
+    }
+
+    private static double[] ReadLightMatrix(byte[] blob, int at)
+    {
+        var m = new double[12];
+        for (int i = 0; i < 12; i++) m[i] = BitConverter.ToSingle(blob, at + i * 4);
+        return m;
+    }
+
+    // Inverse of a 3x4 affine matrix (rotation and scale in the first three columns, translation in the
+    // fourth), in doubles: at world coordinates in the hundreds a float inverse loses the last digits the
+    // shipped ones have.
+    private static bool TryInvertLightMatrix(double[] m, out double[] inverse)
+    {
+        inverse = new double[12];
+        double c00 = m[5] * m[10] - m[6] * m[9];
+        double c01 = m[6] * m[8] - m[4] * m[10];
+        double c02 = m[4] * m[9] - m[5] * m[8];
+        double det = m[0] * c00 + m[1] * c01 + m[2] * c02;
+        if (Math.Abs(det) < 1e-12) return false;
+
+        inverse[0] = c00 / det;
+        inverse[1] = (m[2] * m[9] - m[1] * m[10]) / det;
+        inverse[2] = (m[1] * m[6] - m[2] * m[5]) / det;
+        inverse[4] = c01 / det;
+        inverse[5] = (m[0] * m[10] - m[2] * m[8]) / det;
+        inverse[6] = (m[2] * m[4] - m[0] * m[6]) / det;
+        inverse[8] = c02 / det;
+        inverse[9] = (m[1] * m[8] - m[0] * m[9]) / det;
+        inverse[10] = (m[0] * m[5] - m[1] * m[4]) / det;
+        for (int row = 0; row < 3; row++)
+        {
+            int r = row * 4;
+            inverse[r + 3] = -(inverse[r] * m[3] + inverse[r + 1] * m[7] + inverse[r + 2] * m[11]);
+        }
+        return true;
+    }
+
+    // Largest element by which world times candidate misses the identity.
+    private static double LightMatrixDrift(double[] world, double[] candidate)
+    {
+        double worst = 0;
+        for (int row = 0; row < 3; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                double value = column == 3 ? world[row * 4 + 3] : 0;
+                for (int k = 0; k < 3; k++) value += world[row * 4 + k] * candidate[k * 4 + column];
+                worst = Math.Max(worst, Math.Abs(value - (row == column ? 1 : 0)));
+            }
+        }
+        return worst;
     }
 
 }

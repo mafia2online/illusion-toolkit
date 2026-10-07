@@ -447,17 +447,28 @@ public partial class LauncherWindow : Window
     // launcher is the way IN, not a window that stays around behind the editor.
     private void OpenEditor(Func<Window> create)
     {
+        if (TryOpenEditor(create) is { } error) ShowWarn(error);
+    }
+
+    /// <summary>
+    /// The map editor tile, for a caller that cannot click it — the MCP server. Returns why it could not be
+    /// opened instead of showing it, null once the editor is up.
+    /// </summary>
+    internal string? OpenMapEditor() =>
+        MapEditorBtn.IsEnabled
+            ? TryOpenEditor(() => new MainWindow())
+            : "The launcher is not ready: the game path is not set, or the game has not been unpacked yet.";
+
+    private string? TryOpenEditor(Func<Window> create)
+    {
         // Initialize with the chosen path BEFORE opening the viewport (it calls TryInitialize again
         // and reuses the ready environment).
-        if (!EnsureEnv(out string? err))
-        {
-            ShowWarn("Could not open the game: " + err);
-            return;
-        }
+        if (!EnsureEnv(out string? err)) return "Could not open the game: " + err;
 
         Window editor = create();
         Application.Current.MainWindow = editor;
         editor.Show();
         Close();
+        return null;
     }
 }

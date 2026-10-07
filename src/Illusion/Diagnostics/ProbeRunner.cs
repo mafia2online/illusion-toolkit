@@ -158,6 +158,12 @@ internal static class ProbeRunner
             case "--probe-save":
                 SaveProbes.RunSaveProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Two ways a surface came out black: which meshes of an archive carry no normals (foliage) and what
+            // the renderer is handed for them, and an instanced copy drawn beside a placed one.
+            // Output: %TEMP%\illusion_vertex_normals.txt
+            case "--probe-vertex-normals":
+                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
+                return true;
             // Renders the viewport transform overlay (compact, actions-off Vector3Box at large coords) to a PNG so
             // the fields-fit / no-clip can be eyeballed. Output: %TEMP%\illusion_panel.png
             case "--probe-panel":
@@ -629,6 +635,17 @@ internal static class ProbeRunner
             // HTTP, and a busy port is reported rather than thrown.
             case "--probe-mcp":
                 McpProbes.RunMcpProbe();
+                return true;
+            // The same tools against the editor itself: a real window with a district loaded. Nothing is saved.
+            // Output: %TEMP%\illusion_editor_tools_live.txt
+            case "--probe-editor-tools-live":
+                EditorToolLiveProbes.Run(args.Length >= 2 ? args[1] : "hill");
+                return true;
+            // The MCP editor tools against a scripted editor: what a save, a build and an area load tell
+            // the caller when the editor could not do it, and which property values are refused. No game
+            // install needed. Output: %TEMP%\illusion_editor_tools.txt
+            case "--probe-editor-tools":
+                EditorToolProbes.RunEditorToolProbe();
                 return true;
             // Material editor: preview sphere generator, MTL catalog browse/edit/create/delete (in-memory
             // only), SetTextureFor file roundtrip on a TEMP copy of default.mtl, mesh-slot reassignment,

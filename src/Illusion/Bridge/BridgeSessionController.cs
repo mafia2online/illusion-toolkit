@@ -103,6 +103,23 @@ internal sealed class BridgeSessionController : IDisposable
         }
     }
 
+    /// <summary>Asks Blender to push what it holds now — the addon's own Push button, pressed from this
+    /// side. The push then arrives like any other. False when there is no edit session to push into, or
+    /// the connection is gone. UI thread.</summary>
+    public bool RequestPush()
+    {
+        if (_exported.Count == 0 || _client is not { } client) return false;
+        try
+        {
+            client.Send(new RequestPushMessage());
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     // UI thread: every mesh outside the exported set renders ghosted while a bridge scene is open —
     // the visual "these are not being edited". Cleared when the set empties.
     private void RefreshEditFocus()

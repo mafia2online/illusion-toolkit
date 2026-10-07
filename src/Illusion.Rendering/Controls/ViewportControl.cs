@@ -534,6 +534,50 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         _tweening = true;
     }
 
+    /// <summary>
+    /// Put the camera where it frames a sphere, at once — and, when <paramref name="fromAxis"/> is given, on
+    /// that side of it (the direction from the sphere's centre towards the camera). Unlike
+    /// <see cref="FrameOn"/> nothing glides: this is an absolute answer for a caller that will read the view
+    /// back straight away, and a tween in flight would hand it a frame from half way there.
+    /// </summary>
+    public void LookAt(Vector3 center, float radius, Vector3? fromAxis)
+    {
+        if (Renderer == null) return;
+        LeaveParallelView();
+        Camera cam = Renderer.Camera;
+        if (fromAxis is { } axis && axis.LengthSquared() > 1e-8f) cam.LookAt(center + Vector3.Normalize(axis), center);
+        (Vector3 eye, float distance) = CameraNavigator.FrameOn(cam, center, radius);
+        _tweening = false;
+        cam.Position = eye;
+        _orbitDistance = distance;
+    }
+
+    /// <summary>
+    /// Stand the camera at <paramref name="eye"/> looking at <paramref name="target"/>, at once; the target
+    /// becomes the point the camera orbits and zooms around.
+    /// </summary>
+    public void LookFrom(Vector3 eye, Vector3 target)
+    {
+        if (Renderer == null) return;
+        LeaveParallelView();
+        _tweening = false;
+        Renderer.Camera.LookAt(eye, target);
+        _orbitDistance = MathF.Max(Vector3.Distance(eye, target), 0.5f);
+    }
+
+    /// <summary>
+    /// Draws the current view into a target of the asked size and returns its pixels (BGRA, top row first),
+    /// or null before the pipeline exists. The picture is independent of the control's own size, and the
+    /// surface the window shows is left alone — the next regular frame restores the camera's aspect.
+    /// </summary>
+    public byte[]? CaptureFrame(int width, int height)
+    {
+        if (Renderer == null || _gpu == null) return null;
+        using var target = new SharedRenderTarget(_gpu, width, height);
+        Renderer.Render(target);
+        return RenderTargetReadback.Read(_gpu, target);
+    }
+
     private void UpdateCameraTween(float dt)
     {
         if (!_tweening || Renderer == null) return;
