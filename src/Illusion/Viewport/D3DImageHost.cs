@@ -45,6 +45,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly CarPartController CarPartEditing;
     internal readonly TranslokatorEditController CrashEditing;
     internal readonly ActorEditController ActorEditing;
+    internal readonly ObjectImportController ObjectImporting;
     internal readonly PropertyEditController PropertyEditing;
     internal readonly ScenePersistence Persistence;
     internal readonly GeometryEditController GeometryEditing;
@@ -65,6 +66,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         CarPartEditing = new CarPartController(this);
         CrashEditing = new TranslokatorEditController(this);
         ActorEditing = new ActorEditController(this);
+        ObjectImporting = new ObjectImportController(this);
         PropertyEditing = new PropertyEditController(this);
         Persistence = new ScenePersistence(this);
         GeometryEditing = new GeometryEditController(this);
@@ -275,10 +277,327 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// FrameResource — both undoable and both persisted by Save/Build.</summary>
     public void DeleteSelected()
     {
+        // An object carried in from another archive takes the collision it was given along — those hulls
+        // stand where it stood and are nothing without it.
+        List<SceneNode> selected = [.. Selection.Selected];
+        var held = new HashSet<SceneNode>(selected);
+        List<SceneNode> linked = [.. LinkedCollision(selected).Values.SelectMany(hulls => hulls).Where(n => !held.Contains(n)).Distinct()];
+        if (linked.Count > 0) Selection.SetSelection([.. selected, .. linked], SelectedNode);
+
+        int before = Editing.History.UndoCount;
         ActorEditing.DeleteSelected();     // actors (drops their record from the .act pack)
         CollisionEditing.DeleteSelected(); // collision instances (drops them from the selection)
         CrashEditing.DeleteSelected();     // city_crash placements, in both seasons when linked
         Editing.DeleteSelected();          // frame objects (its DeletableRoots excludes collision)
+        // One Delete is one Ctrl+Z, however many kinds of thing it took out.
+        Editing.History.SquashSince(before, edits => new CompositeEdit(edits));
+    }
+
+    /// <summary>
+    /// The collision placements a piece of scenery this toolkit carried in was given (<see cref="ImportLinks"/>):
+    /// for each recorded placement, the one of that hull standing where the object's matrix now puts the place
+    /// it was recorded at (a record without a place: the one nearest the object's box). Empty for everything
+    /// else — a stock object's collision is not tied to it by anything, and guessing by position would take a
+    /// building's hull along with a bench.
+    /// </summary>
+    /// <param name="standingAt">The world matrix to look from instead of the node's own — for a caller that
+    /// has already moved the object and wants the hulls it had where it stood before.</param>
+    internal IReadOnlyList<SceneNode> LinkedCollisionNodes(SceneNode node, Matrix4x4? standingAt = null) =>
+        LinkedCollision([node], standingAt is { } at ? new Dictionary<SceneNode, Matrix4x4> { [node] = at } : null)
+            .TryGetValue(node, out List<SceneNode>? hulls) ? hulls : [];
+
+    /// <summary>
+    /// The same for many nodes at once, each archive's links worked out ONCE. A drag start, a delete and a
+    /// duplicate ask about every node they touch; answered node by node, each answer read the link file and
+    /// walked every object and every placement of the archive, and a large selection stalled for seconds.
+    /// Only nodes that have hulls are in the result.
+    /// </summary>
+    internal Dictionary<SceneNode, List<SceneNode>> LinkedCollision(IEnumerable<SceneNode> nodes,
+        IReadOnlyDictionary<SceneNode, Matrix4x4>? standingAt = null) =>
+        LinkedSlots(nodes, standingAt).ToDictionary(pair => pair.Key, pair => pair.Value.Select(slot => slot.Hull).ToList());
+
+    /// <summary>One placement an imported object was given, as the scene has it now: whose it is, which entry
+    /// of that object's record it answers to, and its node.</summary>
+    internal sealed record LinkedPlacement(
+        string Dir, string Name, Formats.Frames.ObjectTypes.FrameObjectBase Owner, int Slot, SceneNode Hull);
+
+    /// <summary>
+    /// The same, with whose each placement is and which entry of the record it answers to — and counting as
+    /// a node's not only what was given to it but what was given to anything UNDER it: an imported object
+    /// that was parented to another frame moves when that frame moves, and its collision has to move with it.
+    /// </summary>
+    internal Dictionary<SceneNode, List<LinkedPlacement>> LinkedSlots(IEnumerable<SceneNode> nodes,
+        IReadOnlyDictionary<SceneNode, Matrix4x4>? standingAt = null)
+    {
+        var result = new Dictionary<SceneNode, List<LinkedPlacement>>();
+        var asked = new List<(SceneNode Node, FrameNodeAdapter Frame, SceneDocumentAdapter Scene, SceneNode Document)>();
+        foreach (SceneNode node in nodes)
+        {
+            if (node.Source is FrameNodeAdapter frame && node.Source is not CollisionInstanceAdapter
+                && node.OwningDocumentNode() is { Source: SceneDocumentAdapter scene } documentNode)
+            {
+                asked.Add((node, frame, scene, documentNode));
+            }
+        }
+
+        foreach (var archive in asked.GroupBy(a => a.Scene))
+        {
+            // Where a node is to be looked from, when not from where it stands: everything under it shifts
+            // the same way.
+            var shifts = new List<(Formats.Frames.ObjectTypes.FrameObjectBase Root, Matrix4x4 Shift)>();
+            foreach (var a in archive)
+            {
+                if (standingAt != null && standingAt.TryGetValue(a.Node, out Matrix4x4 at)
+                    && Matrix4x4.Invert(a.Frame.Frame.WorldTransform, out Matrix4x4 back))
+                {
+                    shifts.Add((a.Frame.Frame, back * at));
+                }
+            }
+            List<LinkedPlacement> all = Assignments(archive.Key, archive.First().Document, owner =>
+            {
+                foreach ((Formats.Frames.ObjectTypes.FrameObjectBase root, Matrix4x4 shift) in shifts)
+                {
+                    if (IsSelfOrUnder(owner, root)) return owner.WorldTransform * shift;
+                }
+                return null;
+            }, null);
+            foreach (var a in archive)
+            {
+                List<LinkedPlacement> mine = [.. all.Where(p => IsSelfOrUnder(p.Owner, a.Frame.Frame))];
+                if (mine.Count > 0) result[a.Node] = mine;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// For collision placements themselves: which imported object each was given to, if any. For a caller
+    /// about to change a placement on its own — move it, resize it — and bound to keep its object's record true.
+    /// </summary>
+    /// <param name="stoodAt">Where a placement stood before the change being recorded, for one that has
+    /// already been moved: it is by where it WAS that it is recognised as its object's.</param>
+    internal List<LinkedPlacement> LinksOf(IEnumerable<SceneNode> placements, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt = null)
+    {
+        var found = new List<LinkedPlacement>();
+        foreach (var layer in placements.Where(n => n.Source is CollisionInstanceAdapter && n.Parent != null).GroupBy(n => n.Parent!))
+        {
+            // The scene the layer hangs beside: the frame document under the same wrapper.
+            SceneNode? documentNode = null;
+            void Walk(SceneNode node)
+            {
+                if (documentNode != null) return;
+                if (node.Source is SceneDocumentAdapter) { documentNode = node; return; }
+                foreach (SceneNode child in node.Children) Walk(child);
+            }
+            Walk(layer.Key.Parent ?? layer.Key);
+            if (documentNode?.Source is not SceneDocumentAdapter scene) continue;
+            var wanted = new HashSet<SceneNode>(layer);
+            found.AddRange(Assignments(scene, documentNode, _ => null, stoodAt).Where(p => wanted.Contains(p.Hull)));
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Whether the record of given collision kept under this object's name is THIS object's — for a rename,
+    /// which has to take the record along when it is, and leave it where it is when it is a namesake's.
+    /// With one object of the name it is that object's; with several, the one the record fits (the same
+    /// answer every move, delete and duplicate goes by).
+    /// </summary>
+    /// <param name="dir">The archive's working copy, where the record is kept.</param>
+    internal bool OwnsImportLinks(SceneNode node, out string dir)
+    {
+        dir = "";
+        if (node.Source is not FrameNodeAdapter frame || node.Source is CollisionInstanceAdapter
+            || node.OwningDocumentNode() is not { Source: SceneDocumentAdapter scene } documentNode)
+        {
+            return false;
+        }
+        try
+        {
+            dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
+            Assignments(scene, documentNode, _ => null, null, out var owners);
+            return owners.TryGetValue(frame.Frame.Name.String, out Formats.Frames.ObjectTypes.FrameObjectBase? owner)
+                && ReferenceEquals(owner, frame.Frame);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or InvalidOperationException or NullReferenceException)
+        {
+            return false;   // no game environment (a loose file): there is no link file to keep in step
+        }
+    }
+
+    private static bool IsSelfOrUnder(Formats.Frames.ObjectTypes.FrameObjectBase frame, Formats.Frames.ObjectTypes.FrameObjectBase root)
+    {
+        int guard = 0;
+        for (Formats.Frames.ObjectTypes.FrameObjectBase? at = frame; at != null && guard++ < 256; at = at.Parent)
+        {
+            if (ReferenceEquals(at, root)) return true;
+        }
+        return false;
+    }
+
+    // Every placement of an archive that some imported object's record claims, worked out once: each recorded
+    // entry bids for the placements of its hull, nearest first, and a placement goes to the first bid only.
+    private List<LinkedPlacement> Assignments(SceneDocumentAdapter scene, SceneNode documentNode,
+        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt) =>
+        Assignments(scene, documentNode, lookFrom, stoodAt, out _);
+
+    /// <param name="owners">The object each recorded name belongs to — for every name that has a record and
+    /// an object bearing it, whether or not any of its placements was found.</param>
+    private List<LinkedPlacement> Assignments(SceneDocumentAdapter scene, SceneNode documentNode,
+        Func<Formats.Frames.ObjectTypes.FrameObjectBase, Matrix4x4?> lookFrom, IReadOnlyDictionary<SceneNode, Vector3>? stoodAt,
+        out Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase> owners)
+    {
+        owners = new Dictionary<string, Formats.Frames.ObjectTypes.FrameObjectBase>(StringComparer.Ordinal);
+        var assigned = new List<LinkedPlacement>();
+        string dir = Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive);
+        IReadOnlyDictionary<string, List<Assets.Sds.ImportLinks.Link>> links = Assets.Sds.ImportLinks.All(dir);
+        if (links.Count == 0) return assigned;
+
+        // Without a collision layer nothing is placed, but a record is still somebody's.
+        List<SceneNode> placements = FindCollisionLayer(documentNode) is { } layer ? [.. layer.Children] : [];
+        var byHull = new Dictionary<ulong, List<int>>();
+        for (int i = 0; i < placements.Count; i++)
+        {
+            if (placements[i].Source is not CollisionInstanceAdapter ci) continue;
+            if (!byHull.TryGetValue(ci.Instance.Hash, out List<int>? of)) byHull[ci.Instance.Hash] = of = [];
+            of.Add(i);
+        }
+        Vector3 Stands(int i) => stoodAt != null && stoodAt.TryGetValue(placements[i], out Vector3 was)
+            ? was
+            : ((CollisionInstanceAdapter)placements[i].Source!).Instance.Position;
+
+        // The object a recorded name belongs to. Usually there is one of that name. When a rename has left
+        // two, it is the one the record FITS — whose matrix puts the recorded places where placements of
+        // those hulls stand — and not simply the first in the file: by file order, renaming an earlier object
+        // onto a later one's name handed it the later one's collision.
+        foreach (var named in scene.Frame.FrameObjects.Values.OfType<Formats.Frames.ObjectTypes.FrameObjectBase>()
+                     .Where(f => f.Name.String is { Length: > 0 } n && links.ContainsKey(n)).GroupBy(f => f.Name.String, StringComparer.Ordinal))
+        {
+            List<Formats.Frames.ObjectTypes.FrameObjectBase> bearers = [.. named];
+            if (bearers.Count == 1)
+            {
+                owners[named.Key] = bearers[0];
+                continue;
+            }
+            float Misfit(Formats.Frames.ObjectTypes.FrameObjectBase bearer)
+            {
+                Matrix4x4 standing = lookFrom(bearer) ?? bearer.WorldTransform;
+                float total = 0f;
+                foreach (Assets.Sds.ImportLinks.Link link in links[named.Key])
+                {
+                    // An entry from before places were kept has only the hull to go by: how near a placement
+                    // of it stands to the object. Skipped, a record made of such entries fitted every bearer
+                    // equally and went to the first in the file.
+                    Vector3 expected = link.At is { } place ? Vector3.Transform(place, standing) : standing.Translation;
+                    float nearest = 1e6f;
+                    if (byHull.TryGetValue(link.Hull, out List<int>? candidates))
+                    {
+                        foreach (int i in candidates) nearest = MathF.Min(nearest, Vector3.Distance(expected, Stands(i)));
+                    }
+                    total += nearest;
+                }
+                return total;
+            }
+            owners[named.Key] = bearers.MinBy(Misfit)!;
+        }
+
+        // A tie — a copy on top of its original — goes to the name that sorts first, so the answer does not
+        // change from one call to the next. Two entries for the same hull take two placements.
+        var bids = new List<(float Distance, string Object, int Slot, int Placement)>();
+        foreach ((string linked, List<Assets.Sds.ImportLinks.Link> hulls) in links)
+        {
+            if (!owners.TryGetValue(linked, out Formats.Frames.ObjectTypes.FrameObjectBase? owner)) continue;
+            Matrix4x4? from = lookFrom(owner);
+            Matrix4x4 standing = from ?? owner.WorldTransform;
+            List<(Matrix4x4 World, Matrix4x4 ToLocal, Vector3 Min, Vector3 Max)>? boxes = null;
+            Vector3 pivot = standing.Translation;
+            for (int slot = 0; slot < hulls.Count; slot++)
+            {
+                if (!byHull.TryGetValue(hulls[slot].Hull, out List<int>? candidates)) continue;
+                foreach (int i in candidates)
+                {
+                    Vector3 at = Stands(i);
+                    float distance;
+                    if (hulls[slot].At is { } place)
+                    {
+                        // Where the object's matrix puts the place the placement was recorded at. The two
+                        // move, turn and resize together, so this is where it stands — however far that is
+                        // from the object's pivot or its box.
+                        distance = Vector3.Distance(Vector3.Transform(place, standing), at);
+                    }
+                    else
+                    {
+                        // A record from before places were kept: by nearness to the object's box (its pivot
+                        // still counts — nothing that was linked before stops being linked).
+                        boxes ??= BoxesOf(owner, from, out pivot);
+                        distance = Vector3.Distance(pivot, at);
+                        foreach ((Matrix4x4 world, Matrix4x4 toLocal, Vector3 min, Vector3 max) in boxes)
+                        {
+                            Vector3 nearest = Vector3.Transform(Vector3.Clamp(Vector3.Transform(at, toLocal), min, max), world);
+                            distance = MathF.Min(distance, Vector3.Distance(nearest, at));
+                        }
+                    }
+                    if (distance < 5f) bids.Add((distance, linked, slot, i));
+                }
+            }
+        }
+
+        var takenPlacements = new HashSet<int>();
+        var filledSlots = new HashSet<(string, int)>();
+        foreach ((_, string linked, int slot, int placement) in bids
+                     .OrderBy(b => b.Distance).ThenBy(b => b.Object, StringComparer.Ordinal).ThenBy(b => b.Placement))
+        {
+            if (takenPlacements.Contains(placement) || filledSlots.Contains((linked, slot))) continue;
+            takenPlacements.Add(placement);
+            filledSlots.Add((linked, slot));
+            assigned.Add(new LinkedPlacement(dir, linked, owners[linked], slot, placements[placement]));
+        }
+        return assigned;
+    }
+
+    /// <summary>The record of one placement given to <paramref name="owner"/>: its hull, and where it stands
+    /// in the object's own space right now.</summary>
+    internal static Assets.Sds.ImportLinks.Link LinkFor(Formats.Frames.ObjectTypes.FrameObjectBase owner,
+        Formats.Collisions.CollisionInstance placement) =>
+        new(placement.Hash, Matrix4x4.Invert(owner.WorldTransform, out Matrix4x4 toOwner)
+            ? Vector3.Transform(placement.Position, toOwner)
+            : null);
+
+    // Where an object is, for the question "is this placement beside it": the stored box of every mesh under
+    // it, each with its world matrix and that matrix's inverse. Read from the frames — no geometry is decoded.
+    // With <paramref name="from"/> the whole subtree is taken as standing where that matrix puts the root.
+    private static List<(Matrix4x4 World, Matrix4x4 ToLocal, Vector3 Min, Vector3 Max)> BoxesOf(
+        Formats.Frames.ObjectTypes.FrameObjectBase root, Matrix4x4? from, out Vector3 pivot)
+    {
+        Matrix4x4 shift = Matrix4x4.Identity;
+        if (from is { } standing && Matrix4x4.Invert(root.WorldTransform, out Matrix4x4 back)) shift = back * standing;
+        pivot = (root.WorldTransform * shift).Translation;
+
+        var boxes = new List<(Matrix4x4, Matrix4x4, Vector3, Vector3)>();
+        var seen = new HashSet<Formats.Frames.ObjectTypes.FrameObjectBase>();
+        var stack = new Stack<Formats.Frames.ObjectTypes.FrameObjectBase>();
+        stack.Push(root);
+        while (stack.Count > 0 && seen.Count < 256)
+        {
+            Formats.Frames.ObjectTypes.FrameObjectBase frame = stack.Pop();
+            if (!seen.Add(frame)) continue;
+            foreach (Formats.Frames.ObjectTypes.FrameObjectBase child in frame.Children) stack.Push(child);
+            if (frame is not Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh
+                || !mesh.Refs.ContainsKey(Formats.Frames.FrameEntryRefTypes.Geometry))
+            {
+                continue;
+            }
+            Vector3 min = mesh.Boundings.Min, max = mesh.Boundings.Max;
+            Matrix4x4 world = mesh.WorldTransform * shift;
+            if (min.X > max.X || min.Y > max.Y || min.Z > max.Z || !float.IsFinite(min.LengthSquared() + max.LengthSquared())
+                || !Matrix4x4.Invert(world, out Matrix4x4 toLocal))
+            {
+                continue;
+            }
+            boxes.Add((world, toLocal, min, max));
+        }
+        return boxes;
     }
 
     /// <summary>Whether the selection has anything duplicable — a static mesh or a collision placement.</summary>
@@ -290,10 +609,67 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// deep, independent copies in their FrameResource — both undoable and persisted.</summary>
     public void DuplicateSelected()
     {
+        List<SceneNode> selected = [.. Selection.Selected];
+        int before = Editing.History.UndoCount;
         CollisionEditing.DuplicateSelected(); // collision placements (re-selects the copies)
         CrashEditing.DuplicateSelected();     // city_crash placements (re-selects the copies)
         ActorEditing.DuplicateSelected();     // actors (a copy of the record, under a fresh name)
         Editing.DuplicateSelected();          // frame objects (skips collision sources)
+        DuplicateLinkedCollision(selected);
+        // One Duplicate is one Ctrl+Z, the copies' collision included.
+        Editing.History.SquashSince(before, edits => new CompositeEdit(edits));
+    }
+
+    // A copy of an object carried in from another archive gets copies of the collision it was given — the same
+    // hulls, placed where the copy stands (where the original stands: a duplicate starts on top of it) — and is
+    // linked to them under its own name, so it then moves and is deleted with them like the original. Hulls the
+    // selection already held were copied by the collision duplicate and are left alone here.
+    private void DuplicateLinkedCollision(IReadOnlyList<SceneNode> selected)
+    {
+        Dictionary<SceneNode, List<LinkedPlacement>> given = LinkedSlots(Editing.LastDuplicates.Select(d => d.Source));
+        foreach ((SceneNode source, SceneNode copy) in Editing.LastDuplicates)
+        {
+            if (copy.Source is not FrameNodeAdapter copyFrame
+                || copy.OwningDocumentNode() is not { Source: SceneDocumentAdapter scene } documentNode
+                || FindCollisionLayer(documentNode) is not { Source: CollisionDocumentAdapter collision } layer)
+            {
+                continue;
+            }
+            var hashes = new List<Assets.Sds.ImportLinks.Link>();
+            // The copy's own — not what was given to things under the source: those are copied with their
+            // own objects, or not at all.
+            foreach (SceneNode hull in given.TryGetValue(source, out List<LinkedPlacement>? hulls)
+                         ? hulls.Where(p => source.Source is FrameNodeAdapter s && ReferenceEquals(p.Owner, s.Frame)).Select(p => p.Hull)
+                         : [])
+            {
+                if (hull.Source is not CollisionInstanceAdapter original) continue;
+                hashes.Add(LinkFor(copyFrame.Frame, original.Instance));
+                if (selected.Contains(hull)) continue;
+                var placement = new Formats.Collisions.CollisionInstance
+                {
+                    Position = original.Instance.Position,
+                    Rotation = original.Instance.Rotation,
+                    Hash = original.Instance.Hash,
+                    Unk4 = -1,
+                    Group = original.Instance.Group,
+                };
+                foreach (Domain.IEditAction edit in CollisionEditing.BuildCreateHull(collision, layer, null, placement,
+                             $"{copyFrame.Frame.Name} collision") ?? [])
+                {
+                    edit.Redo();
+                    Editing.History.Push(edit);
+                }
+            }
+            if (hashes.Count > 0)
+            {
+                // As an edit of its own, squashed into the duplicate: an undone duplicate takes its record
+                // back out of the link file, where a bare write left a name pointing at hulls for good.
+                var link = new ImportLinkEdit(Assets.MafiaEnvironment.ExtractedDir(scene.SourceArchive),
+                    copyFrame.Frame.Name.String, hashes);
+                link.Redo();
+                Editing.History.Push(link);
+            }
+        }
     }
 
     /// <summary>Fills in the placements of a crash row when its tree branch opens. The copies are not

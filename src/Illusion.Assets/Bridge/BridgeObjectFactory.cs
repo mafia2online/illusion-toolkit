@@ -200,7 +200,7 @@ public static class BridgeObjectFactory
     // The scene the game actually populates: the folder holding the most normal-season, on-table
     // objects (eastside: 'scene10' with 2110 of them; the winter/proxy folders hold zero). Null when
     // the district has no scene folders at all.
-    private static FrameHeaderScene? PickMainScene(FrameResource resource)
+    internal static FrameHeaderScene? PickMainScene(FrameResource resource)
     {
         FrameHeaderScene? best = null;
         int bestScore = -1;

@@ -19,7 +19,7 @@ internal sealed class PropertyEditController
     public void Commit(SceneNode node, PropertyDescriptor descriptor, object? before, object? after)
     {
         if (descriptor.Set is null || Equals(before, after)) return;
-        descriptor.Set(after);
+        SetAndKeepLinks(node, descriptor, after);
         PropagateNameEdit(node, descriptor);
         _host.Editing.History.Push(new PropertyEdit(this, node, descriptor, before, after));
         _host.Persistence.MarkFrameModified(node);
@@ -32,12 +32,35 @@ internal sealed class PropertyEditController
     private void ApplyRecorded(SceneNode node, PropertyDescriptor descriptor, object? value)
     {
         if (descriptor.Set is null || !_host.Tree.IsInScene(node)) return;
-        descriptor.Set(value);
+        SetAndKeepLinks(node, descriptor, value);
         PropagateNameEdit(node, descriptor);       // update the tree row/name BEFORE re-select so the rebuilt panel is correct
         _host.Persistence.MarkFrameModified(node); // undo/redo re-dirties the frame vs. the last save
         _host.Selection.SetSelection(new[] { node }, node);
         _host.CarCollisionEditing.RefreshOverlay();
         _host.RaiseSelectionPropertiesChanged();
+    }
+
+    // The collision an imported object was given is tied to it by its NAME (Sds.ImportLinks) — the only handle
+    // a static object has — so a rename takes the record along, and so does the undo of one, which comes
+    // through here as well. Only when the record is this object's: with two objects of a name (one renamed
+    // onto a name that was taken) the record under it belongs to one of them, and whose it is is asked
+    // BEFORE the name changes — by which of them it fits, not by there being a namesake. Asked by namesake
+    // alone, an object that had brought its record onto a taken name could not take it away again.
+    private void SetAndKeepLinks(SceneNode node, PropertyDescriptor descriptor, object? value)
+    {
+        string? old = null, dir = null;
+        if (descriptor.Id == "Base.Name" && descriptor.Get() is HashNameValue was && _host.OwnsImportLinks(node, out string kept))
+        {
+            old = was.Name;
+            dir = kept;
+        }
+        descriptor.Set!(value);
+        if (old != null && dir != null && descriptor.Get() is HashNameValue now)
+        {
+            // Not over a record the new name already has: this object then gives up its tie, and its record
+            // stays under the old name for the undo to find.
+            Assets.Sds.ImportLinks.Rename(dir, old, now.Name);
+        }
     }
 
     // Side effects of a name / on-name-table edit: the visible tree-row name and the name-table dirty flag (those

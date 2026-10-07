@@ -77,6 +77,22 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
         return true;
     }
 
+    /// <summary>The material's flag word, or null when the hash is unknown.</summary>
+    public MaterialFlags? GetFlags(ulong hash) => MafiaMaterials.Collection?.FindByHash(hash)?.Flags;
+
+    /// <summary>Replaces the material's flag word. False when the hash is unknown; setting the value it
+    /// already has succeeds without marking the library dirty.</summary>
+    public bool SetFlags(ulong hash, MaterialFlags flags)
+    {
+        MaterialLibrary? lib = FindOwningLibrary(hash);
+        IMaterial? mat = lib?.LookupMaterialByHash(hash);
+        if (lib == null || mat == null) return false;
+        if (mat.Flags == flags) return true;
+        mat.Flags = flags;
+        MarkDirty(lib);
+        return true;
+    }
+
     public ulong? CreateMaterial(string library, string name) => CreateMaterial(library, name, normalMapped: false);
 
     public ulong? CreateMaterial(string library, string name, bool normalMapped)

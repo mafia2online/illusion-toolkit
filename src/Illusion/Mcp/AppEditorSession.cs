@@ -356,6 +356,51 @@ internal sealed class AppEditorSession : IEditorSession
             []);
     }
 
+    public string? MirrorToWinter(out SeasonMirrorOutcome? outcome)
+    {
+        outcome = null;
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (window.WholeMapCheck.IsChecked == true || window.AreaCombo.SelectedItem is not MapArea area)
+        {
+            return "load one district first — the whole map has no single winter archive";
+        }
+        if (area.Winter == null) return $"'{area.BaseName}' has no winter variant";
+        if (window.WinterToggle.IsChecked == true)
+        {
+            return "the winter variant is loaded — load the summer one: it is the summer scene that gets mirrored";
+        }
+
+        try
+        {
+            // The mirror reads the working copy on disk, so what is only in memory has to be written first —
+            // and when that could not be written, the mirror would carry yesterday's scene into winter.
+            D3DImageHost.SaveReport saved = host.SaveEditsReport();
+            if (!saved.Complete) return "the save a mirror starts with did not complete: " + string.Join("; ", saved.NotSaved);
+            Assets.Sds.SeasonMirror.Report? report =
+                Assets.Sds.SeasonMirror.ToWinter(area.Summer, area.Winter, out string? reason);
+            if (report == null) return reason ?? "the winter archive could not be written";
+
+            host.MarkArchiveModified(area.Winter);
+            outcome = new SeasonMirrorOutcome(area.Winter.FullName, report.Matched, report.Added, report.Dropped,
+                report.Reassigned, report.Ambiguous, report.Files, report.Textures);
+            host.RaiseNotice(
+                $"Mirrored {area.BaseName} into {area.Winter.Name}: {report.Matched} object(s) settled, "
+                + $"{report.Added} added, {report.Dropped} dropped, {report.Reassigned} re-pointed slot(s) carried over, "
+                + $"{report.Files.Count} file(s) and {report.Textures.Count} texture(s) written — Build packs it"
+                + (report.Ambiguous == 0 ? "" : $". {report.Ambiguous} object(s) could not be told from a namesake "
+                    + "and kept their summer materials — check them in winter"),
+                isError: report.Ambiguous > 0);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or Formats.SdsFormatException)
+        {
+            return "failed to mirror: " + ex.Message;
+        }
+    }
+
     public CameraInfo Camera()
     {
         var pose = Host.CameraPose;
@@ -500,6 +545,30 @@ internal sealed class AppEditorSession : IEditorSession
         SceneNode? node = host.ActorEditing.Import(
             actorsRow, source, actor, newName, new Vector3(position[0], position[1], position[2]), out string? reason);
         return node == null ? reason ?? "the pack refused the actor" : null;
+    }
+
+    public string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
+        string? collision, int occurrence, out ObjectImportOutcome? outcome)
+    {
+        outcome = null;
+        if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
+        if (yawDegrees is { } yaw && !float.IsFinite(yaw)) return "yawDegrees is not a finite number";
+        if (Window is not { } window) return NotOpen;
+        D3DImageHost host = window.Viewport;
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        if (window.WholeMapCheck.IsChecked == true || window.AreaCombo.SelectedItem is not MapArea area)
+        {
+            return "load one district first — an import needs one archive to go into";
+        }
+        FileInfo destination = area.FileFor(window.WinterToggle.IsChecked == true);
+
+        Assets.Collisions.CollisionChoice hulls = Assets.Collisions.CollisionChoice.Auto;
+        if (!string.IsNullOrEmpty(collision) && !Enum.TryParse(collision, ignoreCase: true, out hulls))
+        {
+            return $"collision '{collision}' is none of auto, convex, box, mesh, none";
+        }
+        return host.ObjectImporting.Import(destination, sourceArchive, name, newName,
+            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls, occurrence);
     }
 
     public string? DuplicateSelected(out IReadOnlyList<string> copies)

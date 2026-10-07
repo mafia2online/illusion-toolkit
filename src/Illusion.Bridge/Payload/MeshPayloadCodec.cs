@@ -59,6 +59,13 @@ public sealed class MeshMaterialInfo
     [JsonPropertyName("roughness")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public float? Roughness { get; set; }
+
+    /// <summary>Blender → toolkit only: what the alpha channel of <see cref="DiffuseImage"/> means —
+    /// <c>"clip"</c> for a cut-out, <c>"blend"</c> for a translucent surface, absent for an opaque one
+    /// (the channel is then dropped). The addon has already put the alpha it means into the image.</summary>
+    [JsonPropertyName("alphaMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AlphaMode { get; set; }
 }
 
 /// <summary>
