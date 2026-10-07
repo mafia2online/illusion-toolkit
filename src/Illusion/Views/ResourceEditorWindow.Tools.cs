@@ -48,6 +48,13 @@ public partial class ResourceEditorWindow
         string? staged = StagedEntry?.File.FullName;
         bool isCar = staged != null
             && string.Equals(Path.GetFileName(Path.GetDirectoryName(staged)), "cars", StringComparison.OrdinalIgnoreCase);
-        new CarToolWindow(tool, isCar ? staged : null) { Owner = this }.ShowDialog();
+        bool done = new CarToolWindow(tool, isCar ? staged : null) { Owner = this }.ShowDialog() == true;
+        // A clone is an archive that was not there when the library was walked (once, as the window opened):
+        // without a second walk the car just made is nowhere in the browser until the window is opened again.
+        if (done && tool == CarTool.Clone)
+        {
+            _catalog = null;
+            BuildCatalog();
+        }
     }
 }

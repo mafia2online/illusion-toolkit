@@ -34,6 +34,30 @@ internal static class HideTrianglesProbes
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
             ExtractedSds scene = ExtractedSds.Load(SdsMeshLoader.EnsureExtracted(sds));
 
+            // What the district's frames share with one another - which is what an edit of ONE mesh has to refuse
+            // or carry to the others: a geometry block, a material block, an index buffer under two blocks.
+            {
+                List<FrameObjectSingleMesh> all = [.. scene.FrameResource!.FrameObjects.Values.OfType<FrameObjectSingleMesh>()];
+                int Shared(Func<FrameObjectSingleMesh, object?> of) => all.Where(m => of(m) != null)
+                    .GroupBy(m => of(m)!, ReferenceEqualityComparer.Instance).Where(g => g.Count() > 1).Sum(g => g.Count());
+                int materialAcrossGeometry = all.Where(m => m.Material != null).GroupBy(m => (object)m.Material, ReferenceEqualityComparer.Instance)
+                    .Count(g => g.Select(m => (object?)m.Geometry).Distinct(ReferenceEqualityComparer.Instance).Count() > 1);
+                var blocksOfBuffer = new Dictionary<ulong, HashSet<object>>();
+                foreach (FrameObjectSingleMesh m in all.Where(m => m.Geometry?.LOD != null))
+                {
+                    for (int lod = 0; lod < m.Geometry.LOD.Length; lod++)
+                    {
+                        if (m.GetIndexBuffer(lod) is not { } buffer) continue;
+                        if (!blocksOfBuffer.TryGetValue(buffer.Hash, out HashSet<object>? blocks))
+                            blocksOfBuffer[buffer.Hash] = blocks = new HashSet<object>(ReferenceEqualityComparer.Instance);
+                        blocks.Add(m.Geometry);
+                    }
+                }
+                sb.AppendLine($"INFO {district}: {all.Count} mesh frames; {Shared(m => m.Geometry)} on a geometry block another frame uses, "
+                    + $"{Shared(m => m.Material)} on a material block another frame uses ({materialAcrossGeometry} material block(s) under frames "
+                    + $"of different geometry); {blocksOfBuffer.Count(b => b.Value.Count > 1)} of {blocksOfBuffer.Count} index buffers drawn by more than one geometry block");
+            }
+
             // The mesh with the most levels of detail and materials the district has, so both are exercised
             // where the district has them at all.
             FrameObjectSingleMesh? mesh = scene.FrameResource!.FrameObjects.Values.OfType<FrameObjectSingleMesh>()

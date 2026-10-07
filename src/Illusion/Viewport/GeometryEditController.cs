@@ -180,10 +180,22 @@ internal sealed class GeometryEditController
     /// <returns>Null when applied, or why not.</returns>
     public string? HideTriangles(SceneNode node, IReadOnlyList<TriangleHider.Change> changes)
     {
+        // A click in the viewport on a mesh of several levels picks the row of the level that is drawn ("LOD 0"),
+        // not the mesh's own row. The edit is the mesh's: every level's buffer changes, and every level's row
+        // has to be redrawn - from the level's row alone the others went on drawing triangles the data had lost.
+        if (node.Kind == "Lod" && node.Parent is { } owner && ReferenceEquals(owner.Source, node.Source)) node = owner;
         if (node.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh } adapter) return "not a mesh";
         if (changes.Count == 0) return "nothing to hide";
         if (node.Mesh is { Instanced: true }) return "an instanced mesh is drawn many times over — its triangles cannot be hidden in one place";
         if (adapter.Document.GeometrySharers(mesh).Any()) return "other objects draw the same geometry — the triangles would vanish from all of them";
+        // Two geometry blocks can stand on one index buffer: an object imported twice, with a level's distance
+        // changed in between, gets a block of its own over the buffers it already brought.
+        if (adapter.Document.IndexBufferSharers(mesh, changes.Select(c => c.Buffer.Hash).ToHashSet()).Any())
+            return "another object draws from the same index buffer — the triangles would vanish from it as well";
+        // The plan is the buffers as they were when it was made, and what they become. Made earlier and applied
+        // now - by a window that counted before something else changed the mesh - it would write over that change.
+        if (changes.Any(c => !ReferenceEquals(c.Buffer.GetData(), c.Before)))
+            return "the mesh changed since these triangles were counted — count them again";
         if (_host.Rnd == null) return "the viewport is not rendering yet";
 
         var edit = new HiddenTrianglesEdit(this, node, adapter.Document, mesh, changes);
