@@ -90,6 +90,36 @@ public static class StreamMapEditor
     private static readonly Encoding PoolEncoding = Encoding.Latin1;
 
     /// <summary>
+    /// Writes a patched StreamMap over <paramref name="filePath"/>, after putting what stood there beside it
+    /// as a backup, and returns the backup's path. The backup goes down first.
+    /// <para>
+    /// It never overwrites an earlier one. The name is derived from the target, so it is the same on every
+    /// edit: a second pass over the same file would have replaced the pristine backup with the
+    /// already-patched file, leaving two copies of modified data and no way back. The first backup is the
+    /// valuable one, so it is kept as <c>&lt;name&gt;_old.bin</c> and later passes get <c>_old.2.bin</c>,
+    /// <c>_old.3.bin</c> and so on.
+    /// </para>
+    /// </summary>
+    public static string WriteWithBackup(string filePath, byte[] original, byte[] patched)
+    {
+        ArgumentNullException.ThrowIfNull(filePath);
+        ArgumentNullException.ThrowIfNull(original);
+        ArgumentNullException.ThrowIfNull(patched);
+        string directory = Path.GetDirectoryName(filePath) ?? ".";
+        string stem = Path.GetFileNameWithoutExtension(filePath) + "_old";
+        string extension = Path.GetExtension(filePath);
+
+        string backup = Path.Combine(directory, stem + extension);
+        for (int n = 2; File.Exists(backup); n++)
+        {
+            backup = Path.Combine(directory, stem + "." + n.ToString(System.Globalization.CultureInfo.InvariantCulture) + extension);
+        }
+        File.WriteAllBytes(backup, original);
+        File.WriteAllBytes(filePath, patched);
+        return backup;
+    }
+
+    /// <summary>
     /// Replaces <paramref name="find"/> with <paramref name="replace"/> in every selected string
     /// field. Returns what it found and, unless <paramref name="dryRun"/>, the patched bytes.
     /// </summary>

@@ -1,0 +1,60 @@
+<Window x:Class="Illusion.Views.HideTrianglesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        Title="Hide Triangles"
+        Width="460" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Tools → Hide triangles in a box…: cuts an opening in a mesh without rebuilding it - a doorway in a
+         stock wall, a pane of glass, a row of tree billboards. Every triangle whose three corners lie inside
+         the box is hidden, on every level of detail. The window stays open beside the viewport and follows
+         the selection; the edit is one undo step. Visual language comes from the shared EditorStyles
+         dictionary, like CrashObjectWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock Style="{StaticResource DimLabel}" Text="Mesh" Margin="0,0,0,4" />
+            <TextBlock x:Name="MeshText" FontSize="13" Foreground="White" TextTrimming="CharacterEllipsis"
+                       Margin="0,0,0,14" Text="Select a mesh in the scene" />
+
+            <v:Vector3Box x:Name="MinBox" Label="Box, lower corner" Decimals="2" Margin="0,0,0,8" />
+            <v:Vector3Box x:Name="MaxBox" Label="Box, upper corner" Decimals="2" Margin="0,0,0,8" />
+            <Button x:Name="WholeMeshBtn" Style="{StaticResource NeutralButton}" HorizontalAlignment="Left"
+                    Height="28" Padding="12,0" Margin="0,0,0,14" Content="Box around the mesh"
+                    ToolTip="Set the box to the whole mesh, then narrow it down"
+                    Click="WholeMesh_Click" />
+
+            <TextBlock Style="{StaticResource DimLabel}" Text="Material" Margin="0,0,0,4" />
+            <ComboBox x:Name="MaterialCombo" Margin="0,0,0,14" SelectionChanged="Material_Changed"
+                      ToolTip="Only triangles drawn with this material. A stock mesh often carries no material names - the box alone has to do then." />
+
+            <Border Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                    BorderThickness="1" CornerRadius="4" Padding="12,10">
+                <TextBlock x:Name="CountText" FontSize="12" Foreground="White" TextWrapping="Wrap"
+                           Text="Nothing selected." />
+            </Border>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="210"
+                           TextWrapping="Wrap" VerticalAlignment="Center"
+                           Text="World coordinates. Hide, look, and Undo (Ctrl+Z) if the box was off." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
+                            Content="Close" Click="Close_Click" />
+                    <Button x:Name="HideBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            Content="Hide" IsEnabled="False" Click="Hide_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

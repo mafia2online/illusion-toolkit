@@ -40,6 +40,22 @@
                           Click="RebuildHitBoxes_Click"
                           ToolTip="Recompute the selected model's per-piece hit boxes from its geometry, so new geometry can be shot" />
             </MenuItem>
+            <!-- What used to be reachable only through the MCP server: each item opens a window over the same
+                 job the matching tool does, so the menu and an agent cannot drift apart. -->
+            <MenuItem Header="Tools">
+                <MenuItem Header="Hide triangles in a box…" Click="HideTriangles_Click"
+                          ToolTip="Hide the triangles of the selected mesh that lie inside a box, without rebuilding it" />
+                <Separator />
+                <MenuItem Header="Clone car…" Click="CloneCar_Click"
+                          ToolTip="A second car under a new model name, registered in the tables and built" />
+                <MenuItem Header="Replace a car…" Click="SubstituteCar_Click"
+                          ToolTip="Build one car under another car's name; no table is touched" />
+                <MenuItem Header="Export car for multiplayer…" Click="ExportCar_Click"
+                          ToolTip="Write a built car out as a multiplayer resource folder" />
+                <Separator />
+                <MenuItem Header="Stream map…" Click="StreamMap_Click"
+                          ToolTip="Find and replace in StreamMapa.bin - archive paths, line and group names" />
+            </MenuItem>
         </Menu>
 
         <StatusBar DockPanel.Dock="Bottom" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">

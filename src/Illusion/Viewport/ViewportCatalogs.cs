@@ -113,6 +113,28 @@ internal sealed class ViewportCatalogs
         });
     }
 
+    /// <summary>
+    /// Reads the loading zones again from the working copy of city_univers and redraws their boxes — after one
+    /// was moved (Tools → Loading zones), so the layer does not go on showing where it stood. False when the
+    /// catalog is not up yet or the zones could not be read; the boxes then stay as they were.
+    /// </summary>
+    public bool ReloadZones()
+    {
+        if (Map == null || _host.Rnd == null) return false;
+        try
+        {
+            Zones = AreaZones.Load(f => SdsMeshLoader.EnsureExtracted(f), Map.Areas.Select(a => a.BaseName).ToList());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+                                       or Formats.FileFormatException)
+        {
+            Debug.WriteLine("Zone reload error: " + ex);
+            return false;
+        }
+        BuildZoneBoxes();
+        return true;
+    }
+
     // Zone boxes for the debug overlay: world AABB of the zone + color by its (first) district.
     public void BuildZoneBoxes()
     {
