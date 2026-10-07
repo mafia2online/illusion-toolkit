@@ -115,6 +115,45 @@ internal static class ObjectTransplantProbes
             Check("carrying the same things a second time adds nothing",
                 again.ItemDescriptions.Count == 0 && !again.Prefab && again.Textures.Count == 0);
 
+            // A texture the object's archive does not hold comes from the archive that does: a weapon on the
+            // shop's shelf is drawn with textures of weapons.sds, which neither the shop nor the district has.
+            {
+                Illusion.Assets.MafiaMaterials.EnsureLoaded();
+                SdsManifest shop = SdsManifest.Load(sourceDir);
+                SdsManifest scratchManifest = SdsManifest.Load(dir);
+                string weaponsDir = SdsMeshLoader.EnsureExtracted(
+                    new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "weapons", "weapons.sds")));
+                (ulong Hash, string Texture)? foreign = null;
+                foreach (ulong hash in theirs.FrameMaterials.Values.SelectMany(b => b.Materials).SelectMany(l => l).Select(m => m.MaterialHash).Distinct())
+                {
+                    string? texture = (Illusion.Assets.MafiaMaterials.Collection?.FindByHash(hash)?.CollectTextures() ?? [])
+                        .FirstOrDefault(t => t.Length > 0 && !shop.HasFile(t) && !scratchManifest.HasFile(t)
+                            && File.Exists(Path.Combine(weaponsDir, t)));
+                    if (texture == null) continue;
+                    foreign = (hash, texture);
+                    break;
+                }
+                Check("the shop draws something with a texture of weapons.sds", foreign != null, foreign?.Texture ?? "");
+                if (foreign is { } wanted)
+                {
+                    ArchiveCarry.Report none = ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null, _ => null);
+                    Check("a texture no archive is found to hold is reported, and nothing is written for it",
+                        none.Elsewhere.Contains(wanted.Texture) && !none.Textures.Contains(wanted.Texture) && none.Borrowed.Count == 0
+                        && !File.Exists(Path.Combine(dir, wanted.Texture)));
+                    ArchiveCarry.Report lent = ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null,
+                        name => Path.Combine(weaponsDir, name));
+                    Check("a texture a third archive holds is taken from it",
+                        lent.Textures.Contains(wanted.Texture) && !lent.Elsewhere.Contains(wanted.Texture)
+                        && lent.Borrowed.Any(b => b.Texture == wanted.Texture && b.Archive == Path.GetFileName(weaponsDir))
+                        && File.Exists(Path.Combine(dir, wanted.Texture)) && SdsManifest.Load(dir).HasFile(wanted.Texture),
+                        $"{wanted.Texture} from {string.Join(", ", lent.Borrowed.Select(b => b.Archive).Distinct())}");
+                    Check("with the bytes it has there",
+                        File.ReadAllBytes(Path.Combine(dir, wanted.Texture)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(weaponsDir, wanted.Texture))));
+                    Check("and a second carry adds nothing",
+                        ArchiveCarry.Carry(sourceDir, dir, [wanted.Hash], [], null, name => Path.Combine(weaponsDir, name)).Textures.Count == 0);
+                }
+            }
+
             // ── A prop an actor places ──
             FrameObjectBase propRoot = theirPlacements.TargetOf(prop)!;
             TransplantedObject? carriedProp = FrameTransplant.TryTransplant(document, theirs, propRoot, "probe_prop",
@@ -385,6 +424,83 @@ internal static class ObjectTransplantProbes
                 ArchiveCarry.Carry(sourceDir, dir,
                     [.. carriedDoor.MaterialHashes, .. carriedProp.MaterialHashes, .. carriedScenery.MaterialHashes], [], null,
                     carriedScenery.DirectTextures);
+            }
+
+            // ── The texture index: a scan made once, kept true as the mirror changes under it ──
+            Illusion.Assets.Textures.TextureSearchIndex.EnsureBuilt();
+            if (Illusion.Assets.Textures.TextureSearchIndex.IsBuilt)
+            {
+                string indexA = Path.Combine(scratch, "index_a"), indexB = Path.Combine(scratch, "index_b"), late = Path.Combine(scratch, "index_late");
+                foreach (string made in new[] { indexA, indexB, late }) Directory.CreateDirectory(made);
+                const string Twice = "illusion_probe_index_twice.dds", Late = "illusion_probe_index_late.dds";
+                File.WriteAllBytes(Path.Combine(indexA, Twice), [1]);
+                File.WriteAllBytes(Path.Combine(indexB, Twice), [2]);
+                File.WriteAllBytes(Path.Combine(late, Late), [3]);
+                bool unknown = Illusion.Assets.Textures.TextureSearchIndex.FindPath(Late) == null;
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(late);
+                Check("a folder that appears after the scan is found once it is announced",
+                    unknown && string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Late), Path.Combine(late, Late), StringComparison.OrdinalIgnoreCase));
+                Illusion.Assets.Textures.TextureSearchIndex.Register(Path.Combine(indexA, Twice));
+                Illusion.Assets.Textures.TextureSearchIndex.Register(Path.Combine(indexB, Twice));
+                bool firstWins = string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice), Path.Combine(indexA, Twice), StringComparison.OrdinalIgnoreCase);
+                File.Delete(Path.Combine(indexA, Twice));
+                bool fallsThrough = string.Equals(Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice), Path.Combine(indexB, Twice), StringComparison.OrdinalIgnoreCase);
+                File.Delete(Path.Combine(indexB, Twice));
+                Check("a name held twice answers with the first copy, with the second when the first is gone, with nothing when both are",
+                    firstWins && fallsThrough && Illusion.Assets.Textures.TextureSearchIndex.FindPath(Twice) == null,
+                    $"first {firstWins}, second {fallsThrough}");
+            }
+
+            // ── The carry through the index itself: donors that appear late, and a first copy that is no donor ──
+            if (Illusion.Assets.Textures.TextureSearchIndex.IsBuilt)
+            {
+                const string Lent = "illusion_probe_lent.dds";
+                string Working(string folder)
+                {
+                    string made = Path.Combine(scratch, folder);
+                    Directory.CreateDirectory(made);
+                    File.WriteAllText(Path.Combine(made, "SDSContent.xml"), "<SDSResource>\n</SDSResource>");
+                    return made;
+                }
+                string Donor(string folder, byte mark, bool listed = true)
+                {
+                    string made = Working(folder);
+                    File.WriteAllBytes(Path.Combine(made, Lent), [mark, 2, 3]);
+                    if (listed) SdsManifest.Load(made).AddEntry("Texture", Lent, 2, [("HasMIP", "0")]);
+                    return made;
+                }
+                string nothing = Working("lend_from"), into = Working("lend_into");
+                ArchiveCarry.Report Bring() => ArchiveCarry.Carry(nothing, into, [], [], null, directTextures: [Lent]);
+
+                ArchiveCarry.Report beforeDonors = Bring();
+                string unlisted = Donor("lend_unlisted", 7, listed: false), good = Donor("lend_good", 9);
+                // As the extractor announces a folder it has just made — in this order, so the copy its own
+                // archive does not list is the one the index offers first.
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(unlisted);
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(good);
+                ArchiveCarry.Report afterDonors = Bring();
+                Check("a texture in an archive extracted after the index was built is found by the carry's own lookup",
+                    beforeDonors.Elsewhere.Contains(Lent) && afterDonors.Textures.Contains(Lent)
+                    && afterDonors.Borrowed.Any(b => b.Texture == Lent && b.Archive == "lend_good"),
+                    $"before: {(beforeDonors.Elsewhere.Contains(Lent) ? "held nowhere" : "found")}; after: from "
+                    + string.Join(", ", afterDonors.Borrowed.Select(b => b.Archive)));
+                Check("the first copy the index offers not being on its archive's list does not end the search",
+                    File.Exists(Path.Combine(into, Lent)) && File.ReadAllBytes(Path.Combine(into, Lent))[0] == 9);
+
+                // Now a donor has gone, and the destination's own copy stands before the one that is left.
+                if (SdsManifest.Load(into).RemoveEntry(Lent)) File.Delete(Path.Combine(into, Lent));
+                File.Delete(Path.Combine(unlisted, Lent));
+                File.Delete(Path.Combine(good, Lent));
+                string own = Path.Combine(into, Lent);
+                File.WriteAllBytes(own, [5]);                              // on disk in the destination, not on its list
+                Illusion.Assets.Textures.TextureSearchIndex.Register(own);
+                string third = Donor("lend_third", 11);
+                Illusion.Assets.Textures.TextureSearchIndex.RegisterFolder(third);
+                ArchiveCarry.Report onceMore = Bring();
+                Check("a donor that has gone, and a copy that is the destination's own, are passed over for the next donor",
+                    onceMore.Textures.Contains(Lent) && onceMore.Borrowed.Any(b => b.Archive == "lend_third")
+                    && File.ReadAllBytes(own)[0] == 11,
+                    onceMore.Elsewhere.Contains(Lent) ? "reported as held nowhere" : "from " + string.Join(", ", onceMore.Borrowed.Select(b => b.Archive)));
             }
 
             // ── A destination that has neither a prefab nor an item description of its own ──

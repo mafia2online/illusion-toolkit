@@ -48,10 +48,14 @@ public static class SdsMeshLoader
             if (File.Exists(Path.Combine(legacy, "SDSContent.xml")))
             {
                 RelocateToResources(legacy, target);
+                Textures.TextureSearchIndex.RegisterFolder(target);
                 return target;
             }
 
             SdsArchive.Open(sdsFile.FullName).Extract(target);
+            // The texture index is a scan made once; what this archive brings into the mirror has to be told
+            // to it, or its textures stay "in no extracted archive" for the rest of the session.
+            Textures.TextureSearchIndex.RegisterFolder(target);
             return target;
         }
     }
