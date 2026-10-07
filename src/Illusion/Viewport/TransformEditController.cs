@@ -73,6 +73,87 @@ internal sealed class TransformEditController
             if (n.Source is not IFrameNode fn || HasSelectedAncestor(fn, frames)) continue;
             _dragGroup.Add((n, fn.WorldTransform, fn.LocalTransform));
         }
+
+        // An object carried in from another archive drags the collision it was given along with it: nothing in
+        // the file ties the two, so without this the hull would stay where the object used to stand.
+        var dragged = new HashSet<SceneNode>(_dragGroup.Select(g => g.Node));
+        // The placements the user took hold of themselves, before the ones that only ride along are added:
+        // changed on their own, they are still their object's, and its record has to be kept true.
+        _dragLinks = _host.LinksOf(dragged);
+        foreach (List<D3DImageHost.LinkedPlacement> riding in _host.LinkedSlots(dragged.ToList()).Values)
+        {
+            foreach (D3DImageHost.LinkedPlacement placement in riding)
+            {
+                if (placement.Hull.Source is not IFrameNode h || !dragged.Add(placement.Hull)) continue;
+                _dragGroup.Add((placement.Hull, h.WorldTransform, h.LocalTransform));
+                _dragLinks.Add(placement);
+            }
+        }
+    }
+
+    // The linked placements a drag has hold of — riding with their object, or taken on their own.
+    private List<D3DImageHost.LinkedPlacement> _dragLinks = [];
+
+    /// <summary>
+    /// Brings the records of imported objects in line with their placements after a change to either. A
+    /// resize re-cooks a hull under a new hash; a placement moved on its own stands somewhere else in its
+    /// object's space. The record names both, and unless it follows, the object has lost its collision by the
+    /// next operation — or, worse, claims some other placement of the old hull that happens to stand near.
+    /// Rewritten as edits, to go into the same undo step as what caused them. Nothing is written for a
+    /// placement that only moved together with its object: its place in the object's space is what it was.
+    /// </summary>
+    internal List<IEditAction> Relink(IReadOnlyList<D3DImageHost.LinkedPlacement> links)
+    {
+        var edits = new List<IEditAction>();
+        foreach (var record in links.GroupBy(l => (l.Dir, l.Name)))
+        {
+            List<Assets.Sds.ImportLinks.Link> entries = [.. Assets.Sds.ImportLinks.HullsOf(record.Key.Dir, record.Key.Name)];
+            bool changed = false;
+            foreach (D3DImageHost.LinkedPlacement link in record)
+            {
+                if (link.Slot >= entries.Count || link.Hull.Source is not CollisionInstanceAdapter placed) continue;
+                Assets.Sds.ImportLinks.Link now = D3DImageHost.LinkFor(link.Owner, placed.Instance);
+                Assets.Sds.ImportLinks.Link was = entries[link.Slot];
+                // A record from before places were kept gains one here, the first time anything is done to
+                // the placement: found by nearness this once, it is found by its place from now on — and
+                // without it a hull of such a record dragged a little too far on its own was lost.
+                bool samePlace = was.At is { } before && now.At is { } after && Vector3.Distance(before, after) < 0.01f;
+                if (was.Hull == now.Hull && (samePlace || now.At == null)) continue;
+                entries[link.Slot] = now.At == null ? was with { Hull = now.Hull } : now;
+                changed = true;
+            }
+            if (!changed) continue;
+            var edit = new ImportLinkEdit(record.Key.Dir, record.Key.Name, entries);
+            edit.Redo();
+            edits.Add(edit);
+        }
+        return edits;
+    }
+
+    /// <summary>
+    /// Moves placements that ride with an object by the change <paramref name="delta"/> made to it, and
+    /// re-cooks the ones a resize reached (a placement cannot store a scale). Returns what moved, for the
+    /// caller's undo entry; <paramref name="minted"/> are the re-cook edits, already applied.
+    /// </summary>
+    /// <param name="skip">Placements that are not to be carried: ones the caller places itself.</param>
+    internal List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> MoveRiders(
+        IEnumerable<D3DImageHost.LinkedPlacement> riders, Matrix4x4 delta, Func<SceneNode, bool>? skip,
+        out List<IEditAction> minted)
+    {
+        var hulls = new List<(SceneNode Node, Matrix4x4 Before)>();
+        foreach (D3DImageHost.LinkedPlacement link in riders)
+        {
+            if (link.Hull.Source is not IFrameNode h || skip?.Invoke(link.Hull) == true
+                || hulls.Any(x => ReferenceEquals(x.Node, link.Hull)))
+            {
+                continue;
+            }
+            hulls.Add((link.Hull, h.LocalTransform));
+            h.LocalTransform = TransformOps.WorldDeltaToLocal(h.WorldTransform, h.ParentWorldTransform, delta);
+            SyncNodeMeshes(link.Hull);
+        }
+        minted = hulls.Count == 0 ? [] : [.. _host.CollisionEditing.MintPreviewedScales(hulls.Select(x => x.Node).ToList())];
+        return [.. hulls.Select(x => (x.Node, x.Before, ((IFrameNode)x.Node.Source!).LocalTransform))];
     }
 
     // True if any frame-graph ancestor of fn is itself selected (its cascade will move fn).
@@ -123,7 +204,11 @@ internal sealed class TransformEditController
     /// <summary>Abandons the drag: drops the snapshots without recording anything. The caller has already put
     /// the objects back by applying an identity delta — which also unwinds a collision placement's previewed
     /// scale, so there is nothing left to mint either.</summary>
-    public void GizmoCancelDrag() => _dragGroup.Clear();
+    public void GizmoCancelDrag()
+    {
+        _dragGroup.Clear();
+        _dragLinks = [];
+    }
 
     /// <summary>Ends the drag: pushes the whole group move as ONE undoable edit.</summary>
     public void GizmoEndDrag()
@@ -135,7 +220,13 @@ internal sealed class TransformEditController
         // has and the hull would grow on every cycle.
         var nodes = new List<SceneNode>(_dragGroup.Count);
         foreach ((SceneNode node, _, _) in _dragGroup) nodes.Add(node);
-        IReadOnlyList<IEditAction> mints = _host.CollisionEditing.MintPreviewedScales(nodes);
+        List<IEditAction> mints = [.. _host.CollisionEditing.MintPreviewedScales(nodes)];
+        // After the mints in the composite, so before them on undo: the record goes back to the old hashes
+        // while the placements still carry the new ones, and then the placements follow.
+        // Only for a drag that moved something: a click on the gizmo is not an edit, and a record from before
+        // places were kept would be brought up to date by it and leave an undo step that undoes nothing seen.
+        if (_gizmoMoved) mints.AddRange(Relink(_dragLinks));
+        _dragLinks = [];
 
         var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)>(_dragGroup.Count);
         foreach ((SceneNode node, _, Matrix4x4 beforeLocal) in _dragGroup)
@@ -150,8 +241,37 @@ internal sealed class TransformEditController
     public void RecordTransform(SceneNode node, Matrix4x4 before, Matrix4x4 after)
     {
         if (before == after) return;
-        History.Push(new TransformEdit(this, new[] { (node, before, after) }));
-        if (Persists(node, before, after)) _host.Persistence.MarkFrameModified(node);
+        var items = new List<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> { (node, before, after) };
+        List<IEditAction> applied = [];
+
+        // A number typed into the Transform panel comes through here, not through a drag — and the collision
+        // an imported object was given has to follow it all the same. It used to stay where the object had
+        // stood; past a few metres it was then no longer found as the object's, and a later delete left it in
+        // the file as an obstacle nobody can see. Everything is looked for from where it WAS: the change has
+        // already been made by the time it is recorded.
+        if (node.Source is IFrameNode moved)
+        {
+            Matrix4x4 parent = moved.ParentWorldTransform;
+            Matrix4x4 worldBefore = before * parent, worldAfter = after * parent;
+            List<D3DImageHost.LinkedPlacement> links;
+            if (node.Source is CollisionInstanceAdapter)
+            {
+                // A placement changed on its own: nothing rides with it, but its object's record follows.
+                links = _host.LinksOf([node], new Dictionary<SceneNode, Vector3> { [node] = worldBefore.Translation });
+            }
+            else
+            {
+                links = _host.LinkedSlots([node], new Dictionary<SceneNode, Matrix4x4> { [node] = worldBefore })
+                    .TryGetValue(node, out List<D3DImageHost.LinkedPlacement>? mine) ? mine : [];
+                if (links.Count > 0 && Matrix4x4.Invert(worldBefore, out Matrix4x4 back))
+                {
+                    items.AddRange(MoveRiders(links, back * worldAfter, null, out List<IEditAction> minted));
+                    applied.AddRange(minted);
+                }
+            }
+            applied.AddRange(Relink(links));
+        }
+        RecordGroupTransform(items, applied);
     }
 
     // Records a group's local-transform changes as ONE undoable edit (keeping only the objects that moved),
@@ -274,7 +394,9 @@ internal sealed class TransformEditController
     /// with a notice.</summary>
     public void DuplicateSelected()
     {
+        LastDuplicates = [];
         var items = new List<DuplicatedItem>();
+        var pairs = new List<(SceneNode Source, SceneNode Copy)>();
         int skipped = 0;
         string? lastReason = null;
         foreach (SceneNode n in _host.Selection.Selected.ToList())
@@ -300,16 +422,22 @@ internal sealed class TransformEditController
             _host.Persistence.MarkFrameModified(leaf);
             if (dup.IsOnNameTable) _host.Persistence.MarkNameTableDirty(leaf);
             items.Add(new DuplicatedItem(leaf, n.Parent, dup, mesh));
+            pairs.Add((n, leaf));
         }
 
         if (skipped > 0)
             _host.RaiseNotice($"{skipped} object(s) not duplicated — {lastReason ?? "unsupported object"}");
         if (items.Count == 0) return;
 
+        LastDuplicates = pairs;
         History.Push(new DuplicateEdit(this, items.ToArray())); // already applied above — pushed, not redone
         _host.Selection.SetSelection(items.Select(i => i.Node).ToList(), items[^1].Node);
         _host.RaiseSceneChanged();
     }
+
+    /// <summary>What the last <see cref="DuplicateSelected"/> copied: each source row and the row of its copy —
+    /// for the host, which gives a copy of an imported object copies of the collision it was given.</summary>
+    public IReadOnlyList<(SceneNode Source, SceneNode Copy)> LastDuplicates { get; private set; } = [];
 
     private sealed record DuplicatedItem(
         SceneNode Node, SceneNode Parent, FrameDuplicator.DuplicatedObject Duplicate, GpuMesh Mesh);

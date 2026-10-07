@@ -470,10 +470,10 @@ public static class SdsMeshLoader
     /// anything, and that reads as data rather than as the absence of it.
     /// </para>
     /// </summary>
-    private static string TreeName(FrameObjectBase o) =>
+    internal static string TreeName(FrameObjectBase o) =>
         o.Name?.String is { Length: > 0 } named ? named : $"({KindOf(o).ToLowerInvariant()}, unnamed)";
 
-    private static string KindOf(FrameObjectBase o)
+    internal static string KindOf(FrameObjectBase o)
     {
         string t = o.GetType().Name;
         if (t.StartsWith("FrameObject", StringComparison.Ordinal)) t = t.Substring(11);

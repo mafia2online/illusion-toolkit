@@ -153,6 +153,19 @@ The camera has two modes, switched by the top button of the viewport tool shelf 
 - **Import** (`Ctrl+I`) reads glTF (`.glb`/`.gltf`) into a chosen loaded archive; meshes named
   `COL_*` become collision hulls, the rest become render meshes, and missing game materials can be
   created automatically.
+- **Objects from other archives** (MCP `object_import`): a door from a shop, a chair or a plant from an
+  interior, carried into the loaded district as one undoable edit. An actor comes with the object it
+  places, its behaviour row, its prefab entry and the item descriptions its collision hulls name, so a
+  door opens and a chair can be knocked over; a plain frame object arrives as scenery anchored to the
+  district's scene. Geometry is copied into the district's own pools and the textures its materials name
+  into its working copy, so nothing depends on the source archive being loaded. `--probe-object-transplant`
+  carries a door, a prop and a piece of scenery onto a scratch copy and reads them back.
+- **Props panel** (map editor, left of the viewport, toolbar's Props button): the stock game's doors, seating, tables, beds, storage, plants, lamps and decor
+  from every extracted interior and district, one card per object with a picture. Drag a card onto the
+  viewport to put the object where it lands, or double-click it to put it in front of the camera. Scenery
+  arrives with its own collision hulls, or — when it had none — its convex hull (or a box, every triangle, or nothing, from the panel's Collision chooser); a door is made
+  openable by the player even where its own building's script used to do that. The scan is remembered
+  between runs (`--probe-prop-catalog`).
 
 ### Materials
 
@@ -219,7 +232,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 65 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 66 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -235,7 +248,7 @@ map editor itself.
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
-| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import` |
+| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -257,6 +270,8 @@ inside is not decoded, and the responses say so rather than looking complete.
 
 - The Resource Editor tile is a stub.
 - Duplicating frame objects covers static single-mesh objects only.
+- Objects carried from another archive: skinned models cannot travel yet, importing the same object
+  again shares the geometry the first import brought, while Ctrl+D still makes a full copy.
 - A topology rebuild does not regenerate lower LODs or collision for that object.
 - `.sds.patch`, `.tra` and `cityareas.bin` are read-only. `StreamMap*.bin` is read-only in the
   editor; the MCP `edit_stream_map` tool can rewrite its strings in place (see above).

@@ -164,6 +164,32 @@ internal static class ProbeRunner
             case "--probe-season-mirror":
                 SeasonMirrorProbes.RunSeasonMirrorProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Carrying objects between archives on a scratch copy: a door, a prop an actor places and a
+            // piece of scenery go from an interior into a district — frames, buffers, actor, prefab entry,
+            // item descriptions — and survive a save and a reload; an undo leaves the scene byte for byte.
+            // Output: %TEMP%\illusion_object_transplant.txt
+            // The prop library: what a scan of the extracted archives finds, shelf by shelf, and a few pictures.
+            // Output: %TEMP%\illusion_prop_catalog.txt
+            case "--probe-prop-catalog":
+                PropCatalogProbes.RunPropCatalogProbe();
+                return true;
+            // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
+            // Output: %TEMP%\illusion_geometry_sweep.txt
+            case "--probe-geometry-sweep":
+                GeometrySweepProbes.RunGeometrySweepProbe();
+                return true;
+            // The import as the editor makes it, in a real window with a district loaded: undo, the tree, the
+            // link to collision. Touches the install and puts it back. Output: %TEMP%\illusion_object_import_live.txt
+            case "--probe-object-import-live":
+                ObjectImportLiveProbes.Run(
+                    args.Length >= 2 ? args[1] : "hill",
+                    args.Length >= 3 ? args[2] : @"shops\harry.sds");
+                return true;
+            case "--probe-object-transplant":
+                ObjectTransplantProbes.RunObjectTransplantProbe(
+                    args.Length >= 2 ? args[1] : "hill",
+                    args.Length >= 3 ? args[2] : @"shops\harry.sds");
+                return true;
             // Two ways a surface came out black: which meshes of an archive carry no normals (foliage) and what
             // the renderer is handed for them, and an instanced copy drawn beside a placed one.
             // Output: %TEMP%\illusion_vertex_normals.txt

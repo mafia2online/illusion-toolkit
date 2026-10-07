@@ -476,7 +476,7 @@ public static class SeasonMirror
                     continue;
                 }
                 string name = Path.GetFileName(ours[i]);
-                if (!CopyEntry(from.Manifest, manifest, summerDir, winterDir, name)) continue;
+                if (!ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name)) continue;
                 files.Add(name);
             }
         }
@@ -533,7 +533,7 @@ public static class SeasonMirror
         // Adds a summer file winter lacks, or refreshes one an earlier mirror brought. True when it wrote.
         bool Bring(string name)
         {
-            if (!manifest.HasFile(name)) return CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
+            if (!manifest.HasFile(name)) return ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
             if (pair.ShippedInWinter(name)) return false;
 
             string source = Path.Combine(summerDir, name.TrimStart('/', '\\'));
@@ -559,7 +559,7 @@ public static class SeasonMirror
             if (!sameEntry && theirs is { Count: >= 3 } && theirs[^1].Name == "Version" && int.TryParse(theirs[^1].Value, out _))
             {
                 manifest.RemoveEntry(name);
-                return CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
+                return ArchiveCarry.CopyEntry(from.Manifest, manifest, summerDir, winterDir, name);
             }
             // An entry that differs and cannot be copied leaves nothing to do when the bytes are the same.
             if (sameBytes) return false;
@@ -582,21 +582,5 @@ public static class SeasonMirror
             if (a.Materials[lod].Length != b.Materials[lod].Length) return false;
         }
         return true;
-    }
-
-    // Copies one file and the manifest entry that announces it, field for field — a packing handler reads an
-    // entry positionally, so the only safe way to move one is verbatim.
-    private static bool CopyEntry(SdsManifest from, SdsManifest to, string fromDir, string toDir, string name)
-    {
-        if (to.HasFile(name)) return false;
-        IReadOnlyList<(string Name, string Value)>? fields = from.EntryFields(name);
-        string source = Path.Combine(fromDir, name.TrimStart('/', '\\'));
-        if (fields is not { Count: >= 3 } || !File.Exists(source)) return false;
-        if (!int.TryParse(fields[^1].Value, out int version) || fields[^1].Name != "Version") return false;
-
-        string target = Path.Combine(toDir, name.TrimStart('/', '\\'));
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        AtomicFile.WriteAllBytes(target, File.ReadAllBytes(source));
-        return to.AddEntry(fields[0].Value, name, version, [.. fields.Skip(2).Take(fields.Count - 3)]);
     }
 }

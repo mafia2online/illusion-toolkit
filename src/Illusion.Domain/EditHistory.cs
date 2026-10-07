@@ -51,6 +51,24 @@ public sealed class EditHistory
         return dropped;
     }
 
+    /// <summary>How many edits can be undone — what <see cref="SquashSince"/> is given to mark a point.</summary>
+    public int UndoCount => _undo.Count;
+
+    /// <summary>
+    /// Folds every edit pushed since the undo stack held <paramref name="count"/> into one, built by
+    /// <paramref name="combine"/> from them in the order they were pushed — so a command that went through
+    /// several editors is still one Ctrl+Z. Nothing happens when fewer than two were pushed.
+    /// </summary>
+    public void SquashSince(int count, Func<IEditAction[], IEditAction> combine)
+    {
+        ArgumentNullException.ThrowIfNull(combine);
+        if (count < 0 || _undo.Count - count < 2) return;
+        IEditAction[] edits = [.. _undo.Skip(count)];
+        _undo.RemoveRange(count, edits.Length);
+        _undo.Add(combine(edits));
+        Changed?.Invoke();
+    }
+
     /// <summary>Reverts the most recent edit (no-op when empty).</summary>
     public void Undo()
     {
