@@ -1142,6 +1142,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="ScenePersistence.BuildEdits"/>
     public BuildReport BuildEdits(bool createBackup = true) => Persistence.BuildEdits(createBackup);
 
+    /// <inheritdoc cref="ScenePersistence.BuildArchives"/>
+    public BuildReport BuildArchives(IReadOnlyList<FileInfo> archives, bool createBackup = true) =>
+        Persistence.BuildArchives(archives, createBackup);
+
     /// <inheritdoc cref="DistrictStreamer.ResetForExternalChange"/>
     public void PrepareForArchiveRestore() => Streamer.ResetForExternalChange();
 

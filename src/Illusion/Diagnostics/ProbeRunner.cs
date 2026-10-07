@@ -45,6 +45,12 @@ internal static class ProbeRunner
             case "--probe-zones":
                 WorldProbes.RunZonesProbe(args.Skip(1).ToArray());
                 return true;
+            // What a Build would put into the game: an untouched working copy shows nothing, a changed and a
+            // removed file are listed, a loose file is not. Arguments: archives under pc\sds (default:
+            // city_univers and one district). Reads the game only. Output: %TEMP%\illusion_build_list.txt
+            case "--probe-build-list":
+                BuildListProbes.Run(args.Skip(1).ToArray());
+                return true;
             // Dump of district scenes + their categories (proxy/snow/normal).
             case "--probe-scenes":
                 SceneProbes.RunScenesProbe(args.Length >= 2 ? args[1] : "eastside");
