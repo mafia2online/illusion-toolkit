@@ -38,14 +38,27 @@ public static class TuningEditing
 
     /// <summary>
     /// Writes one field of one table. Returns null — writing nothing — when the storage cannot be opened,
-    /// the table is not there, or nothing in it sits at that offset.
+    /// the table is not there, nothing in it sits at that offset, or the value is not one the field can
+    /// hold (a number that is not finite, an integer wider than the field).
     /// </summary>
-    public static Change? Set(string storagePath, int tableIndex, uint offset, TuningValue value, string label)
+    public static Change? Set(string storagePath, int tableIndex, uint offset, TuningValue value, string label) =>
+        Set(storagePath, tableIndex, offset, value, label, out _);
+
+    /// <inheritdoc cref="Set(string, int, uint, TuningValue, string)"/>
+    /// <param name="refusal">Why nothing was written, when nothing was.</param>
+    public static Change? Set(string storagePath, int tableIndex, uint offset, TuningValue value, string label,
+        out string? refusal)
     {
         ArgumentException.ThrowIfNullOrEmpty(storagePath);
+        refusal = null;
 
-        if (Open(storagePath) is not { } storage) return null;
-        if (Field(storage, tableIndex, offset) is not { } field) return null;
+        if (Open(storagePath) is not { } storage || Field(storage, tableIndex, offset) is not { } field)
+        {
+            refusal = $"{label} could not be found in the entity data";
+            return null;
+        }
+        refusal = WhyNot(field.Kind, value);
+        if (refusal != null) return null;
 
         TuningValue before = Read(field);
         Apply(field, value);
@@ -53,7 +66,7 @@ public static class TuningEditing
         return new Change(storagePath, tableIndex, offset, before, value, label);
     }
 
-    /// <summary>Puts a field back to a value it held — the undo of <see cref="Set"/>; the redo is the same
+    /// <summary>Puts a field back to a value it held — the undo of <see cref="Set(string, int, uint, TuningValue, string)"/>; the redo is the same
     /// call with the change's After.</summary>
     public static bool Restore(Change change, TuningValue value)
     {
@@ -81,6 +94,35 @@ public static class TuningEditing
             if (field.Offset == offset) return field;
         }
         return null;
+    }
+
+    // A number that is not one, or that does not fit the field's width. A mass of NaN is written as readily
+    // as a mass of 1200 and ships in the next build; an integer too wide for its field is cut to its low
+    // bytes and becomes some other number entirely.
+    private static string? WhyNot(ActorPropertyKind kind, TuningValue value)
+    {
+        (long Min, long Max)? range = kind switch
+        {
+            ActorPropertyKind.Bool => (0, 1),
+            ActorPropertyKind.Int8 => (sbyte.MinValue, sbyte.MaxValue),
+            ActorPropertyKind.UInt8 => (byte.MinValue, byte.MaxValue),
+            ActorPropertyKind.Int16 => (short.MinValue, short.MaxValue),
+            ActorPropertyKind.UInt16 => (ushort.MinValue, ushort.MaxValue),
+            ActorPropertyKind.Int32 => (int.MinValue, int.MaxValue),
+            ActorPropertyKind.UInt32 => (uint.MinValue, uint.MaxValue),
+            // The 64-bit kinds take any value this API can carry: the upper half of an unsigned one arrives
+            // as a negative number, and a range here would refuse it.
+            _ => null,
+        };
+        return kind switch
+        {
+            ActorPropertyKind.Float when !float.IsFinite(value.X) => "the value is not a finite number",
+            ActorPropertyKind.Vector3 when !float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z)
+                => "the vector has a component that is not a finite number",
+            _ when range is { } r && (value.Number < r.Min || value.Number > r.Max)
+                => $"{value.Number} does not fit the field: it holds {r.Min} to {r.Max}",
+            _ => null,
+        };
     }
 
     private static TuningValue Read(ActorPropertyField field) => field.Kind switch

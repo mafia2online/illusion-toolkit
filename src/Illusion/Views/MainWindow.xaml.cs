@@ -408,6 +408,14 @@ public partial class MainWindow : Window
     private void ShowBuildResult(D3DImageHost.BuildReport report)
     {
         bool anyFailed = report.Failed.Count > 0;
+        // Entries a pack left out because their file was not in the working copy. Never silenced: the archive
+        // is short of a resource, and nothing else would say so.
+        List<string> dropped = [.. report.Packed.SelectMany(p => (p.Dropped ?? []).Select(f => $"{Path.GetFileName(p.Archive)}: {f}"))];
+        if (dropped.Count > 0)
+        {
+            PostNotice($"{dropped.Count} manifest entr(ies) named a file missing from the working copy and were left out of "
+                + "the build: " + string.Join(", ", dropped.Take(6)) + (dropped.Count > 6 ? ", …" : ""), true);
+        }
         if (!anyFailed && UserSettings.Current.SuppressBuildNotice) return; // user silenced successful-build notices
 
         var msg = new StringBuilder();

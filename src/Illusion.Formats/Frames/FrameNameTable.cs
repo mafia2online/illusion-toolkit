@@ -70,10 +70,22 @@ public class FrameNameTable
         var objects = new List<FrameObjectBase?>(resource.FrameObjects.Count);
         foreach (object value in resource.FrameObjects.Values) objects.Add(value as FrameObjectBase);
 
+        // Entries go out in the order the loaded table had them (objects it never listed follow, by index):
+        // the order is authored, not derivable — and the game takes a car's first entry for its root.
+        var listed = new List<int>(objects.Count);
         for (int i = 0; i < objects.Count; i++)
         {
-            FrameObjectBase? fBase = objects[i];
-            if (fBase == null || !fBase.IsOnFrameTable) continue;
+            if (objects[i] is { IsOnFrameTable: true }) listed.Add(i);
+        }
+        listed.Sort((a, b) =>
+        {
+            int byOrder = objects[a]!.FrameNameTableOrder.CompareTo(objects[b]!.FrameNameTableOrder);
+            return byOrder != 0 ? byOrder : a.CompareTo(b);
+        });
+
+        foreach (int i in listed)
+        {
+            FrameObjectBase fBase = objects[i]!;
 
             Data data = new Data();
             data.Flags = fBase.FrameNameTableFlags;

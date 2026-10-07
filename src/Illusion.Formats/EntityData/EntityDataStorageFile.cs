@@ -22,6 +22,13 @@ public sealed class EntityDataStorageFile
     /// <summary>The entity type as the known enum (an unmapped id keeps its numeric value).</summary>
     public EntityType Type => (EntityType)Wire.EntityType;
 
+    /// <summary>The name hash the storage is filed under — for a car, FNV64 of its model name in lower case.</summary>
+    public ulong Hash
+    {
+        get => Wire.Hash;
+        set => Wire.Hash = value;
+    }
+
     /// <summary>Number of entity-data tables.</summary>
     public int TableCount => Wire.TableHashes.Count;
 

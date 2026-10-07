@@ -229,7 +229,10 @@ public sealed class SdsArchive
     /// Builds an archive from an extracted folder (its SDSContent.xml manifest drives the entry list;
     /// the manifest itself is re-sorted on disk first, matching how the game orders resources).
     /// </summary>
-    public static SdsArchive Pack(string extractedFolder, GameProfile profile)
+    /// <param name="memory">What each resource asks the engine to budget for it, as the shipped archive stated
+    /// it. Without it an entry states what its packing handler can measure — the payload size — which is less
+    /// than the game's own archives ask for.</param>
+    public static SdsArchive Pack(string extractedFolder, GameProfile profile, SdsMemoryRequirements? memory = null)
     {
         string manifestPath = Path.Combine(extractedFolder, "SDSContent.xml");
         if (!File.Exists(manifestPath))
@@ -267,6 +270,9 @@ public sealed class SdsArchive
         {
             entryNodes.Add(iterator.Current!.Clone());
         }
+        // Keys are taken in MANIFEST order — an entry without a file is told apart by its place among its type.
+        var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
+        List<string> keys = [.. entryNodes.Select(node => SdsMemoryRequirements.KeyOf(node.Clone(), ordinals))];
         var ordered = entryNodes
             .Select((node, index) =>
             {
@@ -278,7 +284,7 @@ public sealed class SdsArchive
             .ThenBy(e => e.Index)
             .ToList();
 
-        foreach ((XPathNavigator entryNode, string typeName, int _) in ordered)
+        foreach ((XPathNavigator entryNode, string typeName, int manifestIndex) in ordered)
         {
             XPathNavigator nav = entryNode;
             nav.MoveToFirstChild();
@@ -316,6 +322,8 @@ public sealed class SdsArchive
             {
                 throw new ResourcePackException($"failed to pack a '{typeName}' entry: {ex.Message}", ex);
             }
+
+            memory?.Apply(keys[manifestIndex], entry);
 
             infoNode.AppendChild(typeNameNode);
             infoNode.AppendChild(descNode);

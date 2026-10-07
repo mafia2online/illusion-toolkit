@@ -30,7 +30,45 @@ public static class SdsWriter
 
     /// <summary>Outcome of a single <see cref="PackSds(FileInfo, bool)"/>: the archive that was (re)written and the backup made of
     /// its previous contents, or <c>null</c> if no backup was created (disabled, or a brand-new archive).</summary>
-    public readonly record struct PackResult(string Archive, string? Backup);
+    public readonly record struct PackResult(string Archive, string? Backup)
+    {
+        /// <summary>Manifest entries that named a file missing from the working copy: left out of the archive
+        /// AND removed from the manifest. Never empty silently — a resource the archive no longer carries is
+        /// something the caller has to be able to say.</summary>
+        public IReadOnlyList<string> Dropped { get; init; } = [];
+    }
+
+    /// <summary>The manifest entries of a working copy whose file is not on disk — what a pack would leave
+    /// out. Reads only.</summary>
+    public static IReadOnlyList<string> MissingEntries(string extracted)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extracted);
+        SdsManifest manifest;
+        try { manifest = SdsManifest.Load(extracted); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException) { return []; }
+        return Missing(manifest, extracted);
+    }
+
+    private static List<string> Missing(SdsManifest manifest, string extracted)
+    {
+        var missing = new List<string>();
+        foreach ((string type, string file) in manifest.Entries)
+        {
+            // Containers list their pieces under elements of their own; their File is not a file.
+            if (type is "Script" or "Table") continue;
+            // Names out of the archive are often rooted ("/missions/city11_Little_Italy/SoundSectors_city11.bin"),
+            // and Path.Combine treats a rooted second argument as absolute: the file was looked for at the
+            // drive root, never found, and a perfectly present resource was unsaid on every Build — a
+            // district lost its AudioSectors that way. Joined the way the handlers join it.
+            string onDisk = Path.Combine(extracted, file.TrimStart('/', '\\'));
+            if (File.Exists(onDisk)) continue;
+            // An XML resource is named without its extension and extracts to that name plus ".xml" — the
+            // handler adds it on both sides. Missing that unsaid every XML of ingame.sds on its first Build.
+            if (type == "XML" && File.Exists(onDisk + ".xml")) continue;
+            missing.Add(file);
+        }
+        return missing;
+    }
 
     /// <summary>
     /// Drops manifest entries whose file is not on disk. Such an entry can only fail packing — the archive
@@ -45,13 +83,8 @@ public static class SdsWriter
         try { manifest = SdsManifest.Load(extracted); }
         catch (Exception ex) when (ex is IOException or SdsFormatException) { return dropped; }
 
-        foreach ((string _, string file) in manifest.Entries.ToArray())
+        foreach (string file in Missing(manifest, extracted))
         {
-            // Names out of the archive are often rooted ("/missions/city11_Little_Italy/SoundSectors_city11.bin"),
-            // and Path.Combine treats a rooted second argument as absolute: the file was looked for at the
-            // drive root, never found, and a perfectly present resource was unsaid on every Build — a
-            // district lost its AudioSectors that way. Joined the way the handlers join it.
-            if (File.Exists(Path.Combine(extracted, file.TrimStart('/', '\\')))) continue;
             if (manifest.RemoveEntry(file)) dropped.Add(file);
         }
         return dropped;
@@ -117,6 +150,73 @@ public static class SdsWriter
         }
         AtomicFile.WriteAllBytes(files[0], bytes);
         return files[0];
+    }
+
+    /// <summary>
+    /// What the resources of <paramref name="sds"/> ask the engine to budget for them. Kept beside the working
+    /// copy once known; read the first time from the archive as it shipped — its oldest backup, or the archive
+    /// itself when it was never built. Figures that read like a packer's own (payload sizes, no "other" RAM)
+    /// are not kept, so an archive the toolkit made earlier does not pass its under-statement on.
+    /// </summary>
+    /// <returns>Null when nothing trustworthy is known — the packing handlers' own figures are used then.</returns>
+    internal static SdsMemoryRequirements? MemoryFor(FileInfo sds, string extracted)
+    {
+        if (SdsMemoryRequirements.Load(extracted) is { } known) return known;
+
+        IReadOnlyList<BackupInfo> backups = ListBackups(sds);
+        sds.Refresh();
+        FileInfo? shipped = backups.Count > 0 ? backups[^1].File : sds.Exists ? sds : null;
+        if (shipped == null) return null;
+        // Reading the figures means extracting the whole archive to a scratch folder. An archive that has
+        // none worth keeping — one the toolkit made — was asked again on every Build; the "no" is remembered
+        // for as long as that file is the same file.
+        shipped.Refresh();
+        (long, DateTime) state = (shipped.Length, shipped.LastWriteTimeUtc);
+        lock (NoShippedFigures)
+        {
+            if (NoShippedFigures.TryGetValue(shipped.FullName, out (long, DateTime) known0) && known0 == state) return null;
+        }
+        try
+        {
+            SdsMemoryRequirements read = SdsMemoryRequirements.FromArchive(shipped.FullName);
+            if (!read.LooksShipped)
+            {
+                lock (NoShippedFigures) NoShippedFigures[shipped.FullName] = state;
+                return null;
+            }
+            read.Save(extracted);
+            return read;
+        }
+        catch (Exception ex) when (ex is IOException or FileFormatException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static readonly Dictionary<string, (long Length, DateTime Stamp)> NoShippedFigures =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Makes sure the working copy of <paramref name="sds"/> knows its memory requirements — what a
+    /// copy of that folder (a cloned car) then carries with it.</summary>
+    public static bool EnsureMemoryRequirements(FileInfo sds)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        return MemoryFor(sds, MafiaEnvironment.ExtractedDir(sds)) != null;
+    }
+
+    /// <summary>
+    /// Gives the working copy of <paramref name="sds"/> the memory requirements <paramref name="reference"/>
+    /// states — for an archive that never shipped itself: a clone made before requirements were kept takes
+    /// them from the car it was cloned from, whose resources bear the same names.
+    /// </summary>
+    /// <returns>How many resources the reference stated requirements for.</returns>
+    public static int AdoptMemoryRequirements(FileInfo sds, FileInfo reference)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        ArgumentNullException.ThrowIfNull(reference);
+        SdsMemoryRequirements read = SdsMemoryRequirements.FromArchive(reference.FullName);
+        read.Save(MafiaEnvironment.ExtractedDir(sds));
+        return read.Count;
     }
 
     /// <summary>The folder timestamped backups of <paramref name="sds"/> are written to: a <c>backups</c> subfolder
@@ -270,28 +370,48 @@ public static class SdsWriter
         // such lines in — an added collision shape that was then undone used to leave one behind. Nothing on
         // disk can rescue such an entry, so drop it here rather than let it block every future Build; the
         // resource is already gone either way, and this is the only place that sees the pair.
-        PruneMissingEntries(extracted);
+        List<string> dropped = PruneMissingEntries(extracted);
 
         // Pack to a temp archive beside the target, so a mid-write failure never touches the live game file.
         // SdsArchive.Pack/Save throw on failure (missing files, bad manifest), which propagates to the
         // caller before the temp is ever moved over the live archive.
         var tmp = new FileInfo(sds.FullName + ".tmp");
         if (tmp.Exists) tmp.Delete();
-        SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII);
-        using (FileStream output = File.Create(tmp.FullName))
+        string? backup = null;
+        try
         {
-            archive.Save(output, new SdsWriteOptions());
-        }
-        tmp.Refresh();
-        if (!tmp.Exists || tmp.Length == 0)
-            throw new IOException($"Packing {sds.Name} produced no output.");
+            SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII, MemoryFor(sds, extracted));
+            using (FileStream output = File.Create(tmp.FullName))
+            {
+                archive.Save(output, new SdsWriteOptions());
+            }
+            tmp.Refresh();
+            if (!tmp.Exists || tmp.Length == 0)
+                throw new IOException($"Packing {sds.Name} produced no output.");
 
-        // Preserve the archive's current contents (the packer makes no backup of its own — bBackupEnabled is off),
-        // then swap the freshly-built archive into place. File.Move on the same volume is atomic, so the game .sds
-        // is never left half-written. The backup is taken AFTER the temp built successfully, so a failed build
-        // never spawns a spurious version.
-        string? backup = createBackup ? BackupArchive(sds, when) : null;
-        File.Move(tmp.FullName, sds.FullName, overwrite: true);
-        return new PackResult(sds.FullName, backup);
+            // Preserve the archive's current contents (the packer makes no backup of its own — bBackupEnabled is off),
+            // then swap the freshly-built archive into place. File.Move on the same volume is atomic, so the game .sds
+            // is never left half-written. The backup is taken AFTER the temp built successfully, so a failed build
+            // never spawns a spurious version.
+            backup = createBackup ? BackupArchive(sds, when) : null;
+            File.Move(tmp.FullName, sds.FullName, overwrite: true);
+        }
+        catch
+        {
+            // The archive is as it was — which is the point — but the temp beside it and a backup taken of an
+            // archive that was then NOT replaced are this call's own, and nobody else knows of them: with the
+            // game holding the archive, every failed build left a "version" in backups\ and a .tmp in the folder.
+            try
+            {
+                if (File.Exists(tmp.FullName)) File.Delete(tmp.FullName);
+                if (backup != null && File.Exists(backup)) File.Delete(backup);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // then they stay; the failure being reported is the pack's
+            }
+            throw;
+        }
+        return new PackResult(sds.FullName, backup) { Dropped = dropped };
     }
 }

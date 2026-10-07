@@ -117,6 +117,49 @@ public interface IEditorSession
     /// <summary>Deletes the selection (undoable). Null on success.</summary>
     string? DeleteSelected(out int deleted);
 
+    /// <summary>Points the scene tools at the map editor (<c>map</c>) or the resource editor (<c>resource</c>).
+    /// Null on success; a note when the chosen editor is not open yet.</summary>
+    string? SetTarget(string target);
+
+    /// <summary>The resource editor's state, and which editor the scene tools drive.</summary>
+    ResourceStatus ResourceStatus();
+
+    /// <summary>Opens the resource editor (if it is not open) on an archive — a path, a path under <c>pc\sds</c>
+    /// such as <c>cars/shubert_38.sds</c>, or a bare name — and makes it the target. Null when the load started.</summary>
+    string? OpenResource(string archive, out string? archivePath);
+
+    /// <summary>Archives of the game's library, by name fragment and/or folder fragment.</summary>
+    IReadOnlyList<LibraryItem> Library(string? query, string? folder, int limit);
+
+    /// <summary>The tuning tables of the archive on the resource editor's stage, and the fields of one of them
+    /// (1-based) whose name or label contains <paramref name="query"/>.</summary>
+    string? Tuning(int table, string? query, int limit, out IReadOnlyList<TuningTableInfo> tables,
+        out IReadOnlyList<TuningFieldInfo> fields);
+
+    /// <summary>Sets one tuning field (undoable; written to the working copy at once, packed by Build). The field
+    /// is its name; <paramref name="band"/> and <paramref name="element"/> narrow it when the name repeats (every
+    /// wheel has the same fields). Null on success.</summary>
+    string? SetTuning(int table, string field, string? band, string? element, string value, out TuningFieldInfo? result);
+
+    /// <summary>Clones a car under a new model name and registers it (vehicle table, paint, cover points and,
+    /// with <paramref name="traffic"/>, the traffic rows of the source car), then builds the archives. Null on
+    /// success.</summary>
+    string? CloneCar(string source, string name, bool traffic, string? title, out CarCloneInfo? result);
+
+    /// <summary>Packs one archive's working copy back into its .sds, keeping a backup of what it replaces — for an
+    /// edit made in the working copy itself (a script, a table) that no editor session tracks. With
+    /// <paramref name="memoryFrom"/>, the working copy first takes the memory requirements that archive states
+    /// (a clone made before they were kept takes them from the car it was cloned from). Null on success.</summary>
+    string? BuildArchive(string archive, string? memoryFrom, bool dropMissing, out PackedArchive? result);
+
+    /// <summary>Builds one car under another car's name, replacing that car's archive (backup kept) and touching
+    /// no table. Null on success.</summary>
+    string? SubstituteCar(string source, string target, out CarSubstituteInfo? result);
+
+    /// <summary>Exports a built car as a multiplayer resource folder (package.json, sds/cars/, vehicles.json);
+    /// nothing of the game is written. Null on success.</summary>
+    string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
+
     string? Undo();
 
     string? Redo();

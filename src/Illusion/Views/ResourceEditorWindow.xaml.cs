@@ -55,8 +55,11 @@ public partial class ResourceEditorWindow : Window
             UpdateTitle();
             CommandManager.InvalidateRequerySuggested();
         });
-        Stage.TransientNotice += (message, isError) => Notices.Post(message, isError);
-        Stage.BridgeNotice += (message, isError) => Notices.Post(message, isError);
+        // Into the application's notice log as well as onto the banner: editor_notices and the Blender tools
+        // read the log, and with this window as their target they were waiting for lines only the map
+        // editor ever wrote — a push that had landed was reported as "no push arrived".
+        Stage.TransientNotice += PostNotice;
+        Stage.BridgeNotice += PostNotice;
 
         // The same tools the map editor has, over the same kind of viewport: select / move / rotate / scale,
         // walk mode, and the Blender bridge. The bridge refuses skinned geometry (a car body is exactly that
@@ -111,6 +114,9 @@ public partial class ResourceEditorWindow : Window
     /// <summary>The archive currently on the stage, or null before anything has been opened.</summary>
     public LibraryEntry? StagedEntry => _staged;
 
+    /// <summary>The stage's viewport — what the MCP session drives when the resource editor is its target.</summary>
+    internal Viewport.D3DImageHost TargetStage => Stage;
+
     /// <summary>
     /// Opens the window on a particular archive — what the map editor's "Open in library" jump will use once
     /// it exists. Safe to call before the catalog has finished building: the request is remembered and
@@ -120,14 +126,32 @@ public partial class ResourceEditorWindow : Window
     {
         if (_catalog?.Find(archive) is { } entry)
         {
+            _rebuiltFor = null;
             Browser.Reveal(entry);
             StageEntry(entry);
             return;
         }
         _pendingReveal = archive;
+
+        // The catalog is a walk of the game's folders made when the window opened. An archive made since — a
+        // car cloned a moment ago — is not in it, and the request used to wait here for good while the stage
+        // went on showing the previous car. Walk again, once per archive: one that is still not found after
+        // that is simply not in the library, and asking again would only loop.
+        if (_catalog != null && archive.Exists
+            && !string.Equals(_rebuiltFor, archive.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            _rebuiltFor = archive.FullName;
+            _catalog = null;
+            BuildCatalog();
+        }
+        else if (_catalog != null)
+        {
+            _pendingReveal = null;
+        }
     }
 
     private FileInfo? _pendingReveal;
+    private string? _rebuiltFor;
 
     // ── Library ──
 
@@ -507,14 +531,29 @@ public partial class ResourceEditorWindow : Window
         finally { Mouse.OverrideCursor = null; }
     }
 
+    private void PostNotice(string message, bool isError)
+    {
+        Mcp.EditorNoticeLog.Add(message, isError);
+        Notices.Post(message, isError);
+    }
+
     // Short and to the point: the map editor's version offers a "don't show again" for successful builds,
     // which only earns its keep when you build district after district.
     private void ShowBuildResult(Viewport.D3DImageHost.BuildReport report)
     {
+        // Entries a pack left out because their file was not in the working copy: said, and as an error —
+        // the archive is short of a resource, whatever else went well.
+        List<string> dropped = [.. report.Packed.SelectMany(p => (p.Dropped ?? []).Select(f => $"{Path.GetFileName(p.Archive)}: {f}"))];
+        if (dropped.Count > 0)
+        {
+            PostNotice($"{dropped.Count} manifest entr(ies) named a file missing from the working copy and were left out: "
+                + string.Join(", ", dropped.Take(6)) + (dropped.Count > 6 ? ", …" : ""), true);
+        }
         if (report.Failed.Count == 0)
         {
             string? backup = report.Packed.Select(r => r.Backup).FirstOrDefault(b => b != null);
-            Notices.Post(report.Packed.Count == 1 ? "Built 1 archive." : $"Built {report.Packed.Count} archives."
+            if (dropped.Count > 0) return;      // the line above is the one to read
+            PostNotice(report.Packed.Count == 1 ? "Built 1 archive." : $"Built {report.Packed.Count} archives."
                          + (backup != null ? "  Backup: " + Path.GetDirectoryName(backup) : ""), false);
             return;
         }

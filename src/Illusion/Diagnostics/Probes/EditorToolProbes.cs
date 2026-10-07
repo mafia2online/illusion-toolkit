@@ -197,6 +197,10 @@ internal static class EditorToolProbes
                     return _script.Status;
                 case nameof(IEditorSession.EnsureEditor):
                     return null;
+                case nameof(IEditorSession.ResourceStatus):
+                    // No resource editor in these cases: an empty status names no target, so a tool that
+                    // asks which editor it is driving falls through to the map's.
+                    return System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(targetMethod.ReturnType);
                 case nameof(IEditorSession.Areas):
                     return (IReadOnlyList<string>)["uppertown", "greenfield"];
                 case nameof(IEditorSession.LoadArea):

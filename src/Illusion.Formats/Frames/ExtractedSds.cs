@@ -86,8 +86,9 @@ public sealed class ExtractedSds
             objects.Add(value as FrameObjectBase);
         }
 
-        foreach (var data in nameTable.FrameData)
+        for (int order = 0; order < nameTable.FrameData.Length; order++)
         {
+            FrameNameTable.Data data = nameTable.FrameData[order];
             if (data.FrameIndex < 0 || data.FrameIndex >= objects.Count)
             {
                 continue;
@@ -99,6 +100,7 @@ public sealed class ExtractedSds
             }
             obj.IsOnFrameTable = true;
             obj.FrameNameTableFlags = data.Flags;
+            obj.FrameNameTableOrder = order;
         }
     }
 }

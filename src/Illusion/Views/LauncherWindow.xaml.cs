@@ -459,6 +459,16 @@ public partial class LauncherWindow : Window
             ? TryOpenEditor(() => new MainWindow())
             : "The launcher is not ready: the game path is not set, or the game has not been unpacked yet.";
 
+    /// <summary>The resource editor tile, for the MCP server — the counterpart of <see cref="OpenMapEditor"/>.</summary>
+    internal string? OpenResourceEditor() =>
+        MapEditorBtn.IsEnabled
+            ? TryOpenEditor(() => new ResourceEditorWindow())
+            : "The launcher is not ready: the game path is not set, or the game has not been unpacked yet.";
+
+    /// <summary>Sets the game folder up from the launcher's path, for a caller that needs it before any editor
+    /// is open (listing the library). Null when ready.</summary>
+    internal string? PrepareEnvironment() => EnsureEnv(out string? error) ? null : "Could not open the game: " + error;
+
     private string? TryOpenEditor(Func<Window> create)
     {
         // Initialize with the chosen path BEFORE opening the viewport (it calls TryInitialize again

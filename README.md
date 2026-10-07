@@ -225,6 +225,14 @@ queues the winter archive for Build. The other ten (eastside, greenfield, hunter
 midtown, port, sandisland, seagift, southport, westside) have a winter scene of their own and are
 refused - edit that archive directly. `--probe-season-mirror` covers both.
 
+**Memory requirements.** Every resource in an archive states how much memory the engine should
+budget for it, and that is not the payload size: a shipped car asks for 170 232 bytes of slot RAM
+where its payloads add up to 148 079. Extraction does not keep those figures, so they are read from
+the archive as it shipped (its oldest backup, or the archive itself before its first Build), kept
+beside the working copy in `illusion_memory.json`, and stated again on every Build - scaled when a
+resource changed size. A repacked stock car states exactly what the original did
+(`--probe-car-clone`).
+
 ### MCP server
 
 An MCP endpoint runs for the lifetime of the application at `http://127.0.0.1:2010/mcp` - loopback
@@ -232,7 +240,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 66 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 76 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -249,6 +257,8 @@ map editor itself.
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
+| **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
+| **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -257,6 +267,24 @@ commands do: every edit lands in the same undo history, nothing reaches disk bef
 and nothing reaches the game before `editor_build` (which keeps the usual timestamped backup).
 `scene_find` answers in world space and tests a box against the mesh's triangles, not its bounds;
 `viewport_screenshot` is how a client checks what a push actually looks like.
+`editor_target resource` points the same tools at the resource editor's stage (one archive, such as
+a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
+entity-data tables the way the Tuning tab does.
+
+**Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
+archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and
+geometry buffers filed under the new model name, registered in the vehicle, paint, cover-point and
+traffic tables, with a title of its own in every installed language. `car_substitute` builds a car
+under ANOTHER car's name instead - that car's archive is replaced (backup kept) and no table is
+touched - which is how a car is tried where nothing can be registered, such as a multiplayer that
+spawns from a fixed list of names. `car_export_m2o` writes a built car out as an M2O resource
+folder: `package.json`, the archives under `sds/cars/` and `vehicles.json`, which names for each car
+the path the game loads it from, the model name its archive is keyed by, its title per language,
+the car it was cloned from, its `vehicles.tbl` and `PaintCombinations.tbl` rows, and the size and
+SHA-256 of each file; only the archives travel, no table edit does. It refuses an archive that is
+not filed under its own name throughout, and says so when the buffers still bear the source car's
+names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
+the working copy itself. `--probe-car-clone` and `--probe-car-m2o` cover them on scratch copies.
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
 only one that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a

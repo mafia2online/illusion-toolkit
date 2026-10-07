@@ -173,6 +173,26 @@ internal static class ProbeRunner
             case "--probe-prop-catalog":
                 PropCatalogProbes.RunPropCatalogProbe();
                 return true;
+            // A car cloned under a new name, on scratch copies of the working copies.
+            // Output: %TEMP%\illusion_car_clone.txt
+            // The real clone against the install with a pack made to fail, and everything it wrote taken
+            // back. WRITES TO THE INSTALL (and restores it); the game must not be running.
+            // Output: %TEMP%\illusion_car_clone_rollback.txt
+            case "--probe-car-clone-rollback":
+                CarCloneProbes.RunCarCloneRollbackProbe();
+                return true;
+            // Which of the install's cars a clone or a substitution will take. Output: %TEMP%\illusion_car_census.txt
+            case "--probe-car-census":
+                CarCloneProbes.RunCarKeyCensus();
+                return true;
+            case "--probe-car-clone":
+                CarCloneProbes.RunCarCloneProbe();
+                return true;
+            // A car exported as a multiplayer resource folder, from a clone made and packed on scratch copies.
+            // Output: %TEMP%\illusion_car_m2o.txt
+            case "--probe-car-m2o":
+                CarM2oExportProbes.RunCarM2oExportProbe();
+                return true;
             // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
             // Output: %TEMP%\illusion_geometry_sweep.txt
             case "--probe-geometry-sweep":

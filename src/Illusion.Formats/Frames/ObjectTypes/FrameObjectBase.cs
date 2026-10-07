@@ -121,6 +121,14 @@ public class FrameObjectBase : FrameEntry
         get { return isOnTable; }
         set { isOnTable = value; }
     }
+
+    /// <summary>
+    /// Where the loaded name table listed this object. A rebuilt table keeps that order, because the game reads
+    /// meaning into it: every car the game ships lists its root frame first, whatever the root's index is — and
+    /// a car whose table led with another frame did not appear in game. An object the table never listed sorts
+    /// after the ones it did.
+    /// </summary>
+    public int FrameNameTableOrder { get; set; } = int.MaxValue;
     public string Type
     {
         get { return GetType().ToString(); }

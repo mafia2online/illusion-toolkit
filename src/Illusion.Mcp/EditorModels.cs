@@ -11,7 +11,58 @@ public sealed record EditorStatus(
     bool UnsavedEdits,
     IReadOnlyList<string> PendingBuild,
     int BlenderObjects,
+    string RenderMode,
+    // Which editor the scene tools drive right now: "map" or "resource". A tool that only works on one of
+    // them switches to it, and this is where that shows.
+    string Target = "map");
+
+/// <summary>What the resource editor is doing: whether it is open, which editor the scene tools drive
+/// (<c>map</c> or <c>resource</c>), and the archive on its stage.</summary>
+public sealed record ResourceStatus(
+    bool Open,
+    string Target,
+    string? Archive,
+    string? ArchivePath,
+    bool Loading,
+    int Meshes,
+    IReadOnlyList<string> Selection,
+    bool UnsavedEdits,
+    IReadOnlyList<string> PendingBuild,
+    int BlenderObjects,
     string RenderMode);
+
+/// <summary>One archive of the game's library: its name, its path under <c>pc\sds</c>, what kind of thing it
+/// holds (Car, Character, CityCrash, …), its size, and whether it already has a working copy.</summary>
+public sealed record LibraryItem(string Name, string Path, string Kind, long Size, bool Extracted);
+
+/// <summary>A car cloned under a new name: the vehicle id the tables gave it, how many traffic rows pick it,
+/// the id of the text holding its own title (null when it shares the source car's), each archive written with
+/// the backup taken of it (null for a new one), and what was left out.</summary>
+public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, int? TextId,
+    IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
+
+/// <summary>One archive a car clone wrote, and the backup of what it replaced.</summary>
+/// <paramref name="Dropped"/> are manifest entries that named a file missing from the working copy: they are
+/// not in the archive, and no longer in the manifest.
+public sealed record PackedArchive(string Archive, string? Backup, IReadOnlyList<string>? Dropped = null);
+
+/// <summary>One car built under another's name: the model name the replaced archives are keyed by, each archive
+/// with the backup of what it held, and what was left as it was.</summary>
+public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
+
+/// <summary>A car exported as a multiplayer resource: the folder and the resource's name, the model, its title
+/// and the car it was cloned from, how many cars the folder lists now, the files written and what the one
+/// shipping it should know.</summary>
+public sealed record M2oExportInfo(string Folder, string Resource, string Model, string? Title, string? BasedOn,
+    int Vehicles, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
+
+/// <summary>One entity-data table of a car — a car ships several (the stock one and its tuned variants); the
+/// label names its mass and power, which is what tells them apart.</summary>
+public sealed record TuningTableInfo(int Table, string Label, string Type, int Fields);
+
+/// <summary>One named value of a car's tuning table: where it sits (band, element — a wheel, a gear), what it is
+/// called, its kind (Number, Integer, Flag, Vector, Text) and its value as text.</summary>
+public sealed record TuningFieldInfo(int Table, string Band, string? Element, string Label, string Name, string Kind, string Value);
 
 /// <summary>One row of the scene tree. <see cref="Path"/> runs from the root, which is what tells two
 /// objects of the same name apart. Bounds are there only for a node that draws a mesh. The three
@@ -44,10 +95,13 @@ public sealed record EditorNotice(DateTime Time, bool Error, string Text);
 /// <summary>What a Build wrote: each packed archive with the backup taken of what it replaced, and each
 /// archive that failed with the reason. <paramref name="NotSaved"/> is what the save a build starts with
 /// could not write; when it is not empty the build stopped there and packed nothing.</summary>
+/// <paramref name="Dropped"/> are manifest entries ("archive: file") that named a file missing from the
+/// working copy and were left out of the archive packed.
 public sealed record BuildOutcome(
     IReadOnlyList<(string Archive, string? Backup)> Packed,
     IReadOnlyList<(string Archive, string Error)> Failed,
-    IReadOnlyList<string> NotSaved);
+    IReadOnlyList<string> NotSaved,
+    IReadOnlyList<string>? Dropped = null);
 
 /// <summary>What mirroring a district into its winter archive did: how many objects had every material
 /// settled (winter's own where the season changes it), how many objects winter gained and lost, how many
