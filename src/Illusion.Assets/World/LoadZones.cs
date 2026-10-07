@@ -353,9 +353,18 @@ public sealed class LoadZones
         FrameObjectArea? theirs = document.Frame.FrameObjects.Values.OfType<FrameObjectArea>()
             .FirstOrDefault(a => string.Equals(a.Name?.ToString(), zone, StringComparison.OrdinalIgnoreCase));
         return theirs == null
-            || (theirs.LocalTransform == mine.LocalTransform && theirs.Bounds.Min == mine.Bounds.Min && theirs.Bounds.Max == mine.Bounds.Max
+            || (SamePlace(theirs.LocalTransform, mine.LocalTransform) && theirs.Bounds.Min == mine.Bounds.Min && theirs.Bounds.Max == mine.Bounds.Max
                 && (theirs.Planes ?? []).SequenceEqual(mine.Planes ?? []));
     }
+
+    // A frame's matrix is stored as three columns of four. The fourth is not in the file: read from disk it is
+    // all zeros, composed by an editor it ends in a one - so a volume moved in the editor and SAVED compared
+    // as "changed and not saved" for good. What counts is what a save writes.
+    private static bool SamePlace(Matrix4x4 a, Matrix4x4 b) =>
+        a.M11 == b.M11 && a.M12 == b.M12 && a.M13 == b.M13
+        && a.M21 == b.M21 && a.M22 == b.M22 && a.M23 == b.M23
+        && a.M31 == b.M31 && a.M32 == b.M32 && a.M33 == b.M33
+        && a.M41 == b.M41 && a.M42 == b.M42 && a.M43 == b.M43;
 
     /// <summary>
     /// Brings the same volume in a scene an open editor holds in step with this one: its place, its box and its

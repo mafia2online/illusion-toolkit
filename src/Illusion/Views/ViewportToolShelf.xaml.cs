@@ -121,6 +121,11 @@ public partial class ViewportToolShelf : UserControl
         ToolBlender.IsEnabled = editing || hasSelection;
     }
 
+    /// <summary>True while a loading zone is being dragged by its gizmo. The drag then owns the keyboard even
+    /// with a text field focused: the gizmo takes no focus of its own, so a field the user typed in last still
+    /// has it, and Esc and Undo went to the field's side of the window instead of the drag's.</summary>
+    public bool IsZoneDragging => _zoneGizmo is { IsDragging: true };
+
     /// <summary>
     /// Keys the 3D viewport claims before the rest of the window sees them. The order is the point: a running
     /// modal transform owns the keyboard (that is what modal means), then a handle drag's axis lock, and only

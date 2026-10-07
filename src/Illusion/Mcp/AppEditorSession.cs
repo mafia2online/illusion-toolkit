@@ -1262,13 +1262,7 @@ internal sealed class AppEditorSession : IEditorSession
             }
             // The slot is a row of the mesh's material block, and a block can serve several objects: all of them
             // would change in the file and in the game, while this answer - and the viewport - showed one.
-            if (adapter.Frame is Formats.Frames.ObjectTypes.FrameObjectSingleMesh single
-                && adapter.Document.MaterialSharers(single) is { Count: > 0 } sharers)
-            {
-                return $"'{name}' draws with a material block {sharers.Count} other object(s) use too ("
-                    + string.Join(", ", sharers.Take(5).Select(s => s.Name.ToString())) + (sharers.Count > 5 ? ", …" : "")
-                    + ") — re-pointing the slot would change them all";
-            }
+            if (host.SlotAssignObstacle(node) is { } shared) return shared;
             if (!host.AssignSlotMaterial(node, index, hash)) return $"slot {index} of '{name}' could not be re-pointed";
             changed = index;
         }
@@ -1575,7 +1569,13 @@ internal sealed class AppEditorSession : IEditorSession
         // its gizmo and its Loading zones window write - so the move is a step of the editor's undo history.
         bool viaEditor = apply && moved.Count == 1 && Window?.Viewport is not null
             && string.Equals(moved[0].Zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase);
-        if (viaEditor && Window!.Viewport.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
+        if (viaEditor)
+        {
+            if (Window!.Viewport.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
+            // The step is on the MAP editor's history. Left pointing at the resource editor, the editor_undo
+            // that follows took back whatever that one did last and called it done.
+            _resourceTarget = false;
+        }
 
         // Written one copy after another - and all of them, or none: the scene each copy had is kept until the
         // last one is down, and a copy that fails puts the ones before it back.

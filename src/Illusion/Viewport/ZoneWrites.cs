@@ -3,6 +3,7 @@ using System.Windows;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
+using Illusion.Scene;
 using Illusion.Views;
 
 namespace Illusion.Viewport;
@@ -36,6 +37,24 @@ internal static class ZoneWrites
         }
     }
 
+    // The row of an editor's tree that stands for a volume of the given document.
+    private static SceneNode? NodeOf(D3DImageHost host, SceneDocumentAdapter document, string zone)
+    {
+        var stack = new Stack<SceneNode>(host.Tree.Roots);
+        while (stack.Count > 0)
+        {
+            SceneNode node = stack.Pop();
+            if (node.Source is FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectArea area } adapter
+                && ReferenceEquals(adapter.Document, document)
+                && string.Equals(area.Name?.ToString(), zone, StringComparison.OrdinalIgnoreCase))
+            {
+                return node;
+            }
+            foreach (SceneNode child in node.Children) stack.Push(child);
+        }
+        return null;
+    }
+
     private static IEnumerable<SceneDocumentAdapter> Holding(FileInfo archive)
     {
         foreach (D3DImageHost host in OpenArchives.HoldersOf(archive).OfType<D3DImageHost>())
@@ -51,6 +70,13 @@ internal static class ZoneWrites
     /// </summary>
     public static string? Blocked(LoadZones zones, string zone)
     {
+        // An editor that is still loading the archive (Whole map just switched on) has read its scene, or is
+        // about to, and does not hold it yet: a write made now would be missing from the scene that arrives,
+        // with nothing to carry it in.
+        if (Viewports().Any(host => host.Streamer.IsLoading(zones.Archive)))
+        {
+            return "city_univers is still being loaded into an editor - try again when it is in";
+        }
         foreach (SceneDocumentAdapter document in Holding(zones.Archive))
         {
             if (!zones.InStepWith(document, zone))
@@ -68,7 +94,15 @@ internal static class ZoneWrites
     /// </summary>
     public static void Landed(LoadZones zones, string zone)
     {
-        foreach (SceneDocumentAdapter document in Holding(zones.Archive)) zones.MirrorInto(document, zone);
+        foreach (D3DImageHost host in OpenArchives.HoldersOf(zones.Archive).OfType<D3DImageHost>())
+        {
+            if (host.Staged(zones.Archive) is not { } document || !zones.MirrorInto(document, zone)) continue;
+            // The volume is a frame of that editor's scene, and the editor shows it: its glyph, the outline of
+            // a selection, the numbers of the property panel. Those are caches of the frame, and the panel
+            // writes its cache back on the next number typed - the old place, over the new one.
+            if (NodeOf(host, document, zone) is { } node) host.Editing.CommitNodeTransform(node);
+            host.RaiseSelectionPropertiesChanged();
+        }
 
         bool main = string.Equals(zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName,
             StringComparison.OrdinalIgnoreCase);

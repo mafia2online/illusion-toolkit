@@ -432,9 +432,12 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     public IReadOnlyList<FrameObjectSingleMesh> MaterialSharers(FrameObjectSingleMesh mesh)
     {
         ArgumentNullException.ThrowIfNull(mesh);
-        if (mesh.Material is not { } material) return [];
+        // Asked through the reference table first: the Material property makes an empty block for a mesh that
+        // has none, and a question must not leave every such mesh of the scene with one.
+        if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Material) || mesh.Material is not { } material) return [];
         return [.. _frame.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
-            .Where(other => !ReferenceEquals(other, mesh) && ReferenceEquals(other.Material, material))];
+            .Where(other => !ReferenceEquals(other, mesh) && other.Refs.ContainsKey(FrameEntryRefTypes.Material)
+                            && ReferenceEquals(other.Material, material))];
     }
 
     /// <summary>The canonical <see cref="IFrameNode"/> adapter for a frame object of this document.</summary>
