@@ -224,4 +224,190 @@ internal static class WorldProbes
             File.WriteAllText(outFile, sb.ToString());
         }
     }
+
+    // The load zones (Illusion.Assets.World.LoadZones) against the real city. With no arguments it checks itself:
+    // the scene of city_univers comes back out of the writer byte for byte; a point known to lie in a gap asks
+    // for nothing; moving one face closes the gap and nothing else moves; the changed scene survives a write to
+    // %TEMP% and a read back. Nothing is written to the working copy or to the game.
+    // Arguments, in any order, for looking around: "x y z" triples; "dump <name part>"; "map <district> x0 y0 x1
+    // y1 step z"; "move <zone> <face> <world value>" (in memory, shows in the maps after it).
+    // Output: %TEMP%\illusion_zones.txt
+    internal static void RunZonesProbe(string[] args)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_zones.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string label, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {label}{(detail.Length > 0 ? " - " + detail : "")}");
+        }
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            MapCatalog map = MapCatalog.Build(MafiaEnvironment.CityFolder, f => SdsMeshLoader.EnsureExtracted(f));
+            List<string> districts = [.. map.Areas.Select(a => a.BaseName)];
+            // "copy <name>" as the first two arguments looks at another copy of city_univers (a DLC's).
+            FileInfo? which = null;
+            if (args.Length >= 2 && args[0] == "copy")
+            {
+                which = LoadZones.Copies().FirstOrDefault(c => string.Equals(LoadZones.CopyName(c), args[1], StringComparison.OrdinalIgnoreCase));
+                if (which == null) { sb.AppendLine($"no copy named {args[1]}; there are: {string.Join(", ", LoadZones.Copies().Select(LoadZones.CopyName))}"); return; }
+                args = args[2..];
+            }
+            LoadZones zones = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), districts, which);
+            sb.AppendLine($"copy '{LoadZones.CopyName(zones.Archive)}' of {string.Join(", ", LoadZones.Copies().Select(LoadZones.CopyName))}: "
+                + $"{zones.Volumes.Count} volumes, {zones.Volumes.Keys.Count(n => zones.DistrictsOf(n).Count > 0)} of them with districts");
+
+            void Plan(LoadZones of, string district, float x0, float y0, float x1, float y1, float step, float z)
+            {
+                sb.AppendLine($"MAP of '{district}' at z {z}: x {x0}..{x1} left to right, y {y1}..{y0} top to bottom, step {step}  (# asked for, + other zones only, . no zone)");
+                for (float y = y1; y >= y0 - 0.001f; y -= step)
+                {
+                    var row = new StringBuilder($"{y,8:F0} ");
+                    for (float x = x0; x <= x1 + 0.001f; x += step)
+                    {
+                        var holding = of.At(new Vector3(x, y, z)).ToList();
+                        row.Append(holding.Any(h => of.DistrictsOf(h.Name).Contains(district, StringComparer.OrdinalIgnoreCase)) ? '#' : holding.Count > 0 ? '+' : '.');
+                    }
+                    sb.AppendLine(row.ToString());
+                }
+            }
+
+            if (args.Length == 0)
+            {
+                string file = Directory.GetFiles(SdsMeshLoader.EnsureExtracted(zones.Archive), "FrameResource_*").First();
+                byte[] original = File.ReadAllBytes(file);
+                byte[] written = new FrameResource(file).WriteToStream();
+                Check("the scene of city_univers comes back out of the writer byte for byte",
+                    original.AsSpan().SequenceEqual(written), $"{original.Length} bytes in, {written.Length} out");
+
+                // The plateau of the Greenfield hill: the stock game never lets the player stand there.
+                var gap = new Vector3(-1520f, 1300f, 5f);
+                var slope = new Vector3(-1620f, 1300f, 0f);
+                const string South = "AREA0019_GREENFIELD";
+                if (zones.DistrictsAt(gap).Count > 0)
+                {
+                    // Closed already in this working copy: every zone that was stretched over the gap is put
+                    // back where the game shipped it, in memory, so the checks below run against the gap all the same.
+                    (string Zone, float North)[] shipped =
+                    [
+                        (South, 1222.3011f), ("AREA341_GREENFIELD_KINGSTONE", 1195.4f), ("AREA519_GREENFIELDF_KINGSTONE", 1195.4f),
+                    ];
+                    bool back = true;
+                    foreach ((string zone, float north) in shipped)
+                    {
+                        if (zones.Volumes.ContainsKey(zone) && LoadZones.Contains(zones.Volumes[zone], gap, out _))
+                            back &= zones.MoveFace(zone, "+y", north, out _) == null;
+                    }
+                    Check("the gap is closed in this working copy; its zones go back to the shipped places in memory",
+                        back && zones.DistrictsAt(gap).Count == 0);
+                }
+                {
+                    Check("a point on the hill's plateau lies in no zone", !zones.At(gap).Any());
+                    Check("the slope beside it asks for greenfield", zones.DistrictsAt(slope).Contains("greenfield"));
+                    FrameObjectArea south = zones.Volumes[South];
+                    (Vector3 min0, Vector3 max0) = LoadZones.WorldBox(south);
+                    Vector4[] planes0 = [.. south.Planes];
+
+                    Check("a face that does not exist is refused", zones.MoveFace(South, "+q", 0, out _) != null);
+                    Check("a move that would turn the zone inside out is refused", zones.MoveFace(South, "+y", min0.Y - 10f, out _) != null);
+                    Check("…and neither refusal changed the zone", south.Planes.SequenceEqual(planes0) && LoadZones.WorldBox(south) == (min0, max0));
+
+                    string? refused = zones.MoveFace(South, "+y", 1381f, out LoadZoneFaceMove? move);
+                    Check("the south zone's north face moves to y 1381", refused == null && move != null
+                        && MathF.Abs(move.From - max0.Y) < 0.05f && MathF.Abs(move.BoxMax.Y - 1381f) < 0.01f, refused ?? $"from {move!.From:F2}");
+                    (Vector3 min1, Vector3 max1) = LoadZones.WorldBox(south);
+                    Check("…and only that face: the other five stand where they stood",
+                        MathF.Abs(min1.X - min0.X) < 1e-3f && MathF.Abs(max1.X - max0.X) < 1e-3f && MathF.Abs(min1.Y - min0.Y) < 1e-3f
+                        && MathF.Abs(min1.Z - min0.Z) < 1e-3f && MathF.Abs(max1.Z - max0.Z) < 1e-3f
+                        && south.Planes.Where((p, i) => i != move!.Plane).SequenceEqual(planes0.Where((p, i) => i != move!.Plane)));
+                    Check("the plateau now asks for greenfield", zones.DistrictsAt(gap).Contains("greenfield"));
+                    int holes = 0;
+                    for (float x = -1570f; x <= -1470f; x += 10f)
+                    {
+                        for (float y = 1230f; y <= 1375f; y += 10f)
+                        {
+                            if (!zones.DistrictsAt(new Vector3(x, y, 5f)).Contains("greenfield")) holes++;
+                        }
+                    }
+                    Check("…everywhere in what was the gap", holes == 0, $"{holes} sample(s) still ask for nothing");
+
+                    string trial = Path.Combine(Path.GetTempPath(), "illusion_zones_trial.fr");
+                    File.WriteAllBytes(trial, zones.Frame.WriteToStream());
+                    var back = new FrameResource(trial);
+                    int differ = back.FrameObjects.Values.OfType<FrameObjectArea>().Count(read =>
+                        zones.Volumes.TryGetValue(read.Name.ToString(), out FrameObjectArea? mine)
+                        && !(read.Planes.SequenceEqual(mine.Planes) && read.Bounds.Min == mine.Bounds.Min && read.Bounds.Max == mine.Bounds.Max));
+                    Check("the changed scene reads back as it was written", differ == 0 && new FileInfo(trial).Length == original.Length,
+                        $"{differ} zone(s) differ, {new FileInfo(trial).Length} bytes");
+                    File.Delete(trial);
+                    Plan(zones, "greenfield", -1760, 1120, -1380, 1600, 20, 5);
+                }
+                return;
+            }
+
+            var numbers = new List<float>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "map" && i + 7 < args.Length)
+                {
+                    float[] v = [.. args.Skip(i + 2).Take(6).Select(a => float.Parse(a, System.Globalization.CultureInfo.InvariantCulture))];
+                    sb.AppendLine();
+                    Plan(zones, args[i + 1], v[0], v[1], v[2], v[3], v[4], v[5]);
+                    i += 7;
+                }
+                else if (args[i] == "dump" && i + 1 < args.Length)
+                {
+                    foreach ((string name, FrameObjectArea area) in zones.Volumes.Where(z => z.Key.Contains(args[i + 1], StringComparison.OrdinalIgnoreCase))
+                                 .OrderBy(z => z.Key, StringComparer.Ordinal))
+                    {
+                        Matrix4x4 w = area.WorldTransform;
+                        sb.AppendLine();
+                        sb.AppendLine($"DUMP {name} -> {string.Join(", ", zones.DistrictsOf(name))}  unk01={area.Unk01} onTable={area.IsOnFrameTable} flags={area.SecondaryFlags}");
+                        sb.AppendLine($"  at ({w.M41:F2}, {w.M42:F2}, {w.M43:F2})  axes ({w.M11:F3}, {w.M12:F3}, {w.M13:F3}) ({w.M21:F3}, {w.M22:F3}, {w.M23:F3}) ({w.M31:F3}, {w.M32:F3}, {w.M33:F3})");
+                        sb.AppendLine($"  local box ({area.Bounds.Min.X:F2}, {area.Bounds.Min.Y:F2}, {area.Bounds.Min.Z:F2}) .. ({area.Bounds.Max.X:F2}, {area.Bounds.Max.Y:F2}, {area.Bounds.Max.Z:F2})");
+                        foreach (Vector4 plane in area.Planes) sb.AppendLine($"  plane n ({plane.X:F3}, {plane.Y:F3}, {plane.Z:F3})  d {plane.W:F2}");
+                    }
+                    i += 1;
+                }
+                else if (args[i] == "move" && i + 3 < args.Length)
+                {
+                    string? refused = zones.MoveFace(args[i + 1], args[i + 2],
+                        float.Parse(args[i + 3], System.Globalization.CultureInfo.InvariantCulture), out LoadZoneFaceMove? move);
+                    sb.AppendLine();
+                    sb.AppendLine(refused != null ? $"MOVE refused: {refused}"
+                        : $"MOVE (in memory) {move!.Zone} {move.Face}: {move.From:F2} -> {move.To:F2}; box now x {move.BoxMin.X:F1}..{move.BoxMax.X:F1} y {move.BoxMin.Y:F1}..{move.BoxMax.Y:F1} z {move.BoxMin.Z:F1}..{move.BoxMax.Z:F1}");
+                    i += 3;
+                }
+                else if (float.TryParse(args[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float n))
+                {
+                    numbers.Add(n);
+                }
+            }
+            for (int i = 0; i + 2 < numbers.Count; i += 3)
+            {
+                var at = new Vector3(numbers[i], numbers[i + 1], numbers[i + 2]);
+                sb.AppendLine();
+                sb.AppendLine($"POINT {at.X:F1}, {at.Y:F1}, {at.Z:F1}");
+                foreach (var z in zones.At(at, 60f))
+                {
+                    (Vector3 min, Vector3 max) = LoadZones.WorldBox(z.Zone);
+                    sb.AppendLine($"  {(z.Inside ? "IN " : "out")} {z.Name,-36} -> {string.Join(", ", zones.DistrictsOf(z.Name)),-28} "
+                        + $"x {min.X:F0}..{max.X:F0} y {min.Y:F0}..{max.Y:F0} z {min.Z:F0}..{max.Z:F0}" + (z.Inside ? "" : $"  (outside by {z.OutsideBy:F1} m)"));
+                }
+                IReadOnlyList<string> asked = zones.DistrictsAt(at);
+                sb.AppendLine("  districts asked for here: " + (asked.Count > 0 ? string.Join(", ", asked) : "NONE"));
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("EXCEPTION: " + ex);
+            fail++;
+        }
+        finally
+        {
+            File.WriteAllText(outFile, $"LOAD ZONES PROBE: {pass} passed, {fail} failed\n" + sb);
+        }
+    }
 }

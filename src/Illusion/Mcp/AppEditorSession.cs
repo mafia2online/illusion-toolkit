@@ -1177,16 +1177,14 @@ internal sealed class AppEditorSession : IEditorSession
         if (TargetHost is not { } host) return TargetNotOpen;
         if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 }) return "boxMin and boxMax are [x, y, z]";
         if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
-        if (node!.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
-        {
-            return $"'{name}' is a {node.Kind} — only a mesh has triangles to hide";
-        }
         if (apply && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
-
-        Assets.Sds.TriangleHider.Plan plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform,
-            new Vector3(boxMin[0], boxMin[1], boxMin[2]), new Vector3(boxMax[0], boxMax[1], boxMax[2]),
-            string.IsNullOrWhiteSpace(material) ? null : material);
-        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node, plan.Changes) is { } refused) return refused;
+        if (PlanHiddenTriangles(node!, new Vector3(boxMin[0], boxMin[1], boxMin[2]), new Vector3(boxMax[0], boxMax[1], boxMax[2]),
+                material, out Assets.Sds.TriangleHider.Plan? found) is { } notAMesh)
+        {
+            return notAMesh;
+        }
+        Assets.Sds.TriangleHider.Plan plan = found!;
+        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node!, plan.Changes) is { } refused) return refused;
 
         static float[] P(Vector3 v) => [v.X, v.Y, v.Z];
         int levels = plan.Triangles.Count == 0 ? 0 : plan.Triangles.Max(t => t.Lod) + 1;
@@ -1195,6 +1193,48 @@ internal sealed class AppEditorSession : IEditorSession
             [.. Enumerable.Range(0, levels).Select(l => plan.Triangles.Count(t => t.Lod == l))],
             apply && plan.Changes.Count > 0,
             [.. plan.Triangles.Take(Math.Clamp(sample, 0, 500)).Select(t => new TriangleInfo(t.Lod, t.Material, P(t.A), P(t.B), P(t.C)))]);
+        return null;
+    }
+
+    /// <summary>The triangles of a scene node's mesh whose corners all lie inside a world-space box, and the index
+    /// edits that hide them. One implementation for the tool and for Tools → Hide triangles. Null on success.</summary>
+    internal static string? PlanHiddenTriangles(SceneNode node, Vector3 min, Vector3 max, string? material,
+        out Assets.Sds.TriangleHider.Plan? plan)
+    {
+        plan = null;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
+        {
+            return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
+        }
+        plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform, min, max,
+            string.IsNullOrWhiteSpace(material) ? null : material);
+        return null;
+    }
+
+    public string? MeshMaterials(string name, int? slot, string? material, out IReadOnlyList<MeshSlotInfo> slots)
+    {
+        slots = [];
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        if (node!.Source is not Assets.Adapters.FrameNodeAdapter adapter || adapter.GetMaterials() is not { Count: > 0 } before)
+        {
+            return $"'{name}' is a {node.Kind} with no material slots";
+        }
+
+        int changed = -1;
+        if (slot != null || !string.IsNullOrWhiteSpace(material))
+        {
+            if (slot is not { } index || string.IsNullOrWhiteSpace(material)) return "to re-point a slot give both: slot and material";
+            if (index < 0 || index >= before.Count) return $"'{name}' has slots 0 to {before.Count - 1}";
+            if (host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+            if (Assets.MafiaMaterials.FindHashByName(material) is not { } hash)
+            {
+                return $"no material named '{material}' in the loaded libraries — search_materials has the names (the spelling is exact)";
+            }
+            if (!host.AssignSlotMaterial(node, index, hash)) return $"slot {index} of '{name}' could not be re-pointed";
+            changed = index;
+        }
+        slots = [.. adapter.GetMaterials().Select((m, i) => new MeshSlotInfo(i, m.Name, m.TriangleCount, i == changed))];
         return null;
     }
 
@@ -1375,5 +1415,139 @@ internal sealed class AppEditorSession : IEditorSession
             if (element is T match) yield return match;
             foreach (T deeper in Descendants<T>(element)) yield return deeper;
         }
+    }
+
+    // The city's load zones, read afresh from the working copy of city_univers on every call: they are a few
+    // hundred small objects, and a tool that moves one must not answer from what stood there before.
+    private string? OpenLoadZones(string? copy, out Assets.World.LoadZones? zones)
+    {
+        zones = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        try
+        {
+            IReadOnlyList<FileInfo> copies = Assets.World.LoadZones.Copies();
+            FileInfo? which = string.IsNullOrWhiteSpace(copy)
+                ? copies[0]
+                : copies.FirstOrDefault(c => string.Equals(Assets.World.LoadZones.CopyName(c), copy, StringComparison.OrdinalIgnoreCase));
+            if (which == null)
+            {
+                return $"no copy of city_univers.sds named '{copy}' - there are: " + string.Join(", ", copies.Select(Assets.World.LoadZones.CopyName));
+            }
+            Assets.World.MapCatalog map = Assets.World.MapCatalog.Build(
+                Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            zones = Assets.World.LoadZones.Open(
+                f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), [.. map.Areas.Select(a => a.BaseName)], which);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+                                       or Formats.FileFormatException)
+        {
+            return "could not read the load zones of city_univers: " + ex.Message;
+        }
+    }
+
+    private static float[] Xyz(Vector3 v) => [v.X, v.Y, v.Z];
+
+    public string? ZonesAt(float[] point, float near, string? copy, out IReadOnlyList<LoadZoneInfo> zones, out IReadOnlyList<string> districts,
+        out IReadOnlyList<string> copies)
+    {
+        zones = [];
+        districts = [];
+        copies = [];
+        if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
+        if (!float.IsFinite(near) || near < 0) return "near is a distance in metres, 0 or more";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+        copies = [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)];
+
+        var at = new Vector3(point[0], point[1], point[2]);
+        zones = [.. all!.At(at, near).Select(z =>
+        {
+            (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
+            return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max));
+        })];
+        districts = all.DistrictsAt(at);
+        return null;
+    }
+
+    public string? ZonesMap(string district, float[] from, float[] to, float step, float z, string? copy, out IReadOnlyList<string> rows)
+    {
+        rows = [];
+        if (string.IsNullOrWhiteSpace(district)) return "name the district, e.g. greenfield";
+        if (from is not { Length: 2 } || to is not { Length: 2 } || from.Concat(to).Any(v => !float.IsFinite(v)))
+            return "from and to are [x, y], finite numbers";
+        if (!float.IsFinite(step) || step <= 0 || !float.IsFinite(z)) return "step is a positive distance and z a height";
+        float x0 = MathF.Min(from[0], to[0]), x1 = MathF.Max(from[0], to[0]);
+        float y0 = MathF.Min(from[1], to[1]), y1 = MathF.Max(from[1], to[1]);
+        if ((x1 - x0) / step > 200 || (y1 - y0) / step > 200) return "that is more than 200 steps a side - take a larger step or a smaller box";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+
+        var lines = new List<string>();
+        for (float y = y1; y >= y0 - 0.001f; y -= step)
+        {
+            var row = new System.Text.StringBuilder($"{y,8:F0} ");
+            for (float x = x0; x <= x1 + 0.001f; x += step)
+            {
+                var holding = all!.At(new Vector3(x, y, z)).ToList();
+                row.Append(holding.Any(h => all.DistrictsOf(h.Name).Contains(district, StringComparer.OrdinalIgnoreCase)) ? '#'
+                    : holding.Count > 0 ? '+' : '.');
+            }
+            lines.Add(row.ToString());
+        }
+        rows = lines;
+        return null;
+    }
+
+    public string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results)
+    {
+        results = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        List<string> names = string.IsNullOrWhiteSpace(copy) ? ["base"]
+            : string.Equals(copy, "all", StringComparison.OrdinalIgnoreCase)
+                ? [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)]
+                : [copy];
+
+        // Everything is worked out, in memory, for every copy before any of them is written: a face that can
+        // be moved in one copy and not in another must not leave the two telling the game different things.
+        var moved = new List<(Assets.World.LoadZones Zones, Assets.World.LoadZoneFaceMove Move, string Copy)>();
+        var absent = new List<string>();
+        foreach (string name in names)
+        {
+            if (OpenLoadZones(name, out Assets.World.LoadZones? all) is { } failed) return failed;
+            if (!all!.Volumes.ContainsKey(zone ?? ""))
+            {
+                absent.Add(name);
+                continue;
+            }
+            // The scene is written whole, from what is on disk: an editor holding the archive with edits not
+            // yet saved would have them written over by the next save of its own - or write over this one.
+            if (apply && Assets.Sds.OpenArchives.HoldersOf(all.Archive).OfType<D3DImageHost>().Any(h => h.HasUnsavedEdits))
+                return $"city_univers.sds ({name}) is open in an editor with unsaved edits - editor_save first";
+            if (all.MoveFace(zone!, face, to, out Assets.World.LoadZoneFaceMove? move) is { } refused) return $"{name}: {refused}";
+            moved.Add((all, move!, name));
+        }
+        if (moved.Count == 0) return $"no load zone named '{zone}' in " + string.Join(", ", absent);
+
+        var list = new List<LoadZoneMoveInfo>();
+        foreach ((Assets.World.LoadZones all, Assets.World.LoadZoneFaceMove move, string name) in moved)
+        {
+            string? file = null;
+            if (apply)
+            {
+                try
+                {
+                    file = all.Save();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+                {
+                    results = list;
+                    return $"could not write the scene of city_univers ({name}): {ex.Message}"
+                        + (list.Count > 0 ? " - already written: " + string.Join(", ", list.Select(l => l.Copy)) : "");
+                }
+            }
+            list.Add(new LoadZoneMoveInfo(name, move.Zone, move.Face, move.From, move.To, Xyz(move.BoxMin), Xyz(move.BoxMax),
+                all.DistrictsOf(move.Zone), apply, file, all.Archive.FullName));
+        }
+        results = list;
+        return null;
     }
 }

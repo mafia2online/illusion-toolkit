@@ -53,6 +53,10 @@ public sealed record TriangleInfo(int Lod, string Material, float[] A, float[] B
 /// hidden or only found, and the first of them.</summary>
 public sealed record HiddenTrianglesInfo(int Triangles, IReadOnlyList<int> PerLod, bool Applied, IReadOnlyList<TriangleInfo> Sample);
 
+/// <summary>One material slot of a mesh: its index, the material it draws with (null when no loaded library
+/// knows the hash), how many triangles it covers, and whether this call re-pointed it.</summary>
+public sealed record MeshSlotInfo(int Slot, string? Material, int Triangles, bool Changed);
+
 /// <summary>One collision file of the open scene: its placements, the hulls it carried, how many of those no
 /// placement referenced, and whether they were removed or only counted.</summary>
 public sealed record UnusedHullsInfo(string Layer, int Placements, int Hulls, int Unused, bool Removed);
@@ -143,3 +147,14 @@ public sealed record ObjectImportOutcome(
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
+
+/// <summary>One load zone at a point: the districts it keeps loaded, whether the point is inside its volume
+/// (and how far outside when not), and its box in world space.</summary>
+public sealed record LoadZoneInfo(string Name, IReadOnlyList<string> Districts, bool Inside, float OutsideBy, float[] BoxMin, float[] BoxMax);
+
+/// <summary>A face of a load zone moved - or, when not applied, what moving it would do: from where to where on
+/// its axis (world), the zone's box afterwards, the districts it asks for, and the working-copy file written.</summary>
+/// <paramref name="Copy"/> is which copy of city_univers.sds this is about: "base" or a DLC's folder name.
+public sealed record LoadZoneMoveInfo(
+    string Copy, string Zone, string Face, float From, float To, float[] BoxMin, float[] BoxMax, IReadOnlyList<string> Districts, bool Applied,
+    string? File, string Archive);

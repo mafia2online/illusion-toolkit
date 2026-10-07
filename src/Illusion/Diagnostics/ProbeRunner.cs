@@ -39,6 +39,12 @@ internal static class ProbeRunner
             case "--probe-stream":
                 WorldProbes.RunStreamProbe();
                 return true;
+            // The city's load zones: with no arguments a self-check on the real city (nothing written to the
+            // working copy); with "x y z", "dump <name>", "map <district> x0 y0 x1 y1 step z", "move <zone> <face>
+            // <value>" a look around. Output: %TEMP%\illusion_zones.txt
+            case "--probe-zones":
+                WorldProbes.RunZonesProbe(args.Skip(1).ToArray());
+                return true;
             // Dump of district scenes + their categories (proxy/snow/normal).
             case "--probe-scenes":
                 SceneProbes.RunScenesProbe(args.Length >= 2 ? args[1] : "eastside");
