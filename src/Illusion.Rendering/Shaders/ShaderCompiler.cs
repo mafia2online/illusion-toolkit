@@ -86,7 +86,12 @@ float4 PSMain(PSIn i) : SV_TARGET
     // fall back to the geometric normal (the Stage-1 behaviour). Mafia II stores normals as DXT5nm (X in alpha)
     // — 'nt.x *= nt.w' recovers X and is a no-op for DXT1 (alpha=1); Z is reconstructed from XY. The flat-normal
     // placeholder decodes to (0,0,1), so a material without a normal map yields exactly the vertex normal.
-    float3 Ngeom = normalize(i.nrm);
+    // A mesh may carry no normals at all: foliage declares Position, Color, TexCoords0 and is lit in the game
+    // by its vertex colour, and its normal channel reaches here as zeroes. normalize() of that is NaN, every
+    // light term after it is NaN, and saturate(NaN)=0 drew the whole bush black. Such a vertex is lit as a
+    // surface facing the sky (world is Z-up): full sky ambient plus whatever sun stands above the horizon.
+    float  nl    = dot(i.nrm, i.nrm);
+    float3 Ngeom = nl > 1e-8 ? i.nrm * rsqrt(nl) : float3(0.0, 0.0, 1.0);
     float3 N = Ngeom;
     float  tl = dot(i.tan, i.tan);
     float  bl = dot(i.bin, i.bin);
