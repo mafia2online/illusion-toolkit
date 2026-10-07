@@ -790,6 +790,9 @@ public sealed unsafe class SceneRenderer : IDisposable
             ViewProj = viewProj,
             LightDir = new Vector4(lightDir, 0f),
             BaseColor = baseColor,
+            // White, said out loud: the shared pixel shader multiplies every texel by it, and left unset it is
+            // zero — every crash prop in a district (trees, lamps, benches) was drawn black in the textured modes.
+            Tint = Vector4.One,
             Lighting = lighting,
         };
         _instShader.UpdateConstants(ctx, ref consts);
