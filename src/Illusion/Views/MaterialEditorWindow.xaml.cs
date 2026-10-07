@@ -407,6 +407,11 @@ public partial class MaterialEditorWindow : Window
     private void Assign_Click(object sender, RoutedEventArgs e)
     {
         if (_contextNode == null || _currentHash == 0) return;
+        if (_viewport.SlotAssignObstacle(_contextNode) is { } shared)
+        {
+            AppDialog.Show(this, new DialogOptions { Title = "Assign material", Icon = DialogIcon.Warning, Text = ToolText.ForPeople(shared) });
+            return;
+        }
         if (!_viewport.AssignSlotMaterial(_contextNode, _contextSlot, _currentHash))
         {
             // Backstop for a stale target the SceneChanged sweep has not caught yet (or a slot that

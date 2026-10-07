@@ -69,7 +69,11 @@ public static partial class WorkingCopyDiff
         Dictionary<string, FileInfo> mine = Files(workingDir);
         // A file the manifest does not name is not packed, whatever lies in the folder (a note, a copy kept
         // "just in case"): it is not something a Build puts into the game, and is not listed as one.
-        string manifest = File.ReadAllText(Path.Combine(workingDir, "SDSContent.xml"));
+        // unescaped: the list writes "&" as "&amp;", and a file name is compared as it stands on disk
+        string manifest = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(workingDir, "SDSContent.xml")));
+        // A name that several files of the working copy carry, each in a folder of its own, is told apart by the
+        // folder: with "/a/foo" unsaid and "/b/foo" still listed, the name alone found it listed.
+        HashSet<string> shared = [.. mine.Keys.GroupBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key!)];
         // As a whole name - the text of an element, or the end of a path in one - and not as a piece of a longer
         // one: with "a.dds" unsaid and "ba.dds" still listed, a search for the letters found it listed.
         bool Says(string name)
@@ -85,13 +89,14 @@ public static partial class WorkingCopyDiff
         }
         bool Named(string path)
         {
-            string name = Path.GetFileName(path);
+            // By its place in the working copy when the name is not its alone, by the name otherwise. A texture's
+            // top level ("MIP_<name>") is a resource with an entry of its own and is looked up as any other: it
+            // used to pass as named whenever its texture was, which hid the deletion of the Mipmap alone.
+            string name = shared.Contains(Path.GetFileName(path)) ? path : Path.GetFileName(path);
             return path.Equals("SDSContent.xml", StringComparison.OrdinalIgnoreCase)
-                || Says(name)
-                // a texture's top level lies beside it as "MIP_<name>", under the texture's own entry
-                || (name.StartsWith("MIP_", StringComparison.OrdinalIgnoreCase) && Says(name[4..]))
+                || Says(name) || Says(name.Replace('/', '\\'))
                 // an XML resource is named without the extension it is unpacked with
-                || (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && Says(name[..^4]));
+                || (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && (Says(name[..^4]) || Says(name[..^4].Replace('/', '\\'))));
         }
         sds.Refresh();
         if (!sds.Exists)

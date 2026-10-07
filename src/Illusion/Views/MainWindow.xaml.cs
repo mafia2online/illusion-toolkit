@@ -171,6 +171,14 @@ public partial class MainWindow : Window
         ModifierKeys modifiers = Keyboard.Modifiers;
         bool typing = IsTextFieldFocused();
 
+        // A zone under the gizmo: Esc drops the drag and nothing else gets through, wherever the focus is.
+        if (ToolShelf.IsZoneDragging)
+        {
+            HandleViewportKey(key, modifiers, e.IsRepeat);
+            e.Handled = true;
+            return;
+        }
+
         if ((!typing && (HandleViewportKey(key, modifiers, e.IsRepeat) || HandleBridgeKey(key, modifiers)))
             || EditorCommands.Handle(key, modifiers, this))
         {

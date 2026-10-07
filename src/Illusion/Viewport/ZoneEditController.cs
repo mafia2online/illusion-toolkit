@@ -58,6 +58,8 @@ internal sealed class ZoneEditController
         _zone = null;
         _reached = null;
         if (zone == null) return;
+        // the layer was switched off under the drag (a tool can do that): what cannot be seen is not written
+        if (!_host.ShowZones) commit = false;
         if (!commit || reached is not { } to || (Vector3.Distance(to.Min, _start.Min) < 0.005f && Vector3.Distance(to.Max, _start.Max) < 0.005f))
         {
             _host.Catalogs.PreviewZone(null);
@@ -104,8 +106,9 @@ internal sealed class ZoneEditController
     public string? MoveFace(string zone, string face, float to)
     {
         string? refused = Write(new Change(zone, [(face.ToLowerInvariant(), float.NaN, to)], Vector3.Zero), forward: true, expect: null, out Change? done);
-        if (refused != null || done == null) return refused ?? "nothing was changed";
-        _host.History.Push(new ZoneEdit(this, done));
+        if (refused != null) return refused;
+        // the face stands there already: nothing was written, and there is no step to take back
+        if (done != null) _host.History.Push(new ZoneEdit(this, done));
         return null;
     }
 
@@ -117,6 +120,7 @@ internal sealed class ZoneEditController
     private string? Write(Change change, bool forward, (Vector3 Min, Vector3 Max)? expect, out Change? done)
     {
         done = null;
+        LoadZones written;
         try
         {
             LoadZones zones = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), _host.Catalogs.DistrictNames);
@@ -136,6 +140,10 @@ internal sealed class ZoneEditController
             if (ZoneWrites.Blocked(zones, change.Zone) is { } blocked) return blocked;
 
             var moved = new List<(string Face, float From, float To)>();
+            if (change.Faces.Count == 0 && change.By.Length() < Same)
+            {
+                return null;       // carried nowhere
+            }
             if (change.Faces.Count == 0)
             {
                 // the same size somewhere else: the zone is moved by its own place, whatever its shape
@@ -149,16 +157,30 @@ internal sealed class ZoneEditController
                     if (zones.MoveFace(change.Zone, face, forward ? to : from, out LoadZoneFaceMove? move) is { } refused) return refused;
                     moved.Add((face, forward ? move!.From : from, to));
                 }
+                // every face stands where it was asked to stand: the scene is not rewritten, the archive is
+                // not queued for a Build and no step goes into the history
+                if (moved.All(m => MathF.Abs(m.From - m.To) < Same)) return null;
             }
             zones.Save();
-            ZoneWrites.Landed(zones, change.Zone);
+            written = zones;
             done = new Change(change.Zone, moved, change.By);
-            return null;
         }
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
         {
             return "city_univers could not be written: " + ex.Message;
         }
+
+        // The zone is written. What follows only tells the editors about it; a failure there is not a failure
+        // of the write, and reporting it as one would leave a change on disk with no step to take it back.
+        try
+        {
+            ZoneWrites.Landed(written, change.Zone);
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            _host.RaiseNotice($"{change.Zone} is written, but the editor could not be brought up to date: {ex.Message}", isError: true);
+        }
+        return null;
     }
 
     private sealed class ZoneEdit(ZoneEditController owner, Change change) : IEditAction
@@ -173,7 +195,7 @@ internal sealed class ZoneEditController
         {
             if (owner.Write(change, forward, expect: null, out _) is { } refused)
             {
-                throw new EditRefusedException($"{change.Zone} was not put back: {refused}");
+                throw new EditRefusedException($"{change.Zone} was not {(forward ? "changed again" : "put back")}: {refused}");
             }
         }
     }

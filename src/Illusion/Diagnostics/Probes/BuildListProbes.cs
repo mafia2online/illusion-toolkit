@@ -134,6 +134,28 @@ internal static class BuildListProbes
                         sb.AppendLine($"({sds.Name}: {unsaid} is not a plain entry of the list - the unsaid-resource check is skipped)");
                     }
                 }
+
+                // A texture's top level lies beside it as "MIP_<name>" and is a resource with an entry of its own.
+                // Unsaid alone - its texture still listed - it used to pass as named by the texture's entry.
+                {
+                    var manifest = Formats.Archive.SdsManifest.Load(scratch);
+                    string? mip = Directory.EnumerateFiles(scratch).Select(Path.GetFileName).Select(n => n!)
+                        .FirstOrDefault(n => n.StartsWith("MIP_", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(scratch, n[4..]))
+                                             && manifest.HasFile(n) && manifest.HasFile(n[4..]));
+                    if (mip != null)
+                    {
+                        int before = WorkingCopyDiff.Compare(sds, scratch).Changes.Count;
+                        manifest.RemoveEntry(mip);
+                        WorkingCopyComparison without = WorkingCopyDiff.Compare(sds, scratch);
+                        Check($"{sds.Name}: a Mipmap unsaid alone, its texture still listed, is listed as removed",
+                            without.Changes.Count == before + 1 && without.Changes.Any(c => c.Kind == WorkingCopyChangeKind.Removed && c.Path.Equals(mip, StringComparison.OrdinalIgnoreCase)),
+                            $"{mip}: {before} -> {without.Changes.Count} change(s)");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"({sds.Name} has no texture with a Mipmap of its own entry - the Mipmap check is skipped)");
+                    }
+                }
             }
 
             // an archive the game does not have yet: everything the manifest names is an addition

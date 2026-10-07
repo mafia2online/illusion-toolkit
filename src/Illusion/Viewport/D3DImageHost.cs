@@ -884,6 +884,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     public bool AssignSlotMaterial(SceneNode node, int slotIndex, ulong newHash) =>
         MaterialEditing.AssignSlotMaterial(node, slotIndex, newHash);
 
+    /// <inheritdoc cref="MaterialEditController.SlotAssignObstacle"/>
+    public string? SlotAssignObstacle(SceneNode node) => MaterialEditing.SlotAssignObstacle(node);
+
     /// <summary>Whether <paramref name="node"/> is still part of the loaded scene tree — actions pinned
     /// to a node across scene reloads (the material editor's assign target) validate with this.</summary>
     public bool IsNodeInScene(SceneNode node) => Tree.IsInScene(node);

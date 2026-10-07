@@ -384,6 +384,23 @@ internal static class WorldProbes
                         LoadZones disk = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), districts, which);
                         var editor = new Assets.Adapters.SceneDocumentAdapter(new FrameResource(file), zones.Archive);
                         Check("a scene an editor holds starts in step with the disk", disk.InStepWith(editor, South) && disk.InStepWith(editor, Slanted));
+                        // A matrix read from disk ends in a column of zeros - the file keeps three columns - and
+                        // one an editor composed ends in a one. A volume moved in the editor and SAVED is the
+                        // disk's volume with that one difference, and has to count as in step.
+                        {
+                            FrameObjectArea theirs = editor.Frame.FrameObjects.Values.OfType<FrameObjectArea>().First(a => a.Name.ToString() == South);
+                            Matrix4x4 composed = theirs.LocalTransform;
+                            bool zeros = composed.M44 == 0f;
+                            composed.M44 = 1f;
+                            theirs.LocalTransform = composed;
+                            Check("a volume whose matrix an editor composed (same place, a one in the corner) is in step", disk.InStepWith(editor, South),
+                                zeros ? "the disk's ends in zeros" : "the disk's already ends in a one here");
+                            composed.M42 += 3f;
+                            theirs.LocalTransform = composed;
+                            Check("...and one the editor has moved is not", !disk.InStepWith(editor, South));
+                            composed.M42 -= 3f;
+                            theirs.LocalTransform = composed;
+                        }
                         (Vector3 lo0, Vector3 hi0) = LoadZones.WorldBox(disk.Volumes[South]);
                         bool faceMoved = disk.MoveFace(South, "+y", hi0.Y + 37.5f, out _) == null;
                         bool carried = disk.Move(Slanted, new Vector3(5f, -3f, 0f)) == null;
