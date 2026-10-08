@@ -25,6 +25,7 @@ public sealed partial class HideTrianglesWindow : Window
     private SceneNode? _node;
     private TriangleHider.Plan? _plan;
     private bool _filling;
+    private long _changedUnderClick = long.MinValue;
 
     public HideTrianglesWindow(D3DImageHost host)
     {
@@ -35,15 +36,27 @@ public sealed partial class HideTrianglesWindow : Window
         MaxBox.ValueCommitted += (_, _) => Recount();
         // The viewport raises these from wherever the change happened, not always from the UI thread.
         Action selection = () => Dispatcher.BeginInvoke(OnSelectionChanged);
-        // A Blender edit starting or ending changes whether a hide is allowed at all.
-        Action bridge = () => Dispatcher.BeginInvoke(Recount);
+        // A Blender edit starting or ending changes whether a hide is allowed at all - and a push from Blender
+        // rebuilds the mesh, after which the picks would name other triangles.
+        Action bridge = () => Dispatcher.BeginInvoke(() =>
+        {
+            _picked.Clear();
+            Recount();
+        });
         Func<System.Windows.Point, bool> clicks = OnSceneClick;
         _host.SelectionChanged += selection;
         _host.BridgeStateChanged += bridge;
         _host.SceneClickTaker = clicks;
         // An Undo or Redo in the editor changes what is there to hide and tells nobody; coming back to this
         // window is when the count has to be true again.
-        Activated += (_, _) => Recount();
+        Activated += (_, _) =>
+        {
+            int before = _plan?.Triangles.Count ?? -1;
+            Recount();
+            // The click that brought the window forward may be a click on Hide: when the count has just changed
+            // under it, that click must not hide what the user has not seen yet.
+            if ((_plan?.Triangles.Count ?? -1) != before) _changedUnderClick = Environment.TickCount64;
+        };
         Closed += (_, _) =>
         {
             _host.SelectionChanged -= selection;
@@ -163,10 +176,10 @@ public sealed partial class HideTrianglesWindow : Window
         string header = $"{count} other object(s) draw this same geometry ({names}). Hide the triangles on:";
         if (SharedPanel.Visibility != Visibility.Visible || SharedText.Text != header)
         {
-            int chosen = Math.Max(0, SharedCombo.SelectedIndex);
+            // another mesh, or other sharers: the choice starts over at the one that changes nothing else
             SharedText.Text = header;
             SharedCombo.ItemsSource = new[] { "Only this object - it gets a copy of the geometry of its own", $"This one and the {count} other(s)" };
-            SharedCombo.SelectedIndex = chosen;
+            SharedCombo.SelectedIndex = 0;
             SharedPanel.Visibility = Visibility.Visible;
         }
     }
@@ -192,7 +205,7 @@ public sealed partial class HideTrianglesWindow : Window
         int[] further = [.. Enumerable.Range(1, levels - 1).Select(l => plan.Triangles.Count(t => t.Lod == l))];
         string others = string.Join(", ", further.Select((n, i) => $"LOD {i + 1}: {n}"));
         return $"{first} triangle(s) picked. With them go the ones lying on them further out ({others})."
-            + (further.Any(n => n == 0) ? " A level with 0 is cut coarser there and stays whole: from its distance the opening is closed. A box takes those too." : "");
+            + (further.Any(n => n == 0) ? " A level with 0 may be cut coarser there and stay whole: from its distance the opening is then closed. A box over the opening takes every level." : "");
     }
 
     private string CountBox()
@@ -257,7 +270,9 @@ public sealed partial class HideTrianglesWindow : Window
             return;
         }
         if (_node == null || _plan == null || _plan.Changes.Count == 0) return;
+        if (_changedUnderClick != long.MinValue && Environment.TickCount64 - _changedUnderClick < 600) return;
         int count = _plan.Triangles.Count;
+        bool everyone = Sharing == GeometryEditController.SharedGeometry.All;
         if (_host.GeometryEditing.HideTriangles(_node, _plan.Changes, Sharing) is { } refused)
         {
             AppDialog.Show(this, new DialogOptions
@@ -271,7 +286,7 @@ public sealed partial class HideTrianglesWindow : Window
         }
         _picked.Clear();
         Recount();
-        CountText.Text = $"Hidden {count} triangle(s) of {_node.Name}. Undo (Ctrl+Z) brings them back; Save and Build keep the change.";
+        CountText.Text = $"Hidden {count} triangle(s) of {MeshText.Text}{(everyone ? " and of the objects that draw the same geometry" : "")}, all levels of detail counted. Undo (Ctrl+Z) brings them back; Save and Build keep the change.";
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
