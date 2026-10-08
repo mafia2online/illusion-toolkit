@@ -173,10 +173,7 @@ public static class TriangleHider
                         lo = Vector3.Min(lo, Vector3.Min(pa, Vector3.Min(pb, pc)));
                         hi = Vector3.Max(hi, Vector3.Max(pa, Vector3.Max(pb, pc)));
                     }
-                    else if (!LiesOn(pa) || !LiesOn(pb) || !LiesOn(pc)
-                        // corners on the picks do not make the triangle lie on them: one spanning a door from
-                        // frame to frame has all three on the frame. Its middle and its edges are asked too.
-                        || !LiesOn((pa + pb + pc) / 3f) || !LiesOn((pa + pb) * 0.5f) || !LiesOn((pb + pc) * 0.5f) || !LiesOn((pc + pa) * 0.5f))
+                    else if (!Covered(pa, pb, pc))
                     {
                         continue;
                     }
@@ -186,6 +183,11 @@ public static class TriangleHider
                 }
             }
         }
+
+        // Corners on the picks do not make a triangle lie on them: one spanning a door from frame to frame has
+        // all three on the frame. Its middle and the middles of its edges are asked too.
+        bool Covered(Vector3 a, Vector3 b, Vector3 c) =>
+            LiesOn(a) && LiesOn(b) && LiesOn(c) && LiesOn((a + b + c) / 3f) && LiesOn((a + b) * 0.5f) && LiesOn((b + c) * 0.5f) && LiesOn((c + a) * 0.5f);
 
         bool LiesOn(Vector3 p)
         {
