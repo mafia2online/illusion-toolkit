@@ -259,8 +259,9 @@ over the same job the matching tool runs, so a result does not depend on who ask
   what is loaded.
 - **Loading zones…** (map editor) - lists the zones of `city_univers` that hold a point (the
   camera's, or one typed in), says which districts a player who appears there gets, and moves one
-  face of a zone. A district streams in where a zone naming two districts holds the player; a zone
-  naming one does not load it by itself. A moved face is written at once, redrawn in the Loading
+  face of a zone. A district streams in where a zone named with two words after its number
+  (`AREA341_GREENFIELD_KINGSTONE`) holds the player; one named with a single word
+  (`AREA0019_GREENFIELD`) does not load it by itself. A moved face is written at once, redrawn in the Loading
   zones layer, queued for Build, and is one step of the editor's Undo.
   The zones are also edited in the viewport, with no window: with the **Loading zones** layer on, a
   click picks the zone that spot is in (the same spot again takes the next one there) and the tool
@@ -270,6 +271,16 @@ over the same job the matching tool runs, so a result does not depend on who ask
   Esc drops a drag, and Undo / Redo take back exactly what the drag changed. With **Whole map** on the
   editor holds `city_univers` itself; a zone write is carried into that scene too, so the editor's own
   save does not put the zone back.
+  The layer draws each zone as the edges of its box with a faint fill, hidden by the scene in front of
+  it and fading with distance (not in a parallel view); a zone with one word in its name - which does
+  not load its district by itself - is drawn fainter, and the picked zone carries its name and
+  districts over it.
+  **New loading zone** (the button at the foot of the tool shelf, with the layer on) makes a zone
+  where the view looks: a name and the one or two districts it keeps loaded are asked, the box appears
+  picked, and Move and Scale put it in place. The name wants two words after its number
+  (`AREA900_DOCK_SOUTH`): that is what makes the game load the districts for a player who appears
+  inside, and the flyout says so when a name has one. It is written at once - the scene, its name
+  table and `cityareas.bin` - and Undo takes it out again. Not with Whole map on.
 - **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
   line and group names), with every string it would change listed before anything is written and a
   backup kept beside the file.
@@ -283,7 +294,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 84 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 85 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -302,7 +313,7 @@ map editor itself.
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
-| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face` |
+| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -326,9 +337,13 @@ delete them, the twin season included.
 `zones_at` lists the load zones of `city_univers` that hold a point and the districts they name,
 `zones_map` draws where a district is asked for as a text plan, and `zone_move_face` moves one face
 of a zone (its plane and its box together; reports by default, writes with `apply`). Measured in
-the game: a district streams in where a zone naming TWO districts holds the player - a zone naming
-one does not load it by itself - and free ride reads the base game's `city_univers`, not the copy a
-DLC ships.
+the game: a district streams in where a zone named with two words after its number holds the player
+- one named with a single word does not load it by itself - and free ride reads the base game's
+`city_univers`, not the copy a DLC ships.
+`zone_create` adds a new zone: a box between two corners, made like an existing zone, with a line in
+`cityareas.bin` for the districts it keeps loaded. Measured in the game, with new zones over one
+spot: a player who appears inside a zone named `AREA901_FOO_BAR` gets the district - with one
+district in the table or two - and inside one named `AREA902_FOOXBAR` he does not.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and

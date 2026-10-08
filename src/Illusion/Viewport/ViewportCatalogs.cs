@@ -158,6 +158,19 @@ internal sealed class ViewportCatalogs
         _host.RaiseBoxGizmoChanged();
     }
 
+    /// <summary>The picked zone in a line: its name, the districts it keeps loaded, and - for one whose name is
+    /// not a seam's (<see cref="LoadZones.LoadsOnArrival"/>) - that it does not load them by itself.</summary>
+    public string? SelectedZoneLabel
+    {
+        get
+        {
+            if (SelectedZone == null || Zones?.FirstOrDefault(z => z.Name == SelectedZone) is not { } zone) return null;
+            return LoadZones.LoadsOnArrival(zone.Name)
+                ? $"{zone.Name}  ·  {string.Join(" + ", zone.Districts)}"
+                : $"{zone.Name}  ·  {string.Join(" + ", zone.Districts)}  ·  does not load it by itself (one word in its name)";
+        }
+    }
+
     /// <summary>The faces of the picked zone that can be pulled ("+x", "-z", ...): a zone with a corner sliced off
     /// has a side with no face square to its axis, and that side gets no arrow.</summary>
     public IReadOnlySet<string> SelectedZoneFaces { get; private set; } = new HashSet<string>();
@@ -213,20 +226,22 @@ internal sealed class ViewportCatalogs
         foreach (MapArea a in Areas) if (!hue.ContainsKey(a.BaseName)) hue[a.BaseName] = hue.Count;
         int count = Math.Max(1, hue.Count);
 
-        var boxes = new List<(Vector3 Min, Vector3 Max, Vector4 Color)>(Zones.Count);
+        var boxes = new List<Rendering.Passes.ZoneBox>(Zones.Count);
         AreaZone? picked = SelectedZone == null ? null : Zones.FirstOrDefault(z => z.Name == SelectedZone);
         foreach (AreaZone z in Zones)
         {
             if (ReferenceEquals(z, picked)) continue;
             string? d = z.Districts.Count > 0 ? z.Districts[0] : null;
             float h = d != null && hue.TryGetValue(d, out int i) ? (float)i / count : 0.5f;
-            boxes.Add((z.Min, z.Max, HueToColor(h, picked == null ? 0.16f : 0.05f)));
+            Vector4 colour = HueToColor(h, 1f);
+            // a zone named as a seam is the kind that loads its districts for a player who appears in it
+            boxes.Add(new Rendering.Passes.ZoneBox(z.Min, z.Max, new Vector3(colour.X, colour.Y, colour.Z), LoadZones.LoadsOnArrival(z.Name), Picked: false));
         }
-        // last, so it is laid over the rest (the pass has no depth): the accent the editor selects with
+        // last, so it is laid over the rest: the accent the editor selects with
         if (picked != null)
         {
             (Vector3 min, Vector3 max) = _preview ?? (picked.Min, picked.Max);
-            boxes.Add((min, max, new Vector4(0.91f, 0.53f, 0.24f, 0.45f)));
+            boxes.Add(new Rendering.Passes.ZoneBox(min, max, new Vector3(0.91f, 0.53f, 0.24f), LoadZones.LoadsOnArrival(picked.Name), Picked: true));
         }
         _host.Rnd!.SetZoneBoxes(boxes);
     }

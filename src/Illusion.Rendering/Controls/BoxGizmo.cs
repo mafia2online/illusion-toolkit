@@ -165,6 +165,7 @@ public sealed class BoxGizmo : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
+        DrawName(dc);
         foreach (Arrow arrow in Arrows())
         {
             bool lit = _active == arrow.Handle || (_active == null && _hover == arrow.Handle);
@@ -190,6 +191,22 @@ public sealed class BoxGizmo : FrameworkElement
 
             if (_active == arrow.Handle) DrawLabel(dc, arrow);
         }
+    }
+
+    // What the picked box is, over its top: with whichever tool, and with none.
+    private void DrawName(DrawingContext dc)
+    {
+        if (_host?.BoxGizmoTarget is not { } box || _host.BoxGizmoLabel is not { Length: > 0 } text || ActualWidth <= 0) return;
+        Vector3 top = (box.Min + box.Max) * 0.5f;
+        top.Z = box.Max.Z;
+        if (!Project(_host.GizmoViewProjection, top, out Point at)) return;
+        var label = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, LabelFace, 12.5, Brushes.White,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        // kept inside the view: the top of a zone the camera stands in is as often as not off screen
+        double x = Math.Clamp(at.X - (label.Width / 2), 8, Math.Max(8, ActualWidth - label.Width - 8));
+        double y = Math.Clamp(at.Y - label.Height - 14, 8, Math.Max(8, ActualHeight - label.Height - 8));
+        dc.DrawRoundedRectangle(LabelBack, null, new Rect(x - 7, y - 3, label.Width + 14, label.Height + 6), 4, 4);
+        dc.DrawText(label, new Point(x, y));
     }
 
     // While a face is being pulled, where it stands; while the box is being moved, how far it has gone.

@@ -1,4 +1,6 @@
+using System.IO;
 using System.Numerics;
+using Illusion.Assets;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Domain;
@@ -110,6 +112,145 @@ internal sealed class ZoneEditController
         // the face stands there already: nothing was written, and there is no step to take back
         if (done != null) _host.History.Push(new ZoneEdit(this, done));
         return null;
+    }
+
+    /// <summary>
+    /// What a new zone made where the view looks would be: a name not taken yet and the two districts of the
+    /// nearest zone that loads districts - the neighbours a zone standing here most likely joins. The name has
+    /// two words after its number either way: that is what makes the game load the districts for a player who
+    /// appears inside (<see cref="LoadZones.LoadsOnArrival"/>).
+    /// </summary>
+    public (string Name, string District1, string? District2) Suggest()
+    {
+        Vector3 at = _host.ViewPoint();
+        AreaZone? near = Nearest(at, z => z.Districts.Count >= 2) ?? Nearest(at, _ => true);
+        string first = near?.Districts[0] ?? _host.Catalogs.DistrictNames.FirstOrDefault() ?? "";
+        string? second = near is { Districts.Count: >= 2 } ? near.Districts[1] : null;
+        var taken = new HashSet<string>((_host.Catalogs.Zones ?? []).Select(z => z.Name), StringComparer.OrdinalIgnoreCase);
+        for (int number = 900; ; number++)
+        {
+            string name = $"AREA{number}_{first.ToUpperInvariant()}_{(second ?? "new").ToUpperInvariant()}";
+            if (!taken.Contains(name)) return (name, first, second);
+        }
+    }
+
+    private AreaZone? Nearest(Vector3 at, Func<AreaZone, bool> wanted) => (_host.Catalogs.Zones ?? [])
+        .Where(wanted).OrderBy(z => Vector3.DistanceSquared(at, Vector3.Clamp(at, z.Min, z.Max))).FirstOrDefault();
+
+    /// <summary>
+    /// Makes a new zone where the view looks: a box 120 m square, as tall as its nearest neighbour, written to
+    /// city_univers at once (the scene, its name table and cityareas.bin), queued for a Build, picked - so the
+    /// shelf's Move and Scale put it where it belongs - and one step of the undo history. Null on success.
+    /// </summary>
+    public string? CreateInView(string name, string district1, string? district2)
+    {
+        if (!_host.ShowZones) return "switch the Loading zones layer on first";
+        Vector3 at = _host.ViewPoint();
+        AreaZone? pattern = Nearest(at, z => z.Districts.Count >= 2) ?? Nearest(at, _ => true);
+        if (pattern == null) return "the scene has no load zone to make it like";
+        var min = new Vector3(at.X - 60f, at.Y - 60f, pattern.Min.Z);
+        var max = new Vector3(at.X + 60f, at.Y + 60f, pattern.Max.Z);
+        var made = new Created(name.Trim(), pattern.Name, min, max, district1.Trim(), string.IsNullOrWhiteSpace(district2) ? null : district2.Trim());
+        if (Structure(made, create: true) is { } refused) return refused;
+        _host.History.Push(new ZoneCreateEdit(this, made));
+        _host.Catalogs.SelectZone(made.Name);
+        _host.RaiseNotice($"{made.Name} made - Move puts it in place, Scale pulls its faces; Build packs city_univers.");
+        return null;
+    }
+
+    private sealed record Created(string Name, string Like, Vector3 Min, Vector3 Max, string District1, string? District2)
+    {
+        // The three files the zone was written into, as they stood before it was made and as making it left
+        // them. Taking a zone out rebuilds the name table, and a rebuilt table is the same names in another
+        // order: while the files are still what the making left, undo puts back what they held before - byte
+        // for byte - and only when something else has written to them since is the zone taken out of the
+        // scene as it now stands.
+        public IReadOnlyDictionary<string, byte[]?>? Before { get; set; }
+        public IReadOnlyDictionary<string, byte[]?>? After { get; set; }
+    }
+
+    private static bool SameFiles(IReadOnlyDictionary<string, byte[]?> a, IReadOnlyDictionary<string, byte[]?> b) =>
+        a.Count == b.Count && a.All(file => b.TryGetValue(file.Key, out byte[]? other)
+            && (file.Value == null ? other == null : other != null && file.Value.AsSpan().SequenceEqual(other)));
+
+    // A zone made, moved, moved back and taken out: the scene is what it was before the zone, and the name table
+    // Save has just rebuilt says what the one from before said, in another order. The one from before is put
+    // back - when nothing but the making has written the name table since (`was` is the files as the undo found
+    // them). The zone is out either way: a table that cannot be put back is left as rebuilt.
+    private static void KeepNameTable(LoadZones zones, Created zone, IReadOnlyDictionary<string, byte[]?> was)
+    {
+        if (zone.Before == null || zone.After == null || zones.NameTableFile is not { } names) return;
+        if (!zone.Before.TryGetValue(names, out byte[]? before) || before == null) return;
+        if (!zone.After.TryGetValue(names, out byte[]? made) || made == null) return;
+        if (!was.TryGetValue(names, out byte[]? found) || found == null || !found.AsSpan().SequenceEqual(made)) return;
+        if (!zone.Before.TryGetValue(zones.SceneFile, out byte[]? scene) || scene == null) return;
+        try
+        {
+            if (File.ReadAllBytes(zones.SceneFile).AsSpan().SequenceEqual(scene)) LoadZones.Restore(new Dictionary<string, byte[]?> { [names] = before });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // the rebuilt table stays
+        }
+    }
+
+    // Adds a zone to the scene on disk, or takes it out again (ZoneWrites.StructureBlocked says when not).
+    private string? Structure(Created zone, bool create)
+    {
+        var archive = new FileInfo(MafiaEnvironment.CityUniversSds);
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        LoadZones zones;
+        try
+        {
+            zones = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), _host.Catalogs.DistrictNames, archive, forNewZones: true);
+            IReadOnlyDictionary<string, byte[]?> now = zones.StructureFiles();
+            if (create)
+            {
+                if (zones.Create(zone.Name, zone.Like, zone.Min, zone.Max, zone.District1, zone.District2) is { } refused) return refused;
+                zones.Save();
+                zone.Before = now;
+                zone.After = zones.StructureFiles();
+            }
+            else if (zone.Before != null && zone.After != null && SameFiles(now, zone.After))
+            {
+                LoadZones.Restore(zone.Before);
+            }
+            else
+            {
+                if (zones.Delete(zone.Name) is { } refused) return refused;
+                zones.Save();
+                KeepNameTable(zones, zone, now);
+            }
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "city_univers could not be written: " + ex.Message;
+        }
+        if (!create && _host.Catalogs.SelectedZone == zone.Name) _host.Catalogs.SelectZone(null);
+        try
+        {
+            ZoneWrites.Landed(zones, zone.Name);
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            _host.RaiseNotice($"{zone.Name} is written, but the editor could not be brought up to date: {ex.Message}", isError: true);
+        }
+        return null;
+    }
+
+    private sealed class ZoneCreateEdit(ZoneEditController owner, Created zone) : IEditAction
+    {
+        public void Undo() => Apply(create: false);
+
+        public void Redo() => Apply(create: true);
+
+        private void Apply(bool create)
+        {
+            if (owner.Structure(zone, create) is { } refused)
+            {
+                throw new EditRefusedException($"{zone.Name} was not {(create ? "made again" : "taken out")}: {refused}");
+            }
+        }
     }
 
     // Carries a change out (forward) or takes it back, in a copy of the scene read from disk, and saves it. A

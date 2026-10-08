@@ -88,6 +88,23 @@ internal static class ZoneWrites
     }
 
     /// <summary>
+    /// Why a zone cannot be ADDED to an archive or taken out of it now, or null. Not while an editor holds the
+    /// archive as a document (Whole map, or the resource editor handed it) or is still loading it: a volume
+    /// cannot be carried into a scene that is already loaded the way a moved one is, and that editor's next
+    /// save would write its own scene - without the volume, or with it - over this one.
+    /// </summary>
+    public static string? StructureBlocked(FileInfo archive)
+    {
+        if (Viewports().Any(host => host.Streamer.IsLoading(archive)))
+        {
+            return "city_univers is still being loaded into an editor - try again when it is in";
+        }
+        return OpenArchives.HoldersOf(archive).Count > 0
+            ? "city_univers is open in an editor (Whole map, or the resource editor) - a zone is added or taken out with a single district loaded"
+            : null;
+    }
+
+    /// <summary>
     /// After <paramref name="zones"/> was saved with <paramref name="zone"/> changed: every editor holding the
     /// archive gets the zone as it now is, and every viewport queues the archive for a Build and reads its
     /// Loading zones layer again.
