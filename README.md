@@ -277,6 +277,13 @@ over the same job the matching tool runs, so a result does not depend on who ask
   Esc drops a drag, and Undo / Redo take back exactly what the drag changed. With **Whole map** on the
   editor holds `city_univers` itself; a zone write is carried into that scene too, so the editor's own
   save does not put the zone back.
+  The layer draws each zone as the edges of its box with a faint fill, hidden by the scene in front of
+  it and fading with distance; a zone that names one district - which does not load it by itself - is
+  drawn fainter, and the picked zone carries its name and districts over it.
+  **New loading zone** (the button at the foot of the tool shelf, with the layer on) makes a zone
+  where the view looks: a name and the one or two districts it keeps loaded are asked, the box appears
+  picked, and Move and Scale put it in place. It is written at once - the scene, its name table and
+  `cityareas.bin` - and Undo takes it out again. Not with Whole map on.
 - **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
   line and group names), with every string it would change listed before anything is written and a
   backup kept beside the file.
@@ -290,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 84 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 85 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -309,7 +316,7 @@ map editor itself.
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
-| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face` |
+| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -336,6 +343,9 @@ of a zone (its plane and its box together; reports by default, writes with `appl
 the game: a district streams in where a zone naming TWO districts holds the player - a zone naming
 one does not load it by itself - and free ride reads the base game's `city_univers`, not the copy a
 DLC ships.
+`zone_create` adds a new zone: a box between two corners, made like an existing zone, with a line in
+`cityareas.bin` for the districts it keeps loaded. Measured in the game: a player who appears inside
+such a zone gets the district, where without it he got none.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and
