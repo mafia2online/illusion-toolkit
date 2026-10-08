@@ -210,7 +210,10 @@ internal sealed class GeometryEditController
         if (node.Kind == "Lod" && node.Parent is { } owner && ReferenceEquals(owner.Source, node.Source)) node = owner;
         if (node.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh } adapter) return "not a mesh";
         if (changes.Count == 0) return "nothing to hide";
-        if (node.Mesh is { Instanced: true }) return "an instanced mesh is drawn many times over — its triangles cannot be hidden in one place";
+        // Asked of every row that draws the mesh: one of several levels keeps its GPU meshes on the level rows,
+        // and its own row has none to ask.
+        if (LevelRows(node).Any(r => r.Mesh is { Instanced: true }))
+            return "an instanced mesh is drawn many times over — its triangles cannot be hidden in one place";
         bool sharing = adapter.Document.GeometrySharers(mesh).Any();
         if (sharing && shared == SharedGeometry.Refuse) return "other objects draw the same geometry — the triangles would vanish from all of them";
         // Two geometry blocks can stand on one index buffer: an object imported twice, with a level's distance
@@ -248,8 +251,20 @@ internal sealed class GeometryEditController
             return null;
         }
 
-        // every object drawing the block is redrawn with it: there is one buffer in the file
-        var edit = new HiddenTrianglesEdit(this, node, adapter.Document, mesh, changes, sharing ? [.. SharerNodes(node)] : []);
+        // Every object drawing the block is redrawn with it: there is one buffer in the file. Their rows are
+        // taken whether or not the row itself carries a mesh - an object of several levels draws from its level
+        // rows - and an instanced one among them cannot be redrawn as a single mesh.
+        List<SceneNode> others = [];
+        if (sharing)
+        {
+            foreach (FrameObjectSingleMesh other in adapter.Document.GeometrySharers(mesh))
+            {
+                if (_host.Streamer.Actors.RowOf(other) is { } row && _host.Tree.IsInScene(row)) others.Add(row);
+            }
+            if (others.SelectMany(LevelRows).Any(r => r.Mesh is { Instanced: true }))
+                return "one of the objects drawing this geometry is instanced — cut this object alone instead";
+        }
+        var edit = new HiddenTrianglesEdit(this, node, adapter.Document, mesh, changes, others);
         edit.Redo();
         _host.Editing.History.Push(edit);
         _host.RaiseSceneChanged();
