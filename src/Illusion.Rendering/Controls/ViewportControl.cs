@@ -341,11 +341,20 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         UpdateCamera(dt);
         CameraMoved?.Invoke();
 
+        // A hook above can pump the dispatcher (a dialog, a wait for a load), and a frame run inside that pump
+        // may have replaced the surface - at another size, the old one disposed. This frame's target is then
+        // gone: nothing is drawn into it, the next frame draws into the new one.
+        if (!ReferenceEquals(_surface.Target, target)) return;
+
         _image.Lock();
         try
         {
             Renderer.Render(target);
-            _image.AddDirtyRect(new Int32Rect(0, 0, target.Width, target.Height));
+            // Never more than the image holds: a dirty rectangle larger than its back buffer is an exception
+            // out of the render pass, with nothing above it but the end of the program - seen when the window
+            // was resized while a district loaded ("dirtyRect 1194 must be less than or equal to 232").
+            int width = Math.Min(target.Width, _image.PixelWidth), height = Math.Min(target.Height, _image.PixelHeight);
+            if (width > 0 && height > 0) _image.AddDirtyRect(new Int32Rect(0, 0, width, height));
         }
         finally
         {
