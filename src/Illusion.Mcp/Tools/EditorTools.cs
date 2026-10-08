@@ -1045,7 +1045,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "zone_create")]
-    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). Not undoable: to take it back, restore the archive's working copy. Refused while an editor holds city_univers (Whole map). Measured in the game: the NAME decides whether the zone loads its districts for a player who appears inside it - two words after the number ('AREA900_DOCK_SOUTH') and it does, one word ('AREA900_DOCK') and it does not, whatever districts it names; the result says which it is ('loadsOnArrival').")]
+    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). With the map editor open the zone is one step of its history (editor_undo takes it out); zone_delete takes it out later. Refused while an editor holds city_univers (Whole map). Measured in the game: the NAME decides whether the zone loads its districts for a player who appears inside it - two words after the number ('AREA900_DOCK_SOUTH') and it does, one word ('AREA900_DOCK') and it does not, whatever districts it names; the result says which it is ('loadsOnArrival').")]
     public static async Task<string> ZoneCreate(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -1061,6 +1061,26 @@ public sealed class EditorTools
             LoadZoneInfo? made = null;
             string? refused = await ui.RunAsync(() => editor.ZoneCreate(name, like, boxMin, boxMax, districts, apply, out made));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made, loadsOnArrival = made?.LoadsOnArrival });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_delete")]
+    [Description("Take a load zone that was ADDED (zone_create, or the editor's New loading zone button - zones_at marks such a zone 'Added') out of city_univers.sds again: its volume, its place in the frame name table and its line in cityareas.bin. A zone the game ships with is refused. By default it only REPORTS; apply=true writes the working copy - then archive_build packs city_univers.sds. With the map editor open it is one step of its history (editor_undo puts the zone back). Refused while an editor holds city_univers (Whole map).")]
+    public static async Task<string> ZoneDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The zone's name, as zones_at lists it.")] string name,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? gone = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneDelete(name, apply, out gone));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = gone });
         }
         catch (Exception ex)
         {

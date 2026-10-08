@@ -149,10 +149,11 @@ public sealed record ObjectImportOutcome(
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
 
 /// <summary>One load zone at a point: the districts it keeps loaded, whether the point is inside its volume
-/// (and how far outside when not), its box in world space, and whether it is of the kind that loads its
-/// districts for a player who appears inside it - which its name decides (two words after the number).</summary>
+/// (and how far outside when not), its box in world space, whether it is of the kind that loads its districts
+/// for a player who appears inside it - which its name decides (two words after the number) - and whether it
+/// was added to the zones the game ships with.</summary>
 public sealed record LoadZoneInfo(string Name, IReadOnlyList<string> Districts, bool Inside, float OutsideBy, float[] BoxMin, float[] BoxMax,
-    bool LoadsOnArrival = false);
+    bool LoadsOnArrival = false, bool Added = false);
 
 /// <summary>A face of a load zone moved - or, when not applied, what moving it would do: from where to where on
 /// its axis (world), the zone's box afterwards, the districts it asks for, and the working-copy file written.</summary>

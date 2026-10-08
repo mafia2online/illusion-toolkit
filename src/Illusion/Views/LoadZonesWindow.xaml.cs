@@ -22,7 +22,7 @@ public sealed partial class LoadZonesWindow : Window
     /// <summary>One zone in the list, with the columns shown beside its name.</summary>
     public sealed record ZoneRow(LoadZoneInfo Info)
     {
-        public string Name => Info.Name;
+        public string Name => Info.Added ? Info.Name + "  (added)" : Info.Name;
         public string DistrictsText => Info.Districts.Count == 0 ? "no district" : string.Join(" + ", Info.Districts);
         public string StatusText => Info.Inside ? "holds the point" : $"{Info.OutsideBy:0.#} m away";
     }

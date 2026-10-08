@@ -158,6 +158,98 @@ internal sealed class ZoneEditController
         return null;
     }
 
+    /// <summary>
+    /// Makes a new zone between two world corners, like an existing one - what the zone_create tool asks for:
+    /// written to city_univers at once, queued for a Build, one step of the undo history. Null on success.
+    /// </summary>
+    public string? Create(string name, string like, Vector3 min, Vector3 max, string district1, string? district2)
+    {
+        var made = new Created(name.Trim(), like, min, max, district1.Trim(), string.IsNullOrWhiteSpace(district2) ? null : district2.Trim());
+        if (Structure(made, create: true) is { } refused) return refused;
+        _host.History.Push(new ZoneCreateEdit(this, made));
+        _host.RaiseNotice($"{made.Name} made - Build packs city_univers; every player of a server needs that archive.");
+        return null;
+    }
+
+    /// <summary>
+    /// Takes a zone that was added to the game's own out of city_univers again - written at once, queued for a
+    /// Build, one step of the undo history (undo puts it back as it was). Null on success.
+    /// </summary>
+    public string? Remove(string name)
+    {
+        if (LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
+        var gone = new Removed(name);
+        if (Unstructure(gone, remove: true) is { } refused) return refused;
+        _host.History.Push(new ZoneRemoveEdit(this, gone));
+        _host.RaiseNotice($"{name} taken out - Build packs city_univers; every player of a server needs that archive.");
+        return null;
+    }
+
+    private sealed record Removed(string Name)
+    {
+        // The three files as they stood with the zone and as taking it out left them: undo puts the first back
+        // while the files are still the second, and refuses once something else has written to them.
+        public IReadOnlyDictionary<string, byte[]?>? Before { get; set; }
+        public IReadOnlyDictionary<string, byte[]?>? After { get; set; }
+    }
+
+    // Takes a zone out of the scene on disk, or - undoing that - puts the files back as they stood with it.
+    private string? Unstructure(Removed zone, bool remove)
+    {
+        var archive = new FileInfo(MafiaEnvironment.CityUniversSds);
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        LoadZones zones;
+        try
+        {
+            zones = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), _host.Catalogs.DistrictNames, archive, forNewZones: true);
+            IReadOnlyDictionary<string, byte[]?> now = zones.StructureFiles();
+            if (remove)
+            {
+                if (zones.Delete(zone.Name) is { } refused) return refused;
+                zones.Save();
+                zone.Before = now;
+                zone.After = zones.StructureFiles();
+            }
+            else if (zone.Before != null && zone.After != null && SameFiles(now, zone.After))
+            {
+                LoadZones.Restore(zone.Before);
+            }
+            else
+            {
+                return "city_univers was written to since the zone was taken out - make the zone again instead";
+            }
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "city_univers could not be written: " + ex.Message;
+        }
+        if (remove && _host.Catalogs.SelectedZone == zone.Name) _host.Catalogs.SelectZone(null);
+        try
+        {
+            ZoneWrites.Landed(zones, zone.Name);
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            _host.RaiseNotice($"{zone.Name} is written, but the editor could not be brought up to date: {ex.Message}", isError: true);
+        }
+        return null;
+    }
+
+    private sealed class ZoneRemoveEdit(ZoneEditController owner, Removed zone) : IEditAction
+    {
+        public void Undo() => Apply(remove: false);
+
+        public void Redo() => Apply(remove: true);
+
+        private void Apply(bool remove)
+        {
+            if (owner.Unstructure(zone, remove) is { } refused)
+            {
+                throw new EditRefusedException($"{zone.Name} was not {(remove ? "taken out again" : "put back")}: {refused}");
+            }
+        }
+    }
+
     private sealed record Created(string Name, string Like, Vector3 Min, Vector3 Max, string District1, string? District2)
     {
         // The three files the zone was written into, as they stood before it was made and as making it left

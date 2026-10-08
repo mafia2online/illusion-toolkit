@@ -211,4 +211,9 @@ public interface IEditorSession
     /// is written. With it the scene, the frame name table and cityareas.bin are saved to the working copy.
     /// Null on success.</summary>
     string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone);
+
+    /// <summary>Takes a load zone that was ADDED to the game's own out of the base city_univers.sds again: its
+    /// volume, its place in the frame name table and its line in cityareas.bin. Without <paramref name="apply"/>
+    /// nothing is written. A zone the game ships with is refused. Null on success.</summary>
+    string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone);
 }

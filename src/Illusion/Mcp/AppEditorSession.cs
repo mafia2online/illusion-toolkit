@@ -1522,7 +1522,7 @@ internal sealed class AppEditorSession : IEditorSession
         {
             (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
             return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max),
-                Assets.World.LoadZones.LoadsOnArrival(z.Name));
+                Assets.World.LoadZones.LoadsOnArrival(z.Name), !Assets.World.LoadZones.IsShipped(z.Name));
         })];
         districts = all.DistrictsAt(at);
         return null;
@@ -1583,19 +1583,63 @@ internal sealed class AppEditorSession : IEditorSession
                 forNewZones: true);
             var min = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
             var max = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+            // worked out in memory first: what the zone would be is the answer of a dry run, and of a write too
             if (zones.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } refused) return refused;
-            if (apply)
-            {
-                zones.Save();
-                ZoneWrites.Landed(zones, name);
-            }
             (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
-            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name));
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                // With the map editor open: written the way its own button writes, so the zone is a step of the
+                // editor's undo history - and the step is on the MAP editor's history (see ZoneMoveFace).
+                if (viewport.ZoneEditing.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } unmade) return unmade;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
             return null;
         }
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
         {
             return "could not add the zone to city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(name)) return "name is the zone to take out";
+        if (Assets.World.LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            if (!zones.Volumes.TryGetValue(name, out Formats.Frames.ObjectTypes.FrameObjectArea? volume)) return $"no load zone named '{name}'";
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(volume);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), false, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (zones.Delete(name) is { } refused) return refused;
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                if (viewport.ZoneEditing.Remove(name) is { } kept) return kept;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not take the zone out of city_univers: " + ex.Message;
         }
     }
 

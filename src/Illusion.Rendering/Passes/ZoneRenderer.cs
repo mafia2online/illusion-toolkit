@@ -17,8 +17,9 @@ public struct ZoneConstants
 }
 
 /// <summary>One loading zone to draw: its world box, the colour of its district, whether it is of the kind that
-/// loads a district for a player who appears inside it (it names two), and whether it is the one picked.</summary>
-public readonly record struct ZoneBox(Vector3 Min, Vector3 Max, Vector3 Color, bool Loads, bool Picked);
+/// loads a district for a player who appears inside it, whether it is the one picked, and whether it was added
+/// to the game's own zones - drawn with a second frame round it, so that it is told from them at a glance.</summary>
+public readonly record struct ZoneBox(Vector3 Min, Vector3 Max, Vector3 Color, bool Loads, bool Picked, bool Added = false);
 
 /// <summary>
 /// Draws the AREA load zones so that they can be read: each zone as the EDGES of its box with a faint fill, both
@@ -65,6 +66,7 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
 
     private const float FadeFrom = 300f;       // metres from the camera at which a zone starts to fade...
     private const float FadeTo = 1500f;        // ...and is no longer drawn
+    private const float AddedFrame = 2.5f;     // metres between an added zone's box and the second frame round it
 
     private ComPtr<ID3D11Buffer> _edges;
 
@@ -188,6 +190,13 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
             ZoneBox box = boxes[i];
             float alpha = box.Picked ? 1f : (box.Loads ? 0.9f : 0.4f) * fade[i];
             if (alpha > 0.02f) Draw(box, alpha, box.Picked ? 0.55f : 0.25f, (uint)EdgeIndices.Length);
+            // A zone that was added: a second, near-white frame a little way out. It fades half as much as the
+            // rest - what one has made oneself is what one looks for from afar.
+            if (box.Added)
+            {
+                var grown = box with { Min = box.Min - new Vector3(AddedFrame), Max = box.Max + new Vector3(AddedFrame) };
+                Draw(grown, box.Picked ? 1f : 0.5f + (0.5f * fade[i]), 0.85f, (uint)EdgeIndices.Length);
+            }
         }
 
         // The picked zone once more, through whatever stands in front of it.
