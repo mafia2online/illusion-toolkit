@@ -94,6 +94,10 @@ The last path is remembered. A green download arrow appears beside the gear when
 out; the same progress bar shows the download, and the toolkit restarts to install it.
 *(A "Resource Editor" tile exists but is a disabled stub.)*
 
+The library browser shows a picture of each character, wardrobe piece and car, drawn from its
+archive: people head and shoulders, a car on its wheels. Pictures are kept on disk and only the
+tiles on screen are read.
+
 ### Viewport and streaming
 
 - Area catalog of open-world districts and interiors, from `cityareas.bin`.
@@ -200,6 +204,9 @@ with it: *Blended* becomes a translucent surface (glass), anything else a cut-ou
 grille). The material is written to the library on Save and its textures are packed into the
 archive on Build.
 
+A skinned mesh - a car body - can gain vertices: its remap pools are rebuilt from the pushed skin.
+Two levels of detail of one object can go in one push. A person opens standing on their rig.
+
 Limits worth knowing: untouched geometry round-trips bit-exactly (that is how a real reshape is
 told apart from an untouched one); a topology rebuild leaves lower LODs and collision with the old
 shape; collision placements refuse scale and mirror pushes (resize the hull with the toolkit's own
@@ -209,9 +216,15 @@ split it into several objects.
 
 ### Saving, building, backups
 
-**Ctrl+S** writes edited FrameResources back to the extracted mirror. **Build** repacks every
-edited archive into its `.sds`, creating a timestamped versioned backup first; archives are packed
-independently, so one failure (the game holding a file open, say) does not block the rest.
+**Ctrl+S** writes edited FrameResources back to the extracted mirror. **Build** opens a window
+first: every archive edited in the session, ticked, and under each the files of its working copy that
+differ from the archive the game has now. A Build packs a whole working copy, so that list is
+everything that is about to change in the game - including a file changed in that folder in an
+earlier session and forgotten, which is marked and counted out loud. Untick an archive to leave it
+for a later Build; **Add archive…** packs one whose working copy was changed by hand (a script, a
+table). Each ticked archive is then repacked into its `.sds` with a timestamped versioned backup
+first; archives are packed independently, so one failure (the game holding a file open, say) does
+not block the rest.
 **Restore Backup** rolls a single archive back to an earlier version - replacing both the live
 `.sds` and its extracted mirror - from the File menu, the tree's context menu or the viewport's.
 *(Material-library edits are not covered by the backup flow.)*
@@ -233,6 +246,25 @@ beside the working copy in `illusion_memory.json`, and stated again on every Bui
 resource changed size. A repacked stock car states exactly what the original did
 (`--probe-car-clone`).
 
+### Tools menu
+
+What the MCP server can do to a scene, the menus can too: each item under **Tools** opens a window
+over the same job the matching tool runs, so a result does not depend on who asked for it.
+
+- **Hide triangles…** (map and resource editor) - cuts an opening in the selected mesh without
+  rebuilding it: a doorway in a stock wall, a pane of glass. With the window open the triangles are
+  picked by clicking them on the mesh in the viewport (a click on a marked one takes it back), or -
+  for many at once - by a box that holds them. What would be hidden is marked on the mesh, the count
+  says what goes on each level of detail, and Hide is one undo step.
+- **Mirror to winter…** (map editor) - carries the loaded district's edits into its winter archive.
+  The item is greyed out, and says why, when the district has no winter variant or the winter one is
+  what is loaded.
+- **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
+  line and group names), with every string it would change listed before anything is written and a
+  backup kept beside the file.
+- **Clone car…**, **Replace a car…**, **Export car for multiplayer…** (resource editor) - the three
+  car jobs described under the MCP server below, starting from the car on the stage.
+
 ### MCP server
 
 An MCP endpoint runs for the lifetime of the application at `http://127.0.0.1:2010/mcp` - loopback
@@ -240,7 +272,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 76 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 81 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -254,9 +286,9 @@ map editor itself.
 | **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
-| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
+| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games`, `ping` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
-| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
+| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
@@ -270,6 +302,14 @@ and nothing reaches the game before `editor_build` (which keeps the usual timest
 `editor_target resource` points the same tools at the resource editor's stage (one archive, such as
 a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
 entity-data tables the way the Tuning tab does.
+
+`mesh_hide_triangles` cuts an opening into a stock mesh without rebuilding it: the triangles inside
+a world-space box are hidden on every level of detail and no vertex is touched, so a stock facade
+keeps the channels Blender never sees. It reports by default and hides with `apply`.
+`mesh_materials` lists a mesh's material slots and re-points one at another material - no geometry
+and no UV is touched. `collision_unused_hulls` counts, and with `apply` removes, the hulls no placement references.
+`crash_placements` lists the crash-layer props (trees, lamps, bins) standing in a box and can
+delete them, the twin season included.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and

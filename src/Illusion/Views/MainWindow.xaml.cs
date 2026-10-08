@@ -360,46 +360,14 @@ public partial class MainWindow : Window
         new ImportWindow(Viewport) { Owner = this }.ShowDialog();
     }
 
-    // Build (center toolbar button / File → Build SDS): pack the edited archive(s) back into the game's .sds.
-    // No pre-build confirmation — edits are already saved to the extracted folders and every build keeps a
-    // versioned backup, so it runs straight away and reports the outcome afterwards (ShowBuildResult). Each build
+    // Build (center toolbar button / File → Build SDS): pack archives back into the game's .sds. The Build window
+    // comes first: it lists, per archive, every file of its working copy that differs from the game - a Build
+    // packs the whole working copy, old forgotten edits included - and packs what is ticked. Each build
     // versions the previous archive contents into a timestamped copy under a "backups" folder beside it.
     private void Build_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-
-        if (Viewport.PendingBuildArchives().Count == 0)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Info,
-                Text = "No edits to build — move or edit an object first.",
-            });
-            return;
-        }
-
-        D3DImageHost.BuildReport report;
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            report = Viewport.BuildEdits(createBackup: true); // backups are always kept (versioned in a "backups" folder)
-        }
-        catch (Exception ex)
-        {
-            Mouse.OverrideCursor = null;
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Error,
-                Heading = "Build failed",
-                Text = ex.Message,
-            });
-            return;
-        }
-        finally { Mouse.OverrideCursor = null; }
-
-        ShowBuildResult(report);
+        if (BuildWindow.Run(this, Viewport) is { } report) ShowBuildResult(report);
     }
 
     // Reports a finished build. A fully-successful build is a "Built N archives" notice the user can silence for

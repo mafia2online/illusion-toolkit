@@ -864,6 +864,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public bool AssignSlotMaterial(SceneNode node, int slotIndex, ulong newHash) =>
         MaterialEditing.AssignSlotMaterial(node, slotIndex, newHash);
 
+    /// <inheritdoc cref="MaterialEditController.SlotAssignObstacle"/>
+    public string? SlotAssignObstacle(SceneNode node) => MaterialEditing.SlotAssignObstacle(node);
+
     /// <summary>Whether <paramref name="node"/> is still part of the loaded scene tree — actions pinned
     /// to a node across scene reloads (the material editor's assign target) validate with this.</summary>
     public bool IsNodeInScene(SceneNode node) => Tree.IsInScene(node);
@@ -1142,6 +1145,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="ScenePersistence.BuildEdits"/>
     public BuildReport BuildEdits(bool createBackup = true) => Persistence.BuildEdits(createBackup);
 
+    /// <inheritdoc cref="ScenePersistence.BuildArchives"/>
+    public BuildReport BuildArchives(IReadOnlyList<FileInfo> archives, bool createBackup = true) =>
+        Persistence.BuildArchives(archives, createBackup);
+
     /// <inheritdoc cref="DistrictStreamer.ResetForExternalChange"/>
     public void PrepareForArchiveRestore() => Streamer.ResetForExternalChange();
 
@@ -1171,12 +1178,73 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     // multi-selection (a miss is ignored); a plain click replaces the selection (or clears it on a miss).
     protected override void OnViewportLeftClick(Point pos)
     {
+        // A tool that is picking on the scene (Tools → Hide triangles picks triangles) is offered the click
+        // first; what it does not take is an ordinary click.
+        if (SceneClickTaker is { } taker && taker(pos)) return;
+
         SceneNode? hit = PickNode(pos);
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             if (hit != null) ToggleSelect(hit);
         }
         else Select(hit);
+    }
+
+    /// <summary>While set, a left click on the scene is offered to it before anything is selected; true means
+    /// the click was its own. One tool at a time: the tool that sets it clears it.</summary>
+    internal Func<Point, bool>? SceneClickTaker { get; set; }
+
+    /// <summary>
+    /// The triangle of a mesh node under a screen pixel, as the eye has it: of the first level of detail, and
+    /// only when nothing of the scene stands in front of it there. Null when the node is not a mesh, the pixel
+    /// misses it, or something covers it - <paramref name="missed"/> then says which, for the user.
+    /// </summary>
+    internal TriangleHider.Picked? PickTriangle(SceneNode node, Point pos, out string? missed)
+    {
+        missed = null;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter) return null;
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
+        TriangleHider.Picked? hit = TriangleHider.Pick(mesh, ((IFrameNode)adapter).WorldTransform, origin, dir);
+        if (hit == null)
+        {
+            missed = "That spot is not on this mesh.";
+            return null;
+        }
+        // Nearer scenery at this pixel means the triangle is behind it: what cannot be seen is not picked. The
+        // mesh's own rows do not count as scenery - from a distance the editor draws a coarser level of it, whose
+        // surface need not lie where the first level's does, and that level stood "in front" of every triangle.
+        SceneNode? front = PickNode(pos);
+        if (front != null && (ReferenceEquals(front, node) || ReferenceEquals(front.Source, node.Source))) return hit;
+        float nearest = PickMesh(pos, out float meshT) != null ? meshT : float.PositiveInfinity;
+        if (nearest >= hit.Distance - MathF.Max(0.05f, hit.Distance * 0.002f)) return hit;
+        missed = $"{front?.Name ?? "Something"} stands in front of the mesh there.";
+        return null;
+    }
+
+    /// <summary>Marks triangles in the viewport as a tool's pick - their edges, and a stroke to each corner so a
+    /// small one still reads as filled. An empty list takes the marks away.</summary>
+    internal void ShowPickedTriangles(IReadOnlyList<TriangleHider.Triangle> triangles)
+    {
+        if (Rnd == null) return;
+        var lines = new List<Vector3>(triangles.Count * 12);
+        var colours = new List<Vector4>(triangles.Count * 12);
+        var edge = new Vector4(1f, 0.62f, 0.22f, 1f);
+        var inner = new Vector4(1f, 0.62f, 0.22f, 0.45f);
+        foreach (TriangleHider.Triangle t in triangles)
+        {
+            Vector3 centre = (t.A + t.B + t.C) / 3f;
+            foreach ((Vector3 from, Vector3 to, Vector4 colour) in new[]
+                     {
+                         (t.A, t.B, edge), (t.B, t.C, edge), (t.C, t.A, edge), (centre, t.A, inner), (centre, t.B, inner), (centre, t.C, inner),
+                     })
+            {
+                lines.Add(from);
+                lines.Add(to);
+                colours.Add(colour);        // one for each end of the line
+                colours.Add(colour);
+            }
+        }
+        Rnd.SetPickedTriangleLines(lines, colours);
     }
 
     // ── Glyph hover: what the cursor is over, highlighted and named ──

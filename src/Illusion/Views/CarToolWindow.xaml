@@ -1,0 +1,78 @@
+<Window x:Class="Illusion.Views.CarToolWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Car"
+        Width="520" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Tools → Clone car… / Replace a car… / Export car for multiplayer…: one window in three guises. Each
+         asks only for what its job needs - the rows of the other two are collapsed - and runs the job the
+         car tools of the MCP server run. Visual language comes from the shared EditorStyles dictionary, like
+         CrashObjectWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock x:Name="IntroText" Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,14" />
+
+            <TextBlock x:Name="CarLabel" Style="{StaticResource DimLabel}" Text="Car" Margin="0,0,0,4" />
+            <ComboBox x:Name="CarCombo" IsEditable="True" IsTextSearchEnabled="True" Margin="0,0,0,12"
+                      SelectionChanged="Field_Changed" TextBoxBase.TextChanged="Field_Changed"
+                      ToolTip="A car archive in pc\sds\cars, by its model name" />
+
+            <StackPanel x:Name="CloneRows">
+                <TextBlock Style="{StaticResource DimLabel}" Text="New model name" Margin="0,0,0,4" />
+                <TextBox x:Name="NameBox" Padding="6,4" Margin="0,0,0,12" MaxLength="31" TextChanged="Field_Changed"
+                         ToolTip="A letter, then letters, digits and '_'; the name of the new archive and of the model in the tables" />
+                <TextBlock Style="{StaticResource DimLabel}" Text="Name shown in the game (optional)" Margin="0,0,0,4" />
+                <TextBox x:Name="TitleBox" Padding="6,4" Margin="0,0,0,12"
+                         ToolTip="Written into the text of every installed language. Left empty, the clone is called what the car it was made from is called." />
+                <CheckBox x:Name="TrafficBox" Content="Let traffic drive it wherever it drives the original"
+                          ToolTip="Adds the clone to every traffic row that can pick the source car." />
+            </StackPanel>
+
+            <StackPanel x:Name="SubstituteRows">
+                <TextBlock Style="{StaticResource DimLabel}" Text="Takes the place of" Margin="0,0,0,4" />
+                <ComboBox x:Name="TargetCombo" IsEditable="True" IsTextSearchEnabled="True"
+                          SelectionChanged="Field_Changed" TextBoxBase.TextChanged="Field_Changed"
+                          ToolTip="The car whose archive is replaced; it keeps its name, its table rows and its place in traffic" />
+            </StackPanel>
+
+            <StackPanel x:Name="ExportRows">
+                <TextBlock Style="{StaticResource DimLabel}" Text="Folder (optional)" Margin="0,0,0,4" />
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="FolderBox" Grid.Column="0" Padding="6,4"
+                             ToolTip="Where the resource folder is written. Left empty: _illusion_export\m2o\&lt;resource&gt; in the game folder." />
+                    <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Height="28" Padding="12,0"
+                            Margin="8,0,0,0" Content="Browse…" Click="Browse_Click" />
+                </Grid>
+                <TextBlock Style="{StaticResource DimLabel}" Text="Resource name (optional)" Margin="0,0,0,4" />
+                <TextBox x:Name="ResourceBox" Padding="6,4"
+                         ToolTip="Lower-case letters, digits, '.', '_' and '-'. Left empty: car-&lt;model&gt;." />
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="HintText" DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"
+                           TextWrapping="Wrap" VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" IsCancel="True" Click="Cancel_Click" />
+                    <Button x:Name="RunBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            IsEnabled="False" Click="Run_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

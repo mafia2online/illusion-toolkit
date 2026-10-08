@@ -495,8 +495,10 @@ internal static class BridgeSkinProbes
             Check("a skinned body with a face removed is accepted", applied != null, why ?? "");
             if (applied != null)
             {
-                // The REBUILT mesh's face count, not the model's index buffer: TryApply leaves the buffers
-                // untouched until the caller commits with ApplyNew, so the model still holds the old ones.
+                // Working a push out leaves the MODEL untouched as well as its buffers — the face ranges and
+                // pools ride in the result — so it is committed before the model is asked about them, and
+                // taken back at the end of this block for the cases that follow.
+                applied.ApplyNew();
                 int triangles = (applied.NewMesh?.Indices.Length ?? 0) / 3;
 
                 // The whole point: no range may name a face the mesh no longer has. A stale one is what
@@ -562,6 +564,7 @@ internal static class BridgeSkinProbes
                     applied.NewMesh == null ? "no replacement mesh built"
                         : $"ids {applied.NewMesh.BoneIndices?.Length ?? 0}, rig "
                           + $"{applied.NewMesh.Skeleton?.Bones.Count ?? 0} bones");
+                applied.RestoreOriginal();
             }
 
             // ── The mirror case: geometry ADDED ──
@@ -585,6 +588,7 @@ internal static class BridgeSkinProbes
                 Check("a skinned body with a face ADDED is accepted", grown != null, growWhy ?? "");
                 if (grown != null)
                 {
+                    grown.ApplyNew(); // the model is asked about its face ranges below
                     int triangles = (grown.NewMesh?.Indices.Length ?? 0) / 3;
                     int verts = grown.NewMesh?.Positions.Length ?? 0;
                     Check("the added geometry really arrived",
@@ -645,7 +649,6 @@ internal static class BridgeSkinProbes
                         $"{onWanted} of {checkedNew} added vertices on bone {wantBone} "
                             + $"(nearest would have given {nearBone})");
 
-                    grown.ApplyNew();
                     Check("the grown model survives the writer and comes back",
                         SurvivesRoundTrip(model3, verts, triangles, out string? tripWhy),
                         tripWhy ?? "");
@@ -853,7 +856,7 @@ internal static class BridgeSkinProbes
     /// is perfectly fine in memory and simply makes the car vanish in game.
     /// </para>
     /// </summary>
-    private static bool SurvivesRoundTrip(FrameObjectModel model, int verts, int faces, out string? why)
+    internal static bool SurvivesRoundTrip(FrameObjectModel model, int verts, int faces, out string? why)
     {
         why = null;
         try
@@ -910,7 +913,7 @@ internal static class BridgeSkinProbes
     /// id read against the wrong pool binds geometry to whatever bone happens to sit at that offset.
     /// </para>
     /// </summary>
-    private static (int Checked, int Wrong, int Groups) ResolvesThroughPools(
+    internal static (int Checked, int Wrong, int Groups) ResolvesThroughPools(
         FrameObjectModel model, BridgeMeshApplier.ApplyResult applied, byte[] pools, byte[] remap)
     {
         MeshData? mesh = applied.NewMesh;
@@ -1000,7 +1003,7 @@ internal static class BridgeSkinProbes
         return m;
     }
 
-    private static IFrameNode? FindModelNode(SdsFrameNode node)
+    internal static IFrameNode? FindModelNode(SdsFrameNode node)
     {
         if (node.Source is IFrameNode f && IsModel(f)) return f;
         foreach (SdsFrameNode c in node.Children)
