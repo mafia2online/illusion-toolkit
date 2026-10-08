@@ -19,6 +19,35 @@ internal static class ProbeRunner
 
         switch (args[0])
         {
+            case "--probe-m2o-export":
+                M2oExportProbes.Run();
+                return true;
+            // Author a .sds.patch headlessly:
+            //   Illusion.exe --build-patch <base.sds> <out.sds.patch> [--delete-type <Name>]... [--delete <ordinal>]...
+            case "--build-patch":
+                PatchProbes.RunBuildPatch(args);
+                return true;
+            // Named frames of a district's scene: Illusion.exe --list-frames <base.sds> [filter]
+            case "--list-frames":
+                PatchProbes.RunListFrames(args);
+                return true;
+            // Remove world objects and emit the patch that does it:
+            //   Illusion.exe --remove-frames <base.sds> <out.sds.patch> --frame <name|0xhash>...
+            case "--remove-frames":
+                PatchProbes.RunRemoveFrames(args);
+                return true;
+            // Where a frame sits and what collision is near it.
+            case "--frame-collision":
+                PatchProbes.RunFrameCollision(args);
+                return true;
+            // Which frames a patch adds or removes, against the archive it targets.
+            case "--patch-diff":
+                PatchProbes.RunPatchDiff(args);
+                return true;
+            // Report what a .sds.patch does, without applying it.
+            case "--dump-patch":
+                PatchProbes.RunDumpPatch(args);
+                return true;
             // SDS read chain: Illusion.exe --probe-sds [path.sds]
             case "--probe-sds":
                 ArchiveProbes.RunSdsProbe(args.Length >= 2 ? args[1] : null);

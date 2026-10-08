@@ -1,0 +1,50 @@
+<Window x:Class="Illusion.Views.M2oExportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Export for M2O" Width="680" Height="650" MinWidth="560" MinHeight="540"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="Prepare your server map" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
+            <TextBlock Margin="0,8,0,16" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"
+                       Text="Export native patches and map_patches.json together. Add this folder to your server resource's packaged files." />
+            <TextBlock x:Name="ScopeText" Style="{StaticResource DimLabel}" Margin="0,0,0,6" />
+        </StackPanel>
+        <ListBox Grid.Row="1" x:Name="ArchiveList" FontFamily="Consolas" FontSize="12"
+                 Background="{StaticResource SurfacePane}" Foreground="{StaticResource TextPrimary}"
+                 BorderBrush="{StaticResource EdgeFaint}" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Target}" ToolTip="{Binding Source}" Padding="6,5" />
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"
+                       Text="Only the listed archives are exported. Edit summer and winter separately to include both. Object removal and collision edits should be checked together in-game." />
+            <TextBlock Text="New export folder" Style="{StaticResource DimLabel}" Margin="0,16,0,6" />
+            <DockPanel>
+                <Button DockPanel.Dock="Right" x:Name="BrowseButton" Content="Browse…" Click="Browse_Click"
+                        Style="{StaticResource NeutralButton}" Margin="8,0,0,0" Padding="12,5" />
+                <TextBox x:Name="FolderBox" Style="{StaticResource InputField}" VerticalContentAlignment="Center"
+                         ToolTip="A new folder; existing exports are never overwritten" />
+            </DockPanel>
+            <TextBlock x:Name="SaveText" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource TextSecondary}" />
+            <ProgressBar x:Name="ProgressBar" Height="4" Margin="0,14,0,8" Visibility="Collapsed" IsIndeterminate="True" />
+            <TextBox x:Name="StatusText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
+                     Foreground="{StaticResource TextPrimary}"
+                     MaxHeight="125" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0" />
+        </StackPanel>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="OpenButton" Content="Open folder" Click="Open_Click" Visibility="Collapsed"
+                    Style="{StaticResource NeutralButton}" Height="36" Padding="14,4" Margin="0,0,8,0" />
+            <Button x:Name="CloseButton" Content="Cancel" IsCancel="True" Style="{StaticResource NeutralButton}" Height="36" Padding="14,4" Margin="0,0,8,0" />
+            <Button x:Name="ExportButton" Content="Export map" IsDefault="True" Click="Export_Click"
+                    Style="{StaticResource AccentButton}" Height="36" Padding="14,4" />
+        </StackPanel>
+    </Grid>
+</Window>
