@@ -235,12 +235,13 @@ public sealed class EditorTools
         [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
         [Description("Only triangles whose material name contains this. Omit for any material.")] string? material = null,
         [Description("Hide the triangles. Default false: report only.")] bool apply = false,
-        [Description("How many of the found triangles to list (0-500). Default 40.")] int sample = 40)
+        [Description("How many of the found triangles to list (0-500). Default 40.")] int sample = 40,
+        [Description("What to do when other objects draw the same geometry (the districts reuse it heavily): omit to refuse, 'own' gives this mesh a copy of the geometry of its own first and cuts it alone, 'all' hides the triangles on every object that draws it.")] string? shared = null)
     {
         try
         {
             HiddenTrianglesInfo? result = null;
-            string? refused = await ui.RunAsync(() => editor.HideTriangles(name, boxMin, boxMax, material, apply, sample, out result));
+            string? refused = await ui.RunAsync(() => editor.HideTriangles(name, boxMin, boxMax, material, apply, sample, shared, out result));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, hidden = result });
         }
         catch (Exception ex)

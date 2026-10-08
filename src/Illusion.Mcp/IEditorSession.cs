@@ -161,8 +161,10 @@ public interface IEditorSession
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
     /// <summary>Finds — and with <paramref name="apply"/> hides, as one undoable edit — the triangles of a mesh
-    /// whose corners all lie inside a world-space box, without rebuilding the mesh. Null on success.</summary>
-    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
+    /// whose corners all lie inside a world-space box, without rebuilding the mesh. <paramref name="shared"/>
+    /// says what to do when other objects draw the same geometry: null refuses, "own" gives the mesh a copy of
+    /// its own first, "all" hides the triangles on every one of them. Null on success.</summary>
+    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample, string? shared,
         out HiddenTrianglesInfo? result);
 
     /// <summary>The material slots of a mesh; with <paramref name="slot"/> and <paramref name="material"/>, that

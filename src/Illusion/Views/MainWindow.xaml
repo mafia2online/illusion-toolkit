@@ -57,7 +57,7 @@
             <!-- What used to be reachable only through the MCP server: each item opens a window over the same
                  job the matching tool does, so the menu and an agent cannot drift apart. -->
             <MenuItem Header="Tools" SubmenuOpened="ToolsMenu_SubmenuOpened">
-                <MenuItem Header="Hide triangles in a box…" Click="HideTriangles_Click"
+                <MenuItem Header="Hide triangles…" Click="HideTriangles_Click"
                           ToolTip="Cut an opening in the selected mesh - a doorway, a pane of glass - without rebuilding it" />
                 <MenuItem x:Name="MirrorWinterItem" Header="Mirror to winter…" Click="MirrorWinter_Click" />
                 <Separator />

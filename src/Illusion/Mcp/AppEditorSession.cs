@@ -1198,11 +1198,16 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
-    public string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
+    public string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample, string? shared,
         out HiddenTrianglesInfo? result)
     {
         result = null;
         if (TargetHost is not { } host) return TargetNotOpen;
+        GeometryEditController.SharedGeometry sharing;
+        if (string.IsNullOrWhiteSpace(shared)) sharing = GeometryEditController.SharedGeometry.Refuse;
+        else if (string.Equals(shared, "own", StringComparison.OrdinalIgnoreCase)) sharing = GeometryEditController.SharedGeometry.OwnCopy;
+        else if (string.Equals(shared, "all", StringComparison.OrdinalIgnoreCase)) sharing = GeometryEditController.SharedGeometry.All;
+        else return "shared is 'own' or 'all', or left out";
         if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 } || boxMin.Concat(boxMax).Any(v => !float.IsFinite(v)))
             return "boxMin and boxMax are [x, y, z], finite numbers";
         if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
@@ -1213,7 +1218,12 @@ internal sealed class AppEditorSession : IEditorSession
             return notAMesh;
         }
         Assets.Sds.TriangleHider.Plan plan = found!;
-        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node!, plan.Changes) is { } refused) return refused;
+        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node!, plan.Changes, sharing) is { } refused)
+        {
+            return sharing == GeometryEditController.SharedGeometry.Refuse && host.GeometryEditing.GeometrySharersOf(node!) is { Count: > 0 } others
+                ? $"{refused} ({others.Count}: {others.Names}) — shared: 'own' cuts this mesh alone, 'all' cuts every one of them"
+                : refused;
+        }
 
         static float[] P(Vector3 v) => [v.X, v.Y, v.Z];
         int levels = plan.Triangles.Count == 0 ? 0 : plan.Triangles.Max(t => t.Lod) + 1;
@@ -1237,6 +1247,23 @@ internal sealed class AppEditorSession : IEditorSession
         }
         plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform, min, max,
             string.IsNullOrWhiteSpace(material) ? null : material);
+        return null;
+    }
+
+    /// <summary>The same for triangles picked one by one on the mesh's first level of detail (Tools → Hide
+    /// triangles, by clicking): the plan that hides them and what lies on them on the other levels, and how many
+    /// levels the mesh has. Null on success.</summary>
+    internal static string? PlanPickedTriangles(SceneNode node, IReadOnlyCollection<int> picked, out Assets.Sds.TriangleHider.Plan? plan,
+        out int levels)
+    {
+        plan = null;
+        levels = 0;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
+        {
+            return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
+        }
+        levels = mesh.Geometry?.LOD?.Length ?? 0;
+        plan = Assets.Sds.TriangleHider.FindPicked(mesh, ((IFrameNode)adapter).WorldTransform, picked);
         return null;
     }
 

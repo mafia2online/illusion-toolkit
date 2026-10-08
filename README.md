@@ -258,9 +258,11 @@ resource changed size. A repacked stock car states exactly what the original did
 What the MCP server can do to a scene, the menus can too: each item under **Tools** opens a window
 over the same job the matching tool runs, so a result does not depend on who asked for it.
 
-- **Hide triangles in a box…** (map and resource editor) - cuts an opening in the selected mesh
-  without rebuilding it: a doorway in a stock wall, a pane of glass. The window follows the
-  selection, counts what the box holds as the numbers change, and hides it as one undo step.
+- **Hide triangles…** (map and resource editor) - cuts an opening in the selected mesh without
+  rebuilding it: a doorway in a stock wall, a pane of glass. With the window open the triangles are
+  picked by clicking them on the mesh in the viewport (a click on a marked one takes it back), or -
+  for many at once - by a box that holds them. What would be hidden is marked on the mesh, the count
+  says what goes on each level of detail, and Hide is one undo step.
 - **Mirror to winter…** (map editor) - carries the loaded district's edits into its winter archive.
   The item is greyed out, and says why, when the district has no winter variant or the winter one is
   what is loaded.
