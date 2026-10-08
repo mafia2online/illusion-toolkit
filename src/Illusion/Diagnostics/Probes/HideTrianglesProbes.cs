@@ -122,6 +122,88 @@ internal static class HideTrianglesProbes
                 && TriangleHider.Find(mesh, world, min, max, "no_such_material_name").Triangles.Count == 0, wanted);
             Check("a box elsewhere finds nothing",
                 TriangleHider.Find(mesh, world, max + new Vector3(5000f), max + new Vector3(5001f)).Changes.Count == 0);
+
+            // Picked by a click: a ray from just off the first triangle, straight at its middle, meets it; the
+            // plan made of that one pick hides it and - on the other levels - only what lies on it.
+            Vector3 middle = (corners[0] + corners[1] + corners[2]) / 3f;
+            Vector3 normal = Vector3.Normalize(Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]));
+            TriangleHider.Picked? hit = TriangleHider.Pick(mesh, world, middle + (normal * 0.02f), -normal);
+            Check("a ray at a triangle's middle meets it, from either side",
+                hit != null && MathF.Abs(hit.Distance - 0.02f) < 0.005f
+                && TriangleHider.Pick(mesh, world, middle - (normal * 0.02f), normal) is { } behind && MathF.Abs(behind.Distance - 0.02f) < 0.005f,
+                hit == null ? "no hit" : $"index {hit.Index} at {hit.Distance:F3} m (the first slot starts at {slot.StartIndex})");
+            Check("a ray pointing away from the mesh meets nothing",
+                TriangleHider.Pick(mesh, world, max + new Vector3(5000f), Vector3.Normalize(Vector3.One)) == null);
+            if (hit != null)
+            {
+                TriangleHider.Plan picked = TriangleHider.FindPicked(mesh, world, new HashSet<int> { hit.Index });
+                Check("one pick is one triangle of the first level, the one that was met",
+                    picked.Triangles.Count(t => t.Lod == 0) == 1 && picked.Triangles.First(t => t.Lod == 0) == hit.Triangle,
+                    string.Join(", ", Enumerable.Range(0, mesh.Geometry.LOD.Length).Select(l => $"LOD {l}: {picked.Triangles.Count(t => t.Lod == l)}")));
+                Vector3 lo = Vector3.Min(hit.Triangle.A, Vector3.Min(hit.Triangle.B, hit.Triangle.C)) - new Vector3(0.06f);
+                Vector3 hi = Vector3.Max(hit.Triangle.A, Vector3.Max(hit.Triangle.B, hit.Triangle.C)) + new Vector3(0.06f);
+                Check("what goes with it on the other levels lies on it",
+                    picked.Triangles.Where(t => t.Lod > 0).All(t => new[] { t.A, t.B, t.C }.All(p =>
+                        p.X >= lo.X && p.Y >= lo.Y && p.Z >= lo.Z && p.X <= hi.X && p.Y <= hi.Y && p.Z <= hi.Z)));
+                Check("picking changes nothing", mesh.GetIndexBuffer(0)!.GetData().AsSpan().SequenceEqual(original));
+                Check("no pick, or a pick that is no triangle's start, hides nothing",
+                    TriangleHider.FindPicked(mesh, world, new HashSet<int>()).Changes.Count == 0
+                    && TriangleHider.FindPicked(mesh, world, new HashSet<int> { hit.Index + 1, -3, int.MaxValue }).Triangles.Count == 0);
+                foreach (TriangleHider.Change change in picked.Changes) change.Buffer.SetData(change.After);
+                Check("a hidden triangle is not met by the same ray again",
+                    TriangleHider.Pick(mesh, world, middle + (normal * 0.02f), -normal)?.Index != hit.Index
+                    && TriangleHider.FindPicked(mesh, world, new HashSet<int> { hit.Index }).Triangles.Count == 0);
+                foreach (TriangleHider.Change change in picked.Changes) change.Buffer.SetData(change.Before);
+                Check("...and restoring puts every index back", mesh.GetIndexBuffer(0)!.GetData().AsSpan().SequenceEqual(original));
+            }
+
+            // A mesh whose geometry other frames draw too, given a block and buffers of its own - what lets its
+            // triangles be hidden without the others losing theirs.
+            var document = new Illusion.Assets.Adapters.SceneDocumentAdapter(scene.FrameResource!, sds);
+            FrameObjectSingleMesh? shared = scene.FrameResource!.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
+                .FirstOrDefault(m => m.GetType() == typeof(FrameObjectSingleMesh) && m.Geometry?.LOD is { Length: > 0 }
+                    && m.GetIndexBuffer(0) != null && document.GeometrySharers(m).Count > 0 && SdsMeshLoader.DecodeLod(m, 0) != null);
+            Check("a mesh that shares its geometry to try", shared != null, shared == null ? "none in this district" :
+                $"{shared.Name.String}: {document.GeometrySharers(shared).Count} other frame(s) on its block");
+            if (shared != null)
+            {
+                byte[] sceneBefore = scene.FrameResource!.WriteToStream();
+                Illusion.Formats.Frames.Resources.FrameGeometry block = shared.Geometry;
+                FrameObjectSingleMesh other = document.GeometrySharers(shared)[0];
+                DecodedMesh was = SdsMeshLoader.DecodeLod(shared, 0)!;
+                uint[] sharedIndices = (uint[])shared.GetIndexBuffer(0)!.GetData().Clone();
+                int vertexBuffers = scene.FrameResource.VertexBuffers.Buffers.Count, indexBuffers = scene.FrameResource.IndexBuffers.Buffers.Count;
+
+                Illusion.Assets.Frames.FrameDuplicator.OwnedGeometry? owned =
+                    Illusion.Assets.Frames.FrameDuplicator.TryOwnGeometry(document, document.Node(shared), out string? noCopy);
+                Check("it is given a block of its own, and the others stay on theirs",
+                    owned != null && !ReferenceEquals(shared.Geometry, block) && ReferenceEquals(other.Geometry, block)
+                    && document.GeometrySharers(shared).Count == 0, noCopy ?? "");
+                if (owned != null)
+                {
+                    DecodedMesh now = SdsMeshLoader.DecodeLod(shared, 0)!;
+                    Check("...which holds what the shared one held, in buffers of its own",
+                        now.Positions.AsSpan().SequenceEqual(was.Positions) && now.Indices.AsSpan().SequenceEqual(was.Indices)
+                        && !ReferenceEquals(shared.GetIndexBuffer(0), other.GetIndexBuffer(0))
+                        && !ReferenceEquals(shared.GetVertexBuffer(0), other.GetVertexBuffer(0))
+                        && ReferenceEquals(owned.CopyOf(other.GetIndexBuffer(0)!), shared.GetIndexBuffer(0)));
+                    Vector3[] tri = [.. Enumerable.Range(0, 3).Select(k => Vector3.Transform(now.Positions[now.Indices[k]], shared.WorldTransform))];
+                    TriangleHider.Plan alone = TriangleHider.Find(shared, shared.WorldTransform,
+                        Vector3.Min(tri[0], Vector3.Min(tri[1], tri[2])) - new Vector3(0.05f), Vector3.Max(tri[0], Vector3.Max(tri[1], tri[2])) + new Vector3(0.05f));
+                    foreach (TriangleHider.Change change in alone.Changes) change.Buffer.SetData(change.After);
+                    Check("triangles hidden in it are not hidden in the shared block",
+                        alone.Changes.Count > 0 && other.GetIndexBuffer(0)!.GetData().AsSpan().SequenceEqual(sharedIndices)
+                        && !shared.GetIndexBuffer(0)!.GetData().AsSpan().SequenceEqual(sharedIndices), $"{alone.Triangles.Count} triangle(s)");
+                    Check("the scene with the new block writes and reads back with the mesh on it",
+                        Reread(scene.FrameResource.WriteToStream(), shared.Name.String) is { } again && again.Geometry.LOD.Length == shared.Geometry.LOD.Length
+                        && again.Geometry.LOD[0].IndexBufferRef.Hash == shared.Geometry.LOD[0].IndexBufferRef.Hash);
+                    owned.Revert();
+                    Check("taking it back leaves the scene and the pools as they were, byte for byte",
+                        ReferenceEquals(shared.Geometry, block) && scene.FrameResource.WriteToStream().AsSpan().SequenceEqual(sceneBefore)
+                        && scene.FrameResource.VertexBuffers.Buffers.Count == vertexBuffers && scene.FrameResource.IndexBuffers.Buffers.Count == indexBuffers
+                        && shared.GetIndexBuffer(0)!.GetData().AsSpan().SequenceEqual(sharedIndices));
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -132,6 +214,21 @@ internal static class HideTrianglesProbes
         {
             sb.Insert(0, $"HIDE TRIANGLES PROBE: {pass} passed, {fail} failed\n\n");
             File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
+    // A scene written to memory, read again, and the mesh of that name in it.
+    private static FrameObjectSingleMesh? Reread(byte[] sceneBytes, string name)
+    {
+        string file = Path.Combine(Path.GetTempPath(), "illusion_hide_triangles_scene.fr");
+        File.WriteAllBytes(file, sceneBytes);
+        try
+        {
+            return new FrameResource(file).FrameObjects.Values.OfType<FrameObjectSingleMesh>().FirstOrDefault(m => m.Name.String == name);
+        }
+        finally
+        {
+            File.Delete(file);
         }
     }
 }

@@ -7,11 +7,12 @@
         ResizeMode="NoResize" ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner">
 
-    <!-- Tools → Hide triangles in a box…: cuts an opening in a mesh without rebuilding it - a doorway in a
-         stock wall, a pane of glass, a row of tree billboards. Every triangle whose three corners lie inside
-         the box is hidden, on every level of detail. The window stays open beside the viewport and follows
-         the selection; the edit is one undo step. Visual language comes from the shared EditorStyles
-         dictionary, like CrashObjectWindow. -->
+    <!-- Tools → Hide triangles…: cuts an opening in a mesh without rebuilding it - a doorway in a stock wall,
+         a pane of glass, a row of tree billboards. The triangles are picked by clicking them in the viewport
+         or, for many at once, by a box: every triangle whose three corners lie inside it. What would be hidden
+         is marked on the mesh. The window stays open beside the viewport and follows the selection; the edit
+         is one undo step. Visual language comes from the shared EditorStyles dictionary, like
+         CrashObjectWindow. -->
 
     <Grid>
         <Grid.RowDefinitions>
@@ -24,16 +25,42 @@
             <TextBlock x:Name="MeshText" FontSize="13" Foreground="White" TextTrimming="CharacterEllipsis"
                        Margin="0,0,0,14" Text="Select a mesh in the scene" />
 
-            <v:Vector3Box x:Name="MinBox" Label="Box, lower corner" Decimals="2" Margin="0,0,0,8" />
-            <v:Vector3Box x:Name="MaxBox" Label="Box, upper corner" Decimals="2" Margin="0,0,0,8" />
-            <Button x:Name="WholeMeshBtn" Style="{StaticResource NeutralButton}" HorizontalAlignment="Left"
-                    Height="28" Padding="12,0" Margin="0,0,0,14" Content="Box around the mesh"
-                    ToolTip="Set the box to the whole mesh, then narrow it down"
-                    Click="WholeMesh_Click" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                <RadioButton x:Name="ClickModeBtn" Content="Click triangles" IsChecked="True" GroupName="HideMode"
+                             Style="{StaticResource PreviewModeToggle}" Padding="12,5" FontSize="12"
+                             Checked="Mode_Changed" />
+                <RadioButton x:Name="BoxModeBtn" Content="Box" GroupName="HideMode" Margin="6,0,0,0"
+                             Style="{StaticResource PreviewModeToggle}" Padding="12,5" FontSize="12"
+                             Checked="Mode_Changed" />
+            </StackPanel>
 
-            <TextBlock Style="{StaticResource DimLabel}" Text="Material" Margin="0,0,0,4" />
-            <ComboBox x:Name="MaterialCombo" Margin="0,0,0,14" SelectionChanged="Material_Changed"
-                      ToolTip="Only triangles drawn with this material. A stock mesh often carries no material names - the box alone has to do then." />
+            <StackPanel x:Name="ClickPanel">
+                <TextBlock Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,10"
+                           Text="Click the triangles of this mesh in the viewport. A click on a marked one takes it back." />
+                <Button x:Name="ClearBtn" Style="{StaticResource NeutralButton}" HorizontalAlignment="Left"
+                        Height="28" Padding="12,0" Margin="0,0,0,14" Content="Clear the picks" IsEnabled="False"
+                        Click="Clear_Click" />
+            </StackPanel>
+
+            <StackPanel x:Name="BoxPanel" Visibility="Collapsed">
+                <v:Vector3Box x:Name="MinBox" Label="Box, lower corner" Decimals="2" Margin="0,0,0,8" />
+                <v:Vector3Box x:Name="MaxBox" Label="Box, upper corner" Decimals="2" Margin="0,0,0,8" />
+                <Button x:Name="WholeMeshBtn" Style="{StaticResource NeutralButton}" HorizontalAlignment="Left"
+                        Height="28" Padding="12,0" Margin="0,0,0,14" Content="Box around the mesh"
+                        ToolTip="Set the box to the whole mesh, then narrow it down"
+                        Click="WholeMesh_Click" />
+
+                <TextBlock Style="{StaticResource DimLabel}" Text="Material" Margin="0,0,0,4" />
+                <ComboBox x:Name="MaterialCombo" Margin="0,0,0,14" SelectionChanged="Material_Changed"
+                          ToolTip="Only triangles drawn with this material. A stock mesh often carries no material names - the box alone has to do then." />
+            </StackPanel>
+
+            <!-- A mesh whose geometry other objects draw too: the districts reuse a shape heavily, and there is
+                 one copy of it in the file. Shown only for such a mesh. -->
+            <StackPanel x:Name="SharedPanel" Visibility="Collapsed" Margin="0,0,0,14">
+                <TextBlock x:Name="SharedText" Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                <ComboBox x:Name="SharedCombo" />
+            </StackPanel>
 
             <Border Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
                     BorderThickness="1" CornerRadius="4" Padding="12,10">
@@ -47,7 +74,7 @@
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="210"
                            TextWrapping="Wrap" VerticalAlignment="Center"
-                           Text="World coordinates. Hide, look, and Undo (Ctrl+Z) if the box was off." />
+                           Text="What is marked on the mesh is what Hide takes out. Undo (Ctrl+Z) brings it back." />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
                             Content="Close" Click="Close_Click" />

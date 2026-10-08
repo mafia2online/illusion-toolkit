@@ -43,7 +43,7 @@
             <!-- What used to be reachable only through the MCP server: each item opens a window over the same
                  job the matching tool does, so the menu and an agent cannot drift apart. -->
             <MenuItem Header="Tools">
-                <MenuItem Header="Hide triangles in a box…" Click="HideTriangles_Click"
+                <MenuItem Header="Hide triangles…" Click="HideTriangles_Click"
                           ToolTip="Hide the triangles of the selected mesh that lie inside a box, without rebuilding it" />
                 <Separator />
                 <MenuItem Header="Clone car…" Click="CloneCar_Click"

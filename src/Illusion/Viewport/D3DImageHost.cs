@@ -1198,6 +1198,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     // multi-selection (a miss is ignored); a plain click replaces the selection (or clears it on a miss).
     protected override void OnViewportLeftClick(Point pos)
     {
+        // A tool that is picking on the scene (Tools → Hide triangles picks triangles) is offered the click
+        // first; what it does not take is an ordinary click.
+        if (SceneClickTaker is { } taker && taker(pos)) return;
+
         // With the Loading zones layer up a click picks a ZONE and nothing else: the zone is then what the tool
         // shelf's Move and Scale act on, and an object picked by the same click would be a second thing under
         // the same gizmo. Objects are picked with the layer off.
@@ -1213,6 +1217,52 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
             if (hit != null) ToggleSelect(hit);
         }
         else Select(hit);
+    }
+
+    /// <summary>While set, a left click on the scene is offered to it before anything is selected; true means
+    /// the click was its own. One tool at a time: the tool that sets it clears it.</summary>
+    internal Func<Point, bool>? SceneClickTaker { get; set; }
+
+    /// <summary>
+    /// The triangle of a mesh node under a screen pixel, as the eye has it: of the first level of detail, and
+    /// only when nothing of the scene stands in front of it there. Null when the node is not a mesh, the pixel
+    /// misses it, or something covers it.
+    /// </summary>
+    internal TriangleHider.Picked? PickTriangle(SceneNode node, Point pos)
+    {
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter) return null;
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
+        TriangleHider.Picked? hit = TriangleHider.Pick(mesh, ((IFrameNode)adapter).WorldTransform, origin, dir);
+        if (hit == null) return null;
+        // nearer scenery at this pixel means the triangle is behind it: what cannot be seen is not picked
+        float nearest = PickMesh(pos, out float meshT) != null ? meshT : float.PositiveInfinity;
+        return nearest < hit.Distance - MathF.Max(0.05f, hit.Distance * 0.002f) ? null : hit;
+    }
+
+    /// <summary>Marks triangles in the viewport as a tool's pick - their edges, and a stroke to each corner so a
+    /// small one still reads as filled. An empty list takes the marks away.</summary>
+    internal void ShowPickedTriangles(IReadOnlyList<TriangleHider.Triangle> triangles)
+    {
+        if (Rnd == null) return;
+        var lines = new List<Vector3>(triangles.Count * 12);
+        var colours = new List<Vector4>(triangles.Count * 12);
+        var edge = new Vector4(1f, 0.62f, 0.22f, 1f);
+        var inner = new Vector4(1f, 0.62f, 0.22f, 0.45f);
+        foreach (TriangleHider.Triangle t in triangles)
+        {
+            Vector3 centre = (t.A + t.B + t.C) / 3f;
+            foreach ((Vector3 from, Vector3 to, Vector4 colour) in new[]
+                     {
+                         (t.A, t.B, edge), (t.B, t.C, edge), (t.C, t.A, edge), (centre, t.A, inner), (centre, t.B, inner), (centre, t.C, inner),
+                     })
+            {
+                lines.Add(from);
+                lines.Add(to);
+                colours.Add(colour);        // one for each end of the line
+                colours.Add(colour);
+            }
+        }
+        Rnd.SetPickedTriangleLines(lines, colours);
     }
 
     /// <summary>Raised by a click on the scene while the Loading zones layer is shown: the world point clicked

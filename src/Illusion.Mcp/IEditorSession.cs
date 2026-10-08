@@ -161,8 +161,10 @@ public interface IEditorSession
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
     /// <summary>Finds — and with <paramref name="apply"/> hides, as one undoable edit — the triangles of a mesh
-    /// whose corners all lie inside a world-space box, without rebuilding the mesh. Null on success.</summary>
-    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample,
+    /// whose corners all lie inside a world-space box, without rebuilding the mesh. <paramref name="shared"/>
+    /// says what to do when other objects draw the same geometry: null refuses, "own" gives the mesh a copy of
+    /// its own first, "all" hides the triangles on every one of them. Null on success.</summary>
+    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample, string? shared,
         out HiddenTrianglesInfo? result);
 
     /// <summary>The material slots of a mesh; with <paramref name="slot"/> and <paramref name="material"/>, that
@@ -209,4 +211,9 @@ public interface IEditorSession
     /// is written. With it the scene, the frame name table and cityareas.bin are saved to the working copy.
     /// Null on success.</summary>
     string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone);
+
+    /// <summary>Takes a load zone that was ADDED to the game's own out of the base city_univers.sds again: its
+    /// volume, its place in the frame name table and its line in cityareas.bin. Without <paramref name="apply"/>
+    /// nothing is written. A zone the game ships with is refused. Null on success.</summary>
+    string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone);
 }

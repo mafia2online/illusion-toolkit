@@ -251,9 +251,11 @@ resource changed size. A repacked stock car states exactly what the original did
 What the MCP server can do to a scene, the menus can too: each item under **Tools** opens a window
 over the same job the matching tool runs, so a result does not depend on who asked for it.
 
-- **Hide triangles in a box…** (map and resource editor) - cuts an opening in the selected mesh
-  without rebuilding it: a doorway in a stock wall, a pane of glass. The window follows the
-  selection, counts what the box holds as the numbers change, and hides it as one undo step.
+- **Hide triangles…** (map and resource editor) - cuts an opening in the selected mesh without
+  rebuilding it: a doorway in a stock wall, a pane of glass. With the window open the triangles are
+  picked by clicking them on the mesh in the viewport (a click on a marked one takes it back), or -
+  for many at once - by a box that holds them. What would be hidden is marked on the mesh, the count
+  says what goes on each level of detail, and Hide is one undo step.
 - **Mirror to winter…** (map editor) - carries the loaded district's edits into its winter archive.
   The item is greyed out, and says why, when the district has no winter variant or the winter one is
   what is loaded.
@@ -273,8 +275,9 @@ over the same job the matching tool runs, so a result does not depend on who ask
   save does not put the zone back.
   The layer draws each zone as the edges of its box with a faint fill, hidden by the scene in front of
   it and fading with distance (not in a parallel view); a zone with one word in its name - which does
-  not load its district by itself - is drawn fainter, and the picked zone carries its name and
-  districts over it.
+  not load its district by itself - is drawn fainter, the picked zone carries its name and
+  districts over it, and a zone that was added to the game's own has a second, near-white frame
+  round it (and "added" in its label and in the Loading zones list).
   **New loading zone** (the button at the foot of the tool shelf, with the layer on) makes a zone
   where the view looks: a name and the one or two districts it keeps loaded are asked, the box appears
   picked, and Move and Scale put it in place. The name wants two words after its number
@@ -294,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 85 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 86 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -313,7 +316,7 @@ map editor itself.
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
-| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create` |
+| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create`, `zone_delete` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -343,7 +346,9 @@ the game: a district streams in where a zone named with two words after its numb
 `zone_create` adds a new zone: a box between two corners, made like an existing zone, with a line in
 `cityareas.bin` for the districts it keeps loaded. Measured in the game, with new zones over one
 spot: a player who appears inside a zone named `AREA901_FOO_BAR` gets the district - with one
-district in the table or two - and inside one named `AREA902_FOOXBAR` he does not.
+district in the table or two - and inside one named `AREA902_FOOXBAR` he does not. With the map
+editor open the new zone is a step of its history; `zone_delete` takes an added zone out again (a
+zone the game ships with is refused). Zones are made in the base game's `city_univers` only.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and

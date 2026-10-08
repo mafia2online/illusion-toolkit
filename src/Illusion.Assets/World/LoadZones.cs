@@ -103,6 +103,27 @@ public sealed class LoadZones
     public static bool LoadsOnArrival(string? name) =>
         (name ?? "").Split(['_', '-'], StringSplitOptions.RemoveEmptyEntries).Length >= 3;
 
+    private static readonly Lazy<HashSet<string>> Shipped = new(() =>
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        System.Reflection.Assembly assembly = typeof(LoadZones).Assembly;
+        string? resource = assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("ShippedLoadZones.txt", StringComparison.Ordinal));
+        if (resource == null || assembly.GetManifestResourceStream(resource) is not { } stream) return names;
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is { } line)
+        {
+            if (line.Trim() is { Length: > 0 } name) names.Add(name);
+        }
+        return names;
+    });
+
+    /// <summary>
+    /// Whether a volume of this name came with the game: it is on the list of the AREA volumes the base game's
+    /// <c>city_univers</c> and the DLC copies ship with. One that is not was ADDED - by <see cref="Create"/>, here
+    /// or on the machine the archive came from - and is the kind that is marked in the layer and may be taken out.
+    /// </summary>
+    public static bool IsShipped(string? name) => name != null && Shipped.Value.Contains(name);
+
     /// <summary>How a copy is named to the user: "base", or the DLC's folder name.</summary>
     public static string CopyName(FileInfo copy)
     {

@@ -483,6 +483,11 @@ internal static class WorldProbes
                             && zones.Volumes.Keys.Count(LoadZones.LoadsOnArrival) > 500,
                             $"{zones.Volumes.Keys.Count(LoadZones.LoadsOnArrival)} of {zones.Volumes.Count} volumes are named as seams");
 
+                        Check("a zone the game ships with is told from one that was added",
+                            LoadZones.IsShipped(South) && LoadZones.IsShipped("AREA0223-DIPTON-KINGSTONE") && !LoadZones.IsShipped("AREA900_PROBE")
+                            && !LoadZones.IsShipped(null),
+                            $"{zones.Volumes.Keys.Count(z => !LoadZones.IsShipped(z))} added zone(s) in this copy");
+
                         // The districts are said as the table says them, and what is no district is refused whole.
                         string? junk = adding.Create("AREA902_PROBE", South, far, far + new Vector3(10), "no_such_district", null);
                         string? twice = adding.Create("AREA902_PROBE", South, far, far + new Vector3(10), "kingstone", "kingston");

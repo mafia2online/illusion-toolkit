@@ -165,9 +165,9 @@ internal sealed class ViewportCatalogs
         get
         {
             if (SelectedZone == null || Zones?.FirstOrDefault(z => z.Name == SelectedZone) is not { } zone) return null;
-            return LoadZones.LoadsOnArrival(zone.Name)
-                ? $"{zone.Name}  ·  {string.Join(" + ", zone.Districts)}"
-                : $"{zone.Name}  ·  {string.Join(" + ", zone.Districts)}  ·  does not load it by itself (one word in its name)";
+            string label = $"{zone.Name}  ·  {string.Join(" + ", zone.Districts)}";
+            if (!LoadZones.IsShipped(zone.Name)) label += "  ·  added";
+            return LoadZones.LoadsOnArrival(zone.Name) ? label : label + "  ·  does not load it by itself (one word in its name)";
         }
     }
 
@@ -235,13 +235,15 @@ internal sealed class ViewportCatalogs
             float h = d != null && hue.TryGetValue(d, out int i) ? (float)i / count : 0.5f;
             Vector4 colour = HueToColor(h, 1f);
             // a zone named as a seam is the kind that loads its districts for a player who appears in it
-            boxes.Add(new Rendering.Passes.ZoneBox(z.Min, z.Max, new Vector3(colour.X, colour.Y, colour.Z), LoadZones.LoadsOnArrival(z.Name), Picked: false));
+            boxes.Add(new Rendering.Passes.ZoneBox(z.Min, z.Max, new Vector3(colour.X, colour.Y, colour.Z), LoadZones.LoadsOnArrival(z.Name), Picked: false,
+                Added: !LoadZones.IsShipped(z.Name)));
         }
         // last, so it is laid over the rest: the accent the editor selects with
         if (picked != null)
         {
             (Vector3 min, Vector3 max) = _preview ?? (picked.Min, picked.Max);
-            boxes.Add(new Rendering.Passes.ZoneBox(min, max, new Vector3(0.91f, 0.53f, 0.24f), LoadZones.LoadsOnArrival(picked.Name), Picked: true));
+            boxes.Add(new Rendering.Passes.ZoneBox(min, max, new Vector3(0.91f, 0.53f, 0.24f), LoadZones.LoadsOnArrival(picked.Name), Picked: true,
+                Added: !LoadZones.IsShipped(picked.Name)));
         }
         _host.Rnd!.SetZoneBoxes(boxes);
     }

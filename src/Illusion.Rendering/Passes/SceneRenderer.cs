@@ -31,6 +31,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly HelperGlyphRenderer _helperHighlightRenderer;
     private readonly LineOverlayRenderer _partShapeRenderer;
     private readonly LineOverlayRenderer _hitBoxRenderer;
+    private readonly LineOverlayRenderer _pickedRenderer;
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
@@ -166,6 +167,16 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// <summary>Drops the hit-box wireframe — what a scene reset owes this layer.</summary>
     public void ClearHitBoxes() => _hitBoxRenderer.Clear();
 
+    /// <summary>
+    /// Replaces the outline of the triangles picked for a tool (Tools → Hide triangles marks the ones a click
+    /// chose). Drawn whenever there are any - it is not a layer to switch, it is the tool's own selection - and
+    /// gone with an empty list.
+    /// </summary>
+    public void SetPickedTriangleLines(IReadOnlyList<Vector3> lineVertices, IReadOnlyList<Vector4> colors) =>
+        _pickedRenderer.SetDistrict(PickedKey, lineVertices, colors);
+
+    private static readonly object PickedKey = new();
+
     private static readonly object HitBoxKey = new();
 
     /// <summary>Removes one archive's rig (district unload).</summary>
@@ -299,6 +310,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _helperHighlightRenderer = new HelperGlyphRenderer(_linePass);
         _partShapeRenderer = new LineOverlayRenderer(_linePass);
         _hitBoxRenderer = new LineOverlayRenderer(_linePass);
+        _pickedRenderer = new LineOverlayRenderer(_linePass);
         _actorRenderer = new ActorMarkerRenderer(_linePass);
         _actorSelectionRenderer = new ActorMarkerRenderer(_linePass);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
@@ -596,6 +608,9 @@ public sealed unsafe class SceneRenderer : IDisposable
         {
             _hitBoxRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 1f, 1f, 0.55f), 1.2f));
         }
+
+        // The triangles a tool has picked, in their own colours.
+        if (_pickedRenderer.HasData) _pickedRenderer.Render(ctx, overlayFrame, RigStyle(Vector4.One, 2.2f));
 
         // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per segment
         // (per category), so the tint stays neutral.
@@ -903,6 +918,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _helperHighlightRenderer.Dispose();
         _partShapeRenderer.Dispose();
         _hitBoxRenderer.Dispose();
+        _pickedRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
         _linePass.Dispose();
