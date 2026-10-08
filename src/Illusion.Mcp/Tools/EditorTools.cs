@@ -226,7 +226,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "mesh_hide_triangles")]
-    [Description("Cut an opening into a mesh WITHOUT rebuilding it: the triangles of the named mesh whose three corners all lie inside a world-space box are hidden on every level of detail (their indices are pointed at one vertex). No vertex is touched, so a stock facade keeps the channels Blender never sees (shadow-map UVs) — use this, not a Blender push, to open a painted door or garage shutter of a stock building. By default it only REPORTS what the box would take (count per LOD and the first triangles with their material and corners); pass apply=true to hide them as one undoable edit. Saved by editor_save, packed by editor_build. Refused for a mesh that shares its geometry with other objects.")]
+    [Description("Cut an opening into a mesh WITHOUT rebuilding it: the triangles of the named mesh whose three corners all lie inside a world-space box are hidden on every level of detail (their indices are pointed at one vertex). No vertex is touched, so a stock facade keeps the channels Blender never sees (shadow-map UVs) — use this, not a Blender push, to open a painted door or garage shutter of a stock building. By default it only REPORTS what the box would take (count per LOD and the first triangles with their material and corners); pass apply=true to hide them as one undoable edit. Saved by editor_save, packed by editor_build. A mesh that shares its geometry with other objects is refused unless 'shared' says what to do about them.")]
     public static async Task<string> MeshHideTriangles(
         IEditorSession editor,
         IUiThreadMarshal ui,
