@@ -68,6 +68,7 @@
                 <Border Height="1" Background="{StaticResource EdgeStrong}" Margin="4,10,4,0" />
                 <ToggleButton x:Name="ToolNewZone" Margin="0,10,0,0" IsEnabled="False"
                               Style="{StaticResource ToolToggleButton}" Checked="NewZone_Opened"
+                              ToolTipService.ShowOnDisabled="True"
                               ToolTip="New loading zone - switch the Loading zones layer on (Layers) to use it">
                     <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
                           Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" StrokeLineJoin="Round"
@@ -76,15 +77,18 @@
                 </ToggleButton>
                 <Popup x:Name="NewZonePopup" IsOpen="{Binding IsChecked, ElementName=ToolNewZone, Mode=TwoWay}" StaysOpen="False"
                        Placement="Right" PlacementTarget="{Binding ElementName=ToolNewZone}" HorizontalOffset="10"
-                       AllowsTransparency="True" PopupAnimation="Fade">
+                       AllowsTransparency="True" PopupAnimation="Fade" Closed="NewZone_Closed">
                     <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
-                            CornerRadius="6" Padding="14,12" Width="300">
+                            CornerRadius="6" Padding="14,12" Width="300" PreviewKeyDown="NewZone_KeyDown">
                         <StackPanel>
                             <TextBlock Text="New loading zone" Foreground="White" FontSize="13" FontWeight="SemiBold" />
                             <TextBlock Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,4,0,10"
-                                       Text="A box is made where the view looks and picked; Move and Scale then put it in place. A zone loads its districts for a player who appears inside it only when it names two." />
+                                       Text="A box is made where the view looks and picked; Move and Scale then put it in place. The game loads a zone's districts for a player who appears inside it when the zone's name has two words after its number (AREA900_DOCK_SOUTH)." />
                             <TextBlock Style="{StaticResource DimLabel}" Text="Name" Margin="0,0,0,3" />
-                            <TextBox x:Name="NewZoneName" Padding="6,4" MaxLength="60" />
+                            <TextBox x:Name="NewZoneName" Padding="6,4" MaxLength="60" TextChanged="NewZoneName_Changed" />
+                            <TextBlock x:Name="NewZoneNameHint" Foreground="#D9B36A" TextWrapping="Wrap" Margin="0,5,0,0"
+                                       Visibility="Collapsed"
+                                       Text="One word after the number: the game will not load the districts for a player who appears inside this zone. Two words do it - AREA900_DOCK_SOUTH." />
                             <TextBlock Style="{StaticResource DimLabel}" Text="Keeps loaded" Margin="0,10,0,3" />
                             <ComboBox x:Name="NewZoneDistrict1" />
                             <ComboBox x:Name="NewZoneDistrict2" Margin="0,6,0,0" />

@@ -473,6 +473,27 @@ internal static class WorldProbes
                         Check("...and so is the districts table with its line added and removed",
                             again.Add("AREA900_PROBE", "greenfield", "kingstone") == null && again.Remove("AREA900_PROBE") && !again.Remove("AREA900_PROBE")
                             && shipped.AsSpan().SequenceEqual(again.ToBytes()));
+                        Check("...and with a line that brought a district name of its own",
+                            again.Add("AREA901_PROBE", "a_new_district", "another_one") == null && again.Remove("AREA901_PROBE")
+                            && shipped.AsSpan().SequenceEqual(again.ToBytes()));
+
+                        Check("a zone loads its districts on arrival by its name: two words after the number, not one",
+                            LoadZones.LoadsOnArrival("AREA341_GREENFIELD_KINGSTONE") && LoadZones.LoadsOnArrival("AREA903_A_B")
+                            && !LoadZones.LoadsOnArrival("AREA0019_GREENFIELD") && !LoadZones.LoadsOnArrival("AREA902_FOOXBAR")
+                            && zones.Volumes.Keys.Count(LoadZones.LoadsOnArrival) > 500,
+                            $"{zones.Volumes.Keys.Count(LoadZones.LoadsOnArrival)} of {zones.Volumes.Count} volumes are named as seams");
+
+                        // The districts are said as the table says them, and what is no district is refused whole.
+                        string? junk = adding.Create("AREA902_PROBE", South, far, far + new Vector3(10), "no_such_district", null);
+                        string? twice = adding.Create("AREA902_PROBE", South, far, far + new Vector3(10), "kingstone", "kingston");
+                        Check("a district that is no archive of the city is refused, and so is one district named twice in two spellings",
+                            junk != null && twice != null && adding.Volumes.Count == volumes && original.AsSpan().SequenceEqual(adding.Frame.WriteToStream()),
+                            $"{junk} / {twice}");
+                        string? spelled = adding.Create("AREA902_PROBE", South, far, far + new Vector3(10), "GREENFIELD", "kingston");
+                        Check("a district is taken in either spelling and listed as the archive it is",
+                            spelled == null && adding.DistrictsOf("AREA902_PROBE").SequenceEqual(["greenfield", "kingstone"]), spelled ?? "");
+                        Check("...and taken out again leaves the scene as it was",
+                            adding.Delete("AREA902_PROBE") == null && original.AsSpan().SequenceEqual(adding.Frame.WriteToStream()));
                     }
 
                     Plan(zones, "greenfield", -1760, 1120, -1380, 1600, 20, 5);

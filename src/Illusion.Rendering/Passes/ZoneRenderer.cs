@@ -125,9 +125,11 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
     }
 
     /// <param name="eye">Where the camera stands: zones fade with their distance from it.</param>
+    /// <param name="parallel">The view is a parallel one (Top, Front...): the camera then stands wherever the
+    /// projection was framed from, which says nothing about how far a zone is - nothing fades.</param>
     /// <param name="depthRead">The scene's own "test, never write" depth state, so the scene hides what lies
     /// behind it.</param>
-    public void Render(ComPtr<ID3D11DeviceContext> ctx, Matrix4x4 viewProj, Vector3 eye,
+    public void Render(ComPtr<ID3D11DeviceContext> ctx, Matrix4x4 viewProj, Vector3 eye, bool parallel,
         ComPtr<ID3D11DepthStencilState> depthRead, IReadOnlyList<ZoneBox> boxes)
     {
         if (boxes == null || boxes.Count == 0) return;
@@ -155,8 +157,8 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
         {
             ZoneBox box = boxes[i];
             float distance = Vector3.Distance(eye, Vector3.Clamp(eye, box.Min, box.Max));
-            inside[i] = distance <= 0f;
-            fade[i] = box.Picked ? 1f : Math.Clamp(1f - ((distance - FadeFrom) / (FadeTo - FadeFrom)), 0f, 1f);
+            inside[i] = !parallel && distance <= 0f;
+            fade[i] = box.Picked || parallel ? 1f : Math.Clamp(1f - ((distance - FadeFrom) / (FadeTo - FadeFrom)), 0f, 1f);
         }
 
         void Draw(ZoneBox box, float alpha, float lighten, uint indices)

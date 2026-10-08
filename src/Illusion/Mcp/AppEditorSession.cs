@@ -1494,7 +1494,8 @@ internal sealed class AppEditorSession : IEditorSession
         zones = [.. all!.At(at, near).Select(z =>
         {
             (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
-            return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max));
+            return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max),
+                Assets.World.LoadZones.LoadsOnArrival(z.Name));
         })];
         districts = all.DistrictsAt(at);
         return null;
@@ -1543,10 +1544,8 @@ internal sealed class AppEditorSession : IEditorSession
             return "boxMin and boxMax are [x, y, z], finite numbers";
         if (districts is not { Length: 1 or 2 } || districts.Any(string.IsNullOrWhiteSpace)) return "districts is one or two district names";
         var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
-        // A new volume cannot be carried into a scene an editor already holds the way a moved one is: that
-        // editor would write its own scene, without the volume, over this one on its next save.
-        if (apply && (Assets.Sds.OpenArchives.HoldersOf(archive).Count > 0 || (Window?.Viewport.Streamer.IsLoading(archive) ?? false)))
-            return "city_univers is open in an editor (Whole map, or the resource editor) - leave it first";
+        // asked of a dry run too: one that says "it can be made" while the write would be refused says nothing
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
         try
         {
             IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
@@ -1564,7 +1563,7 @@ internal sealed class AppEditorSession : IEditorSession
                 ZoneWrites.Landed(zones, name);
             }
             (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
-            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi));
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name));
             return null;
         }
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))

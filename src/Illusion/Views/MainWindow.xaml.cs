@@ -179,6 +179,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The "new zone" flyout has the keyboard while it is open: with one of its lists focused nothing is a
+        // text field, and a letter meant for the list started a tool - or Delete took the selection out.
+        if (ToolShelf.IsFlyoutOpen)
+        {
+            base.OnPreviewKeyDown(e);
+            return;
+        }
+
         if ((!typing && (HandleViewportKey(key, modifiers, e.IsRepeat) || HandleBridgeKey(key, modifiers)))
             || EditorCommands.Handle(key, modifiers, this))
         {

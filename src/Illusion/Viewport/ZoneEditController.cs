@@ -116,7 +116,9 @@ internal sealed class ZoneEditController
 
     /// <summary>
     /// What a new zone made where the view looks would be: a name not taken yet and the two districts of the
-    /// nearest zone that loads districts - the neighbours a zone standing here most likely joins.
+    /// nearest zone that loads districts - the neighbours a zone standing here most likely joins. The name has
+    /// two words after its number either way: that is what makes the game load the districts for a player who
+    /// appears inside (<see cref="LoadZones.LoadsOnArrival"/>).
     /// </summary>
     public (string Name, string District1, string? District2) Suggest()
     {
@@ -127,7 +129,7 @@ internal sealed class ZoneEditController
         var taken = new HashSet<string>((_host.Catalogs.Zones ?? []).Select(z => z.Name), StringComparer.OrdinalIgnoreCase);
         for (int number = 900; ; number++)
         {
-            string name = $"AREA{number}_{first.ToUpperInvariant()}" + (second == null ? "" : "_" + second.ToUpperInvariant());
+            string name = $"AREA{number}_{first.ToUpperInvariant()}_{(second ?? "new").ToUpperInvariant()}";
             if (!taken.Contains(name)) return (name, first, second);
         }
     }
@@ -158,42 +160,66 @@ internal sealed class ZoneEditController
 
     private sealed record Created(string Name, string Like, Vector3 Min, Vector3 Max, string District1, string? District2)
     {
-        // The scene and the name table as they stood before the zone was made. Taking the zone out rebuilds
-        // the name table, and a rebuilt table is the same names in another order: with these the working copy
-        // is put back byte for byte when nothing else has changed the scene since.
-        public byte[]? SceneBefore { get; set; }
-        public byte[]? NamesBefore { get; set; }
+        // The three files the zone was written into, as they stood before it was made and as making it left
+        // them. Taking a zone out rebuilds the name table, and a rebuilt table is the same names in another
+        // order: while the files are still what the making left, undo puts back what they held before - byte
+        // for byte - and only when something else has written to them since is the zone taken out of the
+        // scene as it now stands.
+        public IReadOnlyDictionary<string, byte[]?>? Before { get; set; }
+        public IReadOnlyDictionary<string, byte[]?>? After { get; set; }
     }
 
-    // Adds a zone to the scene on disk, or takes it out again. Not possible while an editor holds city_univers
-    // as a document (Whole map): a volume cannot be carried into a scene that is already loaded the way a
-    // moved one is, and that editor's next save would write its own scene - without the volume - over this.
+    private static bool SameFiles(IReadOnlyDictionary<string, byte[]?> a, IReadOnlyDictionary<string, byte[]?> b) =>
+        a.Count == b.Count && a.All(file => b.TryGetValue(file.Key, out byte[]? other)
+            && (file.Value == null ? other == null : other != null && file.Value.AsSpan().SequenceEqual(other)));
+
+    // A zone made, moved, moved back and taken out: the scene is what it was before the zone, and the name table
+    // Save has just rebuilt says what the one from before said, in another order. The one from before is put
+    // back - when nothing but the making has written the name table since (`was` is the files as the undo found
+    // them). The zone is out either way: a table that cannot be put back is left as rebuilt.
+    private static void KeepNameTable(LoadZones zones, Created zone, IReadOnlyDictionary<string, byte[]?> was)
+    {
+        if (zone.Before == null || zone.After == null || zones.NameTableFile is not { } names) return;
+        if (!zone.Before.TryGetValue(names, out byte[]? before) || before == null) return;
+        if (!zone.After.TryGetValue(names, out byte[]? made) || made == null) return;
+        if (!was.TryGetValue(names, out byte[]? found) || found == null || !found.AsSpan().SequenceEqual(made)) return;
+        if (!zone.Before.TryGetValue(zones.SceneFile, out byte[]? scene) || scene == null) return;
+        try
+        {
+            if (File.ReadAllBytes(zones.SceneFile).AsSpan().SequenceEqual(scene)) LoadZones.Restore(new Dictionary<string, byte[]?> { [names] = before });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // the rebuilt table stays
+        }
+    }
+
+    // Adds a zone to the scene on disk, or takes it out again (ZoneWrites.StructureBlocked says when not).
     private string? Structure(Created zone, bool create)
     {
         var archive = new FileInfo(MafiaEnvironment.CityUniversSds);
-        if (OpenArchives.HoldersOf(archive).Count > 0 || _host.Streamer.IsLoading(archive))
-        {
-            return "city_univers is open in an editor (Whole map) - a zone is added or taken out with a single district loaded";
-        }
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
         LoadZones zones;
         try
         {
             zones = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), _host.Catalogs.DistrictNames, archive, forNewZones: true);
-            string? refused = create
-                ? zones.Create(zone.Name, zone.Like, zone.Min, zone.Max, zone.District1, zone.District2)
-                : zones.Delete(zone.Name);
-            if (refused != null) return refused;
-            string? namesFile = zones.NameTableFile;
+            IReadOnlyDictionary<string, byte[]?> now = zones.StructureFiles();
             if (create)
             {
-                zone.SceneBefore = File.ReadAllBytes(zones.SceneFile);
-                zone.NamesBefore = namesFile != null && File.Exists(namesFile) ? File.ReadAllBytes(namesFile) : null;
+                if (zones.Create(zone.Name, zone.Like, zone.Min, zone.Max, zone.District1, zone.District2) is { } refused) return refused;
+                zones.Save();
+                zone.Before = now;
+                zone.After = zones.StructureFiles();
             }
-            zones.Save();
-            if (!create && namesFile != null && zone.NamesBefore != null && zone.SceneBefore != null
-                && File.ReadAllBytes(zones.SceneFile).AsSpan().SequenceEqual(zone.SceneBefore))
+            else if (zone.Before != null && zone.After != null && SameFiles(now, zone.After))
             {
-                File.WriteAllBytes(namesFile, zone.NamesBefore);
+                LoadZones.Restore(zone.Before);
+            }
+            else
+            {
+                if (zones.Delete(zone.Name) is { } refused) return refused;
+                zones.Save();
+                KeepNameTable(zones, zone, now);
             }
         }
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))

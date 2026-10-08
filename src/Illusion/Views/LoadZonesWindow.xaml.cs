@@ -98,10 +98,11 @@ public sealed partial class LoadZonesWindow : Window
         // planes, the viewport picks by the box drawn, and the two need not agree at a sliced corner.
         if (keep == null) _host.Catalogs.SelectZone(null);
 
-        // What the game does at a login here: measured in the game, only a zone that names two districts
-        // makes them stream in. So "greenfield is asked for" by a one-district zone is not yet "it loads".
+        // What the game does at a login here: measured in the game, only a zone named as a seam - two words
+        // after its number - makes its districts stream in (LoadZones.LoadsOnArrival). So "greenfield is asked
+        // for" by the district's own box is not yet "it loads".
         List<LoadZoneInfo> holding = [.. zones.Where(z => z.Inside)];
-        List<string> loaded = [.. holding.Where(z => z.Districts.Count >= 2).SelectMany(z => z.Districts)
+        List<string> loaded = [.. holding.Where(z => Assets.World.LoadZones.LoadsOnArrival(z.Name)).SelectMany(z => z.Districts)
             .Distinct(StringComparer.OrdinalIgnoreCase)];
         if (holding.Count == 0)
         {
@@ -112,8 +113,8 @@ public sealed partial class LoadZonesWindow : Window
         {
             SummaryText.Text = districts.Count == 0
                 ? "The zones that hold this point name no district."
-                : $"Only one-district zones hold this point ({string.Join(", ", districts)}). They do not load a district "
-                    + "by themselves: a player who appears here sees it unloaded until he crosses a two-district zone.";
+                : $"Only zones with one word in their name hold this point ({string.Join(", ", districts)}). They do not load a "
+                    + "district by themselves: a player who appears here sees it unloaded until he crosses a zone named with two.";
         }
         else
         {

@@ -142,8 +142,27 @@ public sealed class CityAreasTable
         return null;
     }
 
-    /// <summary>Takes a volume's line out. False when the table had none.</summary>
-    public bool Remove(string name) => _entries.RemoveAll(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) > 0;
+    /// <summary>
+    /// Takes a volume's line out. A district only that line named is taken out of the names with it when it
+    /// stands at their end - where <see cref="Add"/> puts a new one - so a line added and removed leaves the
+    /// table as it was. False when the table had none.
+    /// </summary>
+    public bool Remove(string name)
+    {
+        int at = _entries.FindIndex(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (at < 0) return false;
+        (_, ushort target1, ushort target2, _) = _entries[at];
+        _entries.RemoveAll(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        // from the end backwards: of two districts added together, the second stands after the first
+        foreach (ushort offset in new[] { target1, target2 }.Where(o => o != None && o < _districts.Length).Distinct().OrderDescending())
+        {
+            int end = Array.IndexOf(_districts, (byte)0, offset);
+            bool last = end == _districts.Length - 1 && (offset == 0 || _districts[offset - 1] == 0);
+            if (last && !_entries.Any(e => e.Target1 == offset || e.Target2 == offset)) _districts = _districts[..offset];
+        }
+        return true;
+    }
 
     private string? NameAt(ushort offset)
     {

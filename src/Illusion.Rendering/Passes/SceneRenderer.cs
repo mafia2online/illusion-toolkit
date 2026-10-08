@@ -546,7 +546,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _collisionRenderer.Render(target, viewProj, Camera.Position, frustum);
 
         // Debug overlay of loading zones (on top of meshes, semi-transparent boxes).
-        if (ShowZones && _zoneBoxes != null) _zoneRenderer.Render(ctx, viewProj, Camera.Position, _depthReadOnly, _zoneBoxes);
+        if (ShowZones && _zoneBoxes != null) _zoneRenderer.Render(ctx, viewProj, Camera.Position, Camera.Orthographic, _depthReadOnly, _zoneBoxes);
 
         // Everything an overlay glyph needs to size itself in PIXELS rather than metres: the pixel scale is
         // metres-per-pixel per unit of clip W, read straight off the projection (M22 = 1/tan(fov/2)).

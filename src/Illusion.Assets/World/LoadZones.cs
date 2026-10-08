@@ -45,6 +45,7 @@ public sealed class LoadZones
     // For a zone that is ADDED: the working copy's folder, the scene read with its name table (a new volume
     // has to be listed there), and the table of districts once it has been read to be changed.
     private string _extracted = "";
+    private HashSet<string> _known = new(StringComparer.OrdinalIgnoreCase);
     private bool _withNameTable;
     private bool _volumeAdded;
     private CityAreasTable? _table;
@@ -67,10 +68,10 @@ public sealed class LoadZones
     /// its own, with fewer zones. Measured in the game (free ride of a multiplayer client that mounts Joe's
     /// Adventures): the zones in force were the BASE copy's - a face moved in the DLC's copy changed nothing.
     /// <para>
-    /// Measured the same way: what makes a district stream in at the point a player appears at is a zone that
-    /// names TWO districts (the seams, "AREA341_GREENFIELD_KINGSTONE"). A zone that names one (the district's
-    /// own box, "AREA0019_GREENFIELD") did not load it by itself, and a point in no two-district zone keeps
-    /// whatever was loaded before - nothing, right after a login.
+    /// Measured the same way: what makes a district stream in at the point a player appears at is a zone of
+    /// the seam kind ("AREA341_GREENFIELD_KINGSTONE") - see <see cref="LoadsOnArrival"/>. A district's own box
+    /// ("AREA0019_GREENFIELD") did not load it by itself, and a point in no seam zone keeps whatever was loaded
+    /// before - nothing, right after a login.
     /// </para>
     /// </summary>
     public static IReadOnlyList<FileInfo> Copies()
@@ -87,6 +88,20 @@ public sealed class LoadZones
         }
         return copies;
     }
+
+    /// <summary>
+    /// Whether a volume of this name loads its districts for a player who APPEARS inside it (a login, a
+    /// teleport), as opposed to keeping loaded what a neighbour brought in. Measured in the game, with new zones
+    /// over one test spot (free ride of a multiplayer client, 2026-10): the NAME decides. Two words after the
+    /// number - "AREA900_SANDISLAND_TUNEL", "AREA901_FOO_BAR", "AREA903_A_B" - and the district was loaded,
+    /// with one district in cityareas.bin or two, its byte 0 or 1. One word - "AREA900_TEST",
+    /// "AREA902_FOOXBAR" - and it was not, with two districts and the byte 1. The table says WHICH districts;
+    /// it does not say whether. The shipped names agree: a district's own box has one word and one district, a
+    /// seam two and two. The thirty shipped names written with hyphens ("AREA0223-DIPTON-KINGSTONE") were not
+    /// measured and are counted by their words too.
+    /// </summary>
+    public static bool LoadsOnArrival(string? name) =>
+        (name ?? "").Split(['_', '-'], StringSplitOptions.RemoveEmptyEntries).Length >= 3;
 
     /// <summary>How a copy is named to the user: "base", or the DLC's folder name.</summary>
     public static string CopyName(FileInfo copy)
@@ -148,7 +163,12 @@ public sealed class LoadZones
         FrameResource scene = forNewZones
             ? ExtractedSds.Load(extracted).FrameResource ?? throw new InvalidDataException("city_univers.sds has no scene")
             : new FrameResource(scenes[0]);
-        var zones = new LoadZones(archive, scene, scenes[0]) { _extracted = extracted, _withNameTable = forNewZones };
+        var zones = new LoadZones(archive, scene, scenes[0])
+        {
+            _extracted = extracted,
+            _withNameTable = forNewZones,
+            _known = new HashSet<string>(districts, StringComparer.OrdinalIgnoreCase),
+        };
         foreach (FrameObjectArea area in zones.Frame.FrameObjects.Values.OfType<FrameObjectArea>())
         {
             if (area.Name?.ToString() is not { Length: > 0 } name) continue;
@@ -160,7 +180,7 @@ public sealed class LoadZones
         string table = Path.Combine(extracted, "missions", "CITY", "cityareas.bin");
         if (File.Exists(table))
         {
-            var known = new HashSet<string>(districts, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> known = zones._known;
             foreach (CityAreaEntry entry in CityAreasFile.Load(table).Areas)
             {
                 var list = new List<string>(2);
@@ -388,9 +408,34 @@ public sealed class LoadZones
         if (MathF.Abs(world.M11 - 1f) > 1e-3f || MathF.Abs(world.M22 - 1f) > 1e-3f || MathF.Abs(world.M33 - 1f) > 1e-3f)
             return $"{like} is turned or scaled - take a volume that stands square to the map as the pattern";
 
+        // its own origin goes to the box's centre, said in the space of the frame the pattern hangs on
+        Matrix4x4 parent = (source.Parent ?? source.Root)?.WorldTransform ?? Matrix4x4.Identity;
+        var turn = new Matrix4x4(
+            parent.M11, parent.M12, parent.M13, 0f,
+            parent.M21, parent.M22, parent.M23, 0f,
+            parent.M31, parent.M32, parent.M33, 0f,
+            0f, 0f, 0f, 1f);
+        if (!Matrix4x4.Invert(turn, out Matrix4x4 unTurn)) return $"{like} hangs on a frame whose transform cannot be inverted";
+
         if (!File.Exists(TableFile)) return "the working copy of city_univers has no cityareas.bin";
         CityAreasTable table = _table ?? CityAreasTable.Parse(File.ReadAllBytes(TableFile));
-        if (table.Add(name, district1, district2) is { } refused) return refused;
+        // The table names districts in its own words ("kingston" for the archive kingstone): a district is
+        // written as the table says it, and one it has no word for must at least be an archive of the city.
+        var resolved = new List<string>(2);
+        var written = new List<string>(2);
+        foreach (string? asked in new[] { district1, district2 })
+        {
+            if (string.IsNullOrWhiteSpace(asked))
+            {
+                if (resolved.Count == 0) return "a zone names at least one district";
+                continue;
+            }
+            if (TableWord(table, asked.Trim()) is not var (word, district)) return $"'{asked.Trim()}' is not a district of the city";
+            if (resolved.Contains(district, StringComparer.OrdinalIgnoreCase)) return "the two districts are the same one";
+            written.Add(word);
+            resolved.Add(district);
+        }
+        if (table.Add(name, written[0], written.Count > 1 ? written[1] : null) is { } refused) return refused;
 
         // The copy constructor takes every serialized field of the pattern - flags, name-table membership, the
         // references to its parents - and shares its planes array, which is replaced below.
@@ -413,18 +458,7 @@ public sealed class LoadZones
             Frames.FrameDuplicator.ResolveRef(Frame, source, FrameEntryRefTypes.Parent1),
             Frames.FrameDuplicator.ResolveRef(Frame, source, FrameEntryRefTypes.Parent2));
 
-        // its own origin at the box's centre: the pattern's place, carried by the difference between the centres
-        Matrix4x4 parent = (clone.Parent ?? clone.Root)?.WorldTransform ?? Matrix4x4.Identity;
-        var turn = new Matrix4x4(
-            parent.M11, parent.M12, parent.M13, 0f,
-            parent.M21, parent.M22, parent.M23, 0f,
-            parent.M31, parent.M32, parent.M33, 0f,
-            0f, 0f, 0f, 1f);
-        if (!Matrix4x4.Invert(turn, out Matrix4x4 unTurn))
-        {
-            Frame.FrameObjects.Remove(clone.RefID);
-            return $"{like} hangs on a frame whose transform cannot be inverted";
-        }
+        // the pattern's place, carried by the difference between the centres
         Matrix4x4 local = source.LocalTransform;
         local.Translation += Vector3.TransformNormal(((lo + hi) * 0.5f) - world.Translation, unTurn);
         clone.LocalTransform = local;
@@ -432,10 +466,21 @@ public sealed class LoadZones
         _table = table;
         _volumeAdded = true;
         _volumes[name] = clone;
-        _districts[name] = string.IsNullOrWhiteSpace(district2) ? [district1] : [district1, district2];
+        _districts[name] = resolved;
         _ordered = null;
         _toLocal.Clear();
         return null;
+    }
+
+    // How the table says a district, and the archive that is: the table's own name for it when it has one
+    // (exactly, or one that resolves to the archive asked for), otherwise the archive's name as it stands.
+    private (string Word, string District)? TableWord(CityAreasTable table, string asked)
+    {
+        IReadOnlyList<string> words = table.Districts;
+        string? word = words.FirstOrDefault(w => string.Equals(w, asked, StringComparison.OrdinalIgnoreCase))
+            ?? words.FirstOrDefault(w => string.Equals(DistrictNames.Resolve(w, _known), asked, StringComparison.OrdinalIgnoreCase));
+        if (word != null) return (word, DistrictNames.Resolve(word, _known) ?? word);
+        return _known.TryGetValue(asked, out string? archive) ? (archive, archive) : null;
     }
 
     /// <summary>
@@ -448,7 +493,7 @@ public sealed class LoadZones
         if (!_withNameTable) return "these zones were opened for moving, not for taking out";
         if (!_volumes.TryGetValue(name ?? "", out FrameObjectArea? area)) return $"no load zone named '{name}'";
         if (_ambiguous.Contains(name!)) return $"more than one volume of the scene is named '{name}' - which one is meant cannot be told";
-        if (Frame.FrameObjects.Values.OfType<FrameObjectBase>().Any(o => ReferenceEquals(o.Parent, area)))
+        if (Frame.FrameObjects.Values.OfType<FrameObjectBase>().Any(o => ReferenceEquals(o.Parent, area) || ReferenceEquals(o.Root, area)))
             return $"other objects of the scene hang on {name}";
         if (!File.Exists(TableFile)) return "the working copy of city_univers has no cityareas.bin";
         CityAreasTable table = _table ?? CityAreasTable.Parse(File.ReadAllBytes(TableFile));
@@ -525,24 +570,78 @@ public sealed class LoadZones
         // A new volume is three files - the scene, the name table that lists it and the districts table that
         // names it - and one without the others is a scene the game has no use for. What each held is kept
         // until the last is written, and put back if one fails.
-        List<string> files = [SceneFile, .. SdsManifest.Load(_extracted).GetFiles("FrameNameTable"), TableFile];
-        var before = files.Where(File.Exists).ToDictionary(f => f, File.ReadAllBytes);
+        IReadOnlyDictionary<string, byte[]?> before = StructureFiles();
+        var replaced = new List<string>();
         try
         {
             string written = SdsWriter.SaveFrameResource(Frame, Archive);
-            SdsWriter.SaveFrameNameTable(Frame, Archive);
+            replaced.Add(written);
+            if (SdsWriter.SaveFrameNameTable(Frame, Archive) is { } names) replaced.Add(names);
             AtomicFile.WriteAllBytes(TableFile, _table!.ToBytes());
             return written;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException)
         {
-            foreach ((string file, byte[] bytes) in before)
-            {
-                try { File.WriteAllBytes(file, bytes); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* reported by the failure that brought us here */ }
-            }
-            throw;
+            // a write is one file swapped in whole: the one that failed is as it was, the ones before it are not
+            string left = PutBack(replaced.ToDictionary(f => f, f => before.GetValueOrDefault(f)));
+            if (left.Length == 0) throw;
+            throw new IOException($"{ex.Message} - and the working copy could not be put back as it was ({left}): unpack city_univers again", ex);
         }
+    }
+
+    /// <summary>
+    /// The files a volume that is added or taken out is written into - the scene, the name table that lists it
+    /// and the districts table that names it - each with what it holds now, or null when it is not there.
+    /// </summary>
+    public IReadOnlyDictionary<string, byte[]?> StructureFiles()
+    {
+        List<string> files = [SceneFile, .. SdsManifest.Load(_extracted).GetFiles("FrameNameTable"), TableFile];
+        return files.Distinct(StringComparer.OrdinalIgnoreCase).ToDictionary(f => f, f => File.Exists(f) ? File.ReadAllBytes(f) : null);
+    }
+
+    /// <summary>
+    /// Writes those files as they are given: all of them or - when one cannot be written - none, the ones
+    /// already swapped in being put back.
+    /// </summary>
+    /// <exception cref="IOException">A file could not be written; the message says what was left changed, if anything.</exception>
+    public static void Restore(IReadOnlyDictionary<string, byte[]?> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        var before = files.Keys.ToDictionary(f => f, f => File.Exists(f) ? File.ReadAllBytes(f) : null);
+        var replaced = new Dictionary<string, byte[]?>();
+        try
+        {
+            foreach ((string file, byte[]? bytes) in files)
+            {
+                if (bytes != null) AtomicFile.WriteAllBytes(file, bytes);
+                else File.Delete(file);
+                replaced[file] = before[file];
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            string left = PutBack(replaced);
+            throw new IOException(left.Length == 0 ? ex.Message : $"{ex.Message} - and the working copy was left half written ({left}): unpack city_univers again", ex);
+        }
+    }
+
+    // Each file to the bytes given, or away when it had none. Returns what could not be put back ("" when all was).
+    private static string PutBack(IReadOnlyDictionary<string, byte[]?> files)
+    {
+        var left = new List<string>();
+        foreach ((string file, byte[]? bytes) in files)
+        {
+            try
+            {
+                if (bytes != null) AtomicFile.WriteAllBytes(file, bytes);
+                else File.Delete(file);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                left.Add($"{Path.GetFileName(file)}: {ex.Message}");
+            }
+        }
+        return string.Join("; ", left);
     }
 }
 

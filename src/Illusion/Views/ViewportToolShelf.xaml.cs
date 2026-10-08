@@ -136,9 +136,51 @@ public partial class ViewportToolShelf : UserControl
         if (!shown) ToolNewZone.IsChecked = false;
     }
 
+    /// <summary>True while the "new zone" flyout is open. It has the keyboard then: a letter typed with one of
+    /// its lists focused is a search in that list, not a tool of the viewport behind it.</summary>
+    public bool IsFlyoutOpen => NewZonePopup.IsOpen;
+
+    private long _closedByItsButton = long.MinValue;
+
+    // A flyout closes on a press anywhere outside it - its own button included, and the button then takes the
+    // same click as "open": the flyout came back, filled in afresh, on the click meant to put it away.
+    private void NewZone_Closed(object? sender, EventArgs e)
+    {
+        Point at = Mouse.GetPosition(ToolNewZone);
+        bool onButton = at.X >= 0 && at.Y >= 0 && at.X <= ToolNewZone.ActualWidth && at.Y <= ToolNewZone.ActualHeight;
+        _closedByItsButton = onButton && Mouse.LeftButton == MouseButtonState.Pressed ? Environment.TickCount64 : long.MinValue;
+    }
+
+    private void NewZone_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            ToolNewZone.IsChecked = false;
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && e.OriginalSource is not ComboBoxItem && !NewZoneDistrict1.IsDropDownOpen && !NewZoneDistrict2.IsDropDownOpen)
+        {
+            NewZone_Create(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    // Said while the name is typed: a zone named as a district's own box is made, and loads nothing by itself.
+    private void NewZoneName_Changed(object sender, TextChangedEventArgs e)
+    {
+        string name = NewZoneName.Text.Trim();
+        NewZoneNameHint.Visibility = name.Length > 0 && !Assets.World.LoadZones.LoadsOnArrival(name) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // The flyout opens filled in: a free name and the districts of the nearest zone that loads districts.
     private void NewZone_Opened(object sender, RoutedEventArgs e)
     {
+        if (_closedByItsButton != long.MinValue && Environment.TickCount64 - _closedByItsButton < 1500)
+        {
+            _closedByItsButton = long.MinValue;
+            ToolNewZone.IsChecked = false;
+            return;
+        }
         (string name, string first, string? second) = _viewport.ZoneEditing.Suggest();
         List<string> districts = [.. _viewport.Catalogs.DistrictNames.OrderBy(d => d, StringComparer.OrdinalIgnoreCase)];
         NewZoneName.Text = name;

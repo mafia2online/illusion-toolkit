@@ -1044,11 +1044,11 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "zone_create")]
-    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). Not undoable: to take it back, restore the archive's working copy. Refused while an editor holds city_univers (Whole map). Whether the game takes a zone it did not ship with has to be looked at in the game.")]
+    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). Not undoable: to take it back, restore the archive's working copy. Refused while an editor holds city_univers (Whole map). Measured in the game: the NAME decides whether the zone loads its districts for a player who appears inside it - two words after the number ('AREA900_DOCK_SOUTH') and it does, one word ('AREA900_DOCK') and it does not, whatever districts it names; the result says which it is ('loadsOnArrival').")]
     public static async Task<string> ZoneCreate(
         IEditorSession editor,
         IUiThreadMarshal ui,
-        [Description("The new zone's name, e.g. 'AREA900_SANDISLAND_TUNEL'. No object of the scene may have it.")] string name,
+        [Description("The new zone's name, e.g. 'AREA900_SANDISLAND_TUNEL' - two words after the number, or the game will not load the districts for a player who appears inside. No object of the scene may have it.")] string name,
         [Description("An existing zone to make it like, as zones_at lists it - one that stands square to the map.")] string like,
         [Description("One corner of the box, world [x, y, z].")] float[] boxMin,
         [Description("The opposite corner, world [x, y, z].")] float[] boxMax,
@@ -1059,7 +1059,7 @@ public sealed class EditorTools
         {
             LoadZoneInfo? made = null;
             string? refused = await ui.RunAsync(() => editor.ZoneCreate(name, like, boxMin, boxMax, districts, apply, out made));
-            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made });
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made, loadsOnArrival = made?.LoadsOnArrival });
         }
         catch (Exception ex)
         {
