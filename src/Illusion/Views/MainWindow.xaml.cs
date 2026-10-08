@@ -829,6 +829,7 @@ public partial class MainWindow : Window
     {
         if (Viewport == null) return;
         Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        ToolShelf.SetZonesLayer(Viewport.ShowZones);
         // a zone picked while the layer was up is not left picked - and under the gizmo - with nothing drawn
         if (!Viewport.ShowZones) Viewport.Catalogs.SelectZone(null);
     }

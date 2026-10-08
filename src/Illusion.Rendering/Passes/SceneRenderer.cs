@@ -37,8 +37,8 @@ public sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>Whether to show debug loading-zone boxes (UI toggle). Off by default.</summary>
     public bool ShowZones { get; set; }
-    private IReadOnlyList<(Vector3 Min, Vector3 Max, Vector4 Color)>? _zoneBoxes;
-    public void SetZoneBoxes(IReadOnlyList<(Vector3 Min, Vector3 Max, Vector4 Color)> boxes) => _zoneBoxes = boxes;
+    private IReadOnlyList<ZoneBox>? _zoneBoxes;
+    public void SetZoneBoxes(IReadOnlyList<ZoneBox> boxes) => _zoneBoxes = boxes;
 
     /// <summary>Uploads/replaces one district's collision geometry (keyed so streaming can remove it alone).</summary>
     public void SetCollisionDistrict(object key, Domain.CollisionRenderData? data) => _collisionRenderer.SetDistrict(key, data);
@@ -546,7 +546,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _collisionRenderer.Render(target, viewProj, Camera.Position, frustum);
 
         // Debug overlay of loading zones (on top of meshes, semi-transparent boxes).
-        if (ShowZones && _zoneBoxes != null) _zoneRenderer.Render(ctx, viewProj, _zoneBoxes);
+        if (ShowZones && _zoneBoxes != null) _zoneRenderer.Render(ctx, viewProj, Camera.Position, _depthReadOnly, _zoneBoxes);
 
         // Everything an overlay glyph needs to size itself in PIXELS rather than metres: the pixel scale is
         // metres-per-pixel per unit of clip W, read straight off the projection (M22 = 1/tan(fov/2)).

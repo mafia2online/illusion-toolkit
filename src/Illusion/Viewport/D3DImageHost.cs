@@ -1411,6 +1411,19 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
 
     public (Vector3 Min, Vector3 Max)? BoxGizmoTarget => ZoneEditing.Target;
 
+    public string? BoxGizmoLabel => ShowZones ? Catalogs.SelectedZoneLabel : null;
+
+    /// <summary>The point of the scene the middle of the view looks at - where a thing made "here" goes - or,
+    /// with nothing under it, a point some way in front of the camera.</summary>
+    internal Vector3 ViewPoint(float ahead = 60f)
+    {
+        var centre = new Point(ActualWidth / 2, ActualHeight / 2);
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(centre);
+        float t = PickMesh(centre, out float meshT) != null ? meshT : float.PositiveInfinity;
+        if (Streamer.PickCrash(origin, dir, out float crashT) != null) t = MathF.Min(t, crashT);
+        return origin + (dir * (float.IsFinite(t) && t > 0f ? t : ahead));
+    }
+
     public bool BoxGizmoFaceMoves(int axis, int side) => Catalogs.SelectedZoneFaces.Contains((side > 0 ? "+" : "-") + "xyz"[axis]);
 
     public event Action? BoxGizmoChanged;

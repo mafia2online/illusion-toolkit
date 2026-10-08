@@ -22,6 +22,9 @@ public interface IBoxGizmoHost
     /// One that cannot gets no arrow.</summary>
     bool BoxGizmoFaceMoves(int axis, int side);
 
+    /// <summary>What the box is, in a line - shown over it for as long as it is picked. Null: nothing shown.</summary>
+    string? BoxGizmoLabel { get; }
+
     /// <summary>Raised each frame the camera changes, so the overlay repaints.</summary>
     event Action? CameraMoved;
 

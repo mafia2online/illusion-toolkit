@@ -108,6 +108,9 @@ public partial class ViewportToolShelf : UserControl
         ToolRotate.Checked += (_, _) => SetGizmoMode(GizmoMode.Rotate);
         ToolScale.Checked += (_, _) => SetGizmoMode(GizmoMode.Scale);
 
+        // The zone tools belong to a map: a stage handed one archive has no loading zones to add to.
+        ZoneTools.Visibility = viewport.IsMapViewport ? Visibility.Visible : Visibility.Collapsed;
+
         ApplyHotkeys();
         HotkeyMap.Current.Changed += ApplyHotkeys;
         Unloaded += (_, _) => HotkeyMap.Current.Changed -= ApplyHotkeys;
@@ -119,6 +122,49 @@ public partial class ViewportToolShelf : UserControl
     {
         ToolBlender.IsChecked = editing;
         ToolBlender.IsEnabled = editing || hasSelection;
+    }
+
+    private const string OneDistrict = "(one district only)";
+
+    /// <summary>Follows the Loading zones layer: the "new zone" button works while the layer is shown.</summary>
+    public void SetZonesLayer(bool shown)
+    {
+        ToolNewZone.IsEnabled = shown;
+        ToolNewZone.ToolTip = shown
+            ? "New loading zone - made where the view looks, then moved and sized with Move and Scale"
+            : "New loading zone - switch the Loading zones layer on (Layers) to use it";
+        if (!shown) ToolNewZone.IsChecked = false;
+    }
+
+    // The flyout opens filled in: a free name and the districts of the nearest zone that loads districts.
+    private void NewZone_Opened(object sender, RoutedEventArgs e)
+    {
+        (string name, string first, string? second) = _viewport.ZoneEditing.Suggest();
+        List<string> districts = [.. _viewport.Catalogs.DistrictNames.OrderBy(d => d, StringComparer.OrdinalIgnoreCase)];
+        NewZoneName.Text = name;
+        NewZoneDistrict1.ItemsSource = districts;
+        NewZoneDistrict1.SelectedItem = districts.FirstOrDefault(d => string.Equals(d, first, StringComparison.OrdinalIgnoreCase));
+        NewZoneDistrict2.ItemsSource = new[] { OneDistrict }.Concat(districts).ToList();
+        NewZoneDistrict2.SelectedItem = second == null
+            ? OneDistrict
+            : districts.FirstOrDefault(d => string.Equals(d, second, StringComparison.OrdinalIgnoreCase)) ?? OneDistrict;
+        NewZoneRefusal.Visibility = Visibility.Collapsed;
+    }
+
+    private void NewZone_Create(object sender, RoutedEventArgs e)
+    {
+        string? second = NewZoneDistrict2.SelectedItem as string;
+        string? refused = NewZoneDistrict1.SelectedItem is not string first
+            ? "pick the district the zone keeps loaded"
+            : _viewport.ZoneEditing.CreateInView(NewZoneName.Text, first, second == OneDistrict ? null : second);
+        if (refused != null)
+        {
+            NewZoneRefusal.Text = ToolText.ForPeople(refused);
+            NewZoneRefusal.Visibility = Visibility.Visible;
+            return;
+        }
+        ToolNewZone.IsChecked = false;
+        ToolMove.IsChecked = true;          // the zone is picked: the arrows that move it are what comes next
     }
 
     /// <summary>True while a loading zone is being dragged by its gizmo. The drag then owns the keyboard even
