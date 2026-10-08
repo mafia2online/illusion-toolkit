@@ -127,8 +127,8 @@ public static class TriangleHider
 
     /// <summary>
     /// What hiding triangles picked one by one takes out of a mesh: those triangles of the first level of detail
-    /// (<see cref="Picked.Index"/>), and on every other level the triangles that LIE ON them - all three corners
-    /// within <paramref name="near"/> metres of a picked triangle. A level cut coarser than the first has
+    /// (<see cref="Picked.Index"/>), and on every other level the triangles that LIE ON them - their corners, the
+    /// middles of their edges and their own middle within <paramref name="near"/> metres of a picked triangle. A level cut coarser than the first has
     /// triangles that reach past what was picked; those stay, and the opening closes at the distance that level
     /// is drawn from - the count per level says so before anything is hidden.
     /// </summary>
@@ -173,7 +173,7 @@ public static class TriangleHider
                         lo = Vector3.Min(lo, Vector3.Min(pa, Vector3.Min(pb, pc)));
                         hi = Vector3.Max(hi, Vector3.Max(pa, Vector3.Max(pb, pc)));
                     }
-                    else if (!LiesOn(pa) || !LiesOn(pb) || !LiesOn(pc))
+                    else if (!Covered(pa, pb, pc))
                     {
                         continue;
                     }
@@ -183,6 +183,11 @@ public static class TriangleHider
                 }
             }
         }
+
+        // Corners on the picks do not make a triangle lie on them: one spanning a door from frame to frame has
+        // all three on the frame. Its middle and the middles of its edges are asked too.
+        bool Covered(Vector3 a, Vector3 b, Vector3 c) =>
+            LiesOn(a) && LiesOn(b) && LiesOn(c) && LiesOn((a + b + c) / 3f) && LiesOn((a + b) * 0.5f) && LiesOn((b + c) * 0.5f) && LiesOn((c + a) * 0.5f);
 
         bool LiesOn(Vector3 p)
         {
