@@ -63,7 +63,13 @@ public sealed partial class HideTrianglesWindow : Window
     private bool OnSceneClick(System.Windows.Point pos)
     {
         if (!ClickMode || _node == null || _host.BridgeEditedCount > 0) return false;
-        if (_host.PickTriangle(_node, pos) is not { } hit) return _picked.Count > 0;
+        if (_host.PickTriangle(_node, pos, out string? missed) is not { } hit)
+        {
+            // said either way; with nothing picked the click is then an ordinary one, and may choose another mesh
+            Recount();
+            if (_plan != null || _picked.Count == 0) CountText.Text = missed + " " + CountText.Text;
+            return _picked.Count > 0;
+        }
         if (!_picked.Remove(hit.Index)) _picked.Add(hit.Index);
         Recount();
         return true;

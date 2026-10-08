@@ -220,19 +220,14 @@ internal static class ProbeRunner
             case "--probe-car-m2o":
                 CarM2oExportProbes.RunCarM2oExportProbe();
                 return true;
-            // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
-            // Output: %TEMP%\illusion_geometry_sweep.txt
-            // Which meshes of an archive carry no normals (foliage), and what the renderer is handed for them.
-            // Output: %TEMP%\illusion_vertex_normals.txt
-            case "--probe-vertex-normals":
-                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
-                return true;
-            // Hiding triangles of a stock mesh without a rebuild, in memory only: what a box finds, that
-            // nothing but the found triangles' indices changes, on every level of detail.
+            // Hiding triangles of a stock mesh without a rebuild, in memory only: what a box or a click finds,
+            // that nothing but the found triangles' indices changes, a mesh given geometry of its own.
             // Output: %TEMP%\illusion_hide_triangles.txt
             case "--probe-hide-triangles":
                 HideTrianglesProbes.RunHideTrianglesProbe(args.Length >= 2 ? args[1] : "uppertown");
                 return true;
+            // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
+            // Output: %TEMP%\illusion_geometry_sweep.txt
             case "--probe-geometry-sweep":
                 GeometrySweepProbes.RunGeometrySweepProbe();
                 return true;
@@ -247,6 +242,12 @@ internal static class ProbeRunner
                 ObjectTransplantProbes.RunObjectTransplantProbe(
                     args.Length >= 2 ? args[1] : "hill",
                     args.Length >= 3 ? args[2] : @"shops\harry.sds");
+                return true;
+            // Two ways a surface came out black: which meshes of an archive carry no normals (foliage) and what
+            // the renderer is handed for them, and an instanced copy drawn beside a placed one.
+            // Output: %TEMP%\illusion_vertex_normals.txt
+            case "--probe-vertex-normals":
+                VertexNormalProbes.RunVertexNormalProbe(args.Length >= 2 ? args[1] : @"city_crash\city_crash.sds");
                 return true;
             // Renders the viewport transform overlay (compact, actions-off Vector3Box at large coords) to a PNG so
             // the fields-fit / no-clip can be eyeballed. Output: %TEMP%\illusion_panel.png

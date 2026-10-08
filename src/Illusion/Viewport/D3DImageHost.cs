@@ -1226,17 +1226,28 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     /// <summary>
     /// The triangle of a mesh node under a screen pixel, as the eye has it: of the first level of detail, and
     /// only when nothing of the scene stands in front of it there. Null when the node is not a mesh, the pixel
-    /// misses it, or something covers it.
+    /// misses it, or something covers it - <paramref name="missed"/> then says which, for the user.
     /// </summary>
-    internal TriangleHider.Picked? PickTriangle(SceneNode node, Point pos)
+    internal TriangleHider.Picked? PickTriangle(SceneNode node, Point pos, out string? missed)
     {
+        missed = null;
         if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter) return null;
         (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
         TriangleHider.Picked? hit = TriangleHider.Pick(mesh, ((IFrameNode)adapter).WorldTransform, origin, dir);
-        if (hit == null) return null;
-        // nearer scenery at this pixel means the triangle is behind it: what cannot be seen is not picked
+        if (hit == null)
+        {
+            missed = "That spot is not on this mesh.";
+            return null;
+        }
+        // Nearer scenery at this pixel means the triangle is behind it: what cannot be seen is not picked. The
+        // mesh's own rows do not count as scenery - from a distance the editor draws a coarser level of it, whose
+        // surface need not lie where the first level's does, and that level stood "in front" of every triangle.
+        SceneNode? front = PickNode(pos);
+        if (front != null && (ReferenceEquals(front, node) || ReferenceEquals(front.Source, node.Source))) return hit;
         float nearest = PickMesh(pos, out float meshT) != null ? meshT : float.PositiveInfinity;
-        return nearest < hit.Distance - MathF.Max(0.05f, hit.Distance * 0.002f) ? null : hit;
+        if (nearest >= hit.Distance - MathF.Max(0.05f, hit.Distance * 0.002f)) return hit;
+        missed = $"{front?.Name ?? "Something"} stands in front of the mesh there.";
+        return null;
     }
 
     /// <summary>Marks triangles in the viewport as a tool's pick - their edges, and a stroke to each corner so a
