@@ -226,7 +226,7 @@ public static class FrameDuplicator
         }
     }
 
-    private static FrameEntry? ResolveRef(FrameResource resource, FrameObjectBase source, FrameEntryRefTypes slot)
+    internal static FrameEntry? ResolveRef(FrameResource resource, FrameObjectBase source, FrameEntryRefTypes slot)
     {
         if (!source.Refs.TryGetValue(slot, out int id)) return null;
         if (resource.FrameScenes.TryGetValue(id, out FrameHeaderScene? scene)) return scene;
@@ -236,7 +236,7 @@ public static class FrameDuplicator
 
     // Writes both parent slots the way the loader/reparenter do: SetParent maintains the frame-side
     // runtime links; scene folders hold their members in a separate list the setter does not touch.
-    private static void LinkParents(FrameObjectSingleMesh clone, FrameEntry? parent1, FrameEntry? parent2)
+    internal static void LinkParents(FrameObjectBase clone, FrameEntry? parent1, FrameEntry? parent2)
     {
         clone.SetParent(ParentInfo.ParentType.ParentIndex1, parent1);
         clone.SetParent(ParentInfo.ParentType.ParentIndex2, parent2);

@@ -5,6 +5,8 @@ using Illusion.Formats.Archive;
 using Illusion.Formats.CityAreas;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Frames.Resources;
+using Illusion.Formats.Hashing;
 
 namespace Illusion.Assets.World;
 
@@ -39,6 +41,19 @@ public sealed class LoadZones
         Frame = frame;
         SceneFile = sceneFile;
     }
+
+    // For a zone that is ADDED: the working copy's folder, the scene read with its name table (a new volume
+    // has to be listed there), and the table of districts once it has been read to be changed.
+    private string _extracted = "";
+    private bool _withNameTable;
+    private bool _volumeAdded;
+    private CityAreasTable? _table;
+
+    private string TableFile => Path.Combine(_extracted, "missions", "CITY", "cityareas.bin");
+
+    /// <summary>The frame name table of the working copy - the file a new volume is listed in - or null when
+    /// the archive has none.</summary>
+    public string? NameTableFile => SdsManifest.Load(_extracted).GetFiles("FrameNameTable").FirstOrDefault();
 
     /// <summary>The file of the working copy the scene was read from, and <see cref="Save"/> writes.</summary>
     public string SceneFile { get; }
@@ -105,7 +120,10 @@ public sealed class LoadZones
     /// <param name="ensureExtracted">Unpacks an archive when it has no working copy yet; returns its folder.</param>
     /// <param name="districts">The district archives' base names ("midtown"), to resolve the table's targets against.</param>
     /// <param name="copy">Which copy (one of <see cref="Copies"/>); the base game's when null.</param>
-    public static LoadZones Open(Func<FileInfo, string> ensureExtracted, IReadOnlyCollection<string> districts, FileInfo? copy = null)
+    /// <param name="forNewZones">Reads the scene together with its frame name table - what <see cref="Create"/>
+    /// needs, and what costs a full read of the archive's buffer pools; moving existing zones does not need it.</param>
+    public static LoadZones Open(Func<FileInfo, string> ensureExtracted, IReadOnlyCollection<string> districts, FileInfo? copy = null,
+        bool forNewZones = false)
     {
         ArgumentNullException.ThrowIfNull(ensureExtracted);
         ArgumentNullException.ThrowIfNull(districts);
@@ -125,7 +143,12 @@ public sealed class LoadZones
             throw new InvalidDataException("the working copy of city_univers.sds has a contents list that cannot be read: " + ex.Message, ex);
         }
         if (scenes.Count == 0) throw new InvalidDataException("city_univers.sds has no scene");
-        var zones = new LoadZones(archive, new FrameResource(scenes[0]), scenes[0]);
+        // A volume that is added has to be listed in the frame name table, with the flags the other volumes
+        // carry there - and those are only on the frames when the scene is read together with the table.
+        FrameResource scene = forNewZones
+            ? ExtractedSds.Load(extracted).FrameResource ?? throw new InvalidDataException("city_univers.sds has no scene")
+            : new FrameResource(scenes[0]);
+        var zones = new LoadZones(archive, scene, scenes[0]) { _extracted = extracted, _withNameTable = forNewZones };
         foreach (FrameObjectArea area in zones.Frame.FrameObjects.Values.OfType<FrameObjectArea>())
         {
             if (area.Name?.ToString() is not { Length: > 0 } name) continue;
@@ -341,6 +364,111 @@ public sealed class LoadZones
     }
 
     /// <summary>
+    /// Adds a NEW volume to the scene, IN MEMORY, and a line for it to the table of districts: a box standing
+    /// square to the map between two world corners, keeping the one or two districts named loaded while the
+    /// player is inside it. It is made as a copy of an existing volume (<paramref name="like"/>) - its type,
+    /// flags, parent and place in the name table - given a name, a place and a shape of its own.
+    /// <see cref="Save"/> writes the scene, the name table and the districts table.
+    /// </summary>
+    /// <returns>Null on success, otherwise why not; nothing is changed on a refusal.</returns>
+    public string? Create(string name, string like, Vector3 min, Vector3 max, string district1, string? district2)
+    {
+        if (!_withNameTable) return "these zones were opened for moving, not for adding to";
+        if (string.IsNullOrWhiteSpace(name)) return "a zone needs a name";
+        if (Frame.FrameObjects.Values.OfType<FrameObjectBase>().Any(o => string.Equals(o.Name?.ToString(), name, StringComparison.OrdinalIgnoreCase)))
+            return $"the scene already has an object named '{name}'";
+        if (!_volumes.TryGetValue(like ?? "", out FrameObjectArea? source)) return $"no load zone named '{like}' to make it like";
+        foreach (float v in new[] { min.X, min.Y, min.Z, max.X, max.Y, max.Z })
+        {
+            if (!float.IsFinite(v)) return "the corners must be finite numbers";
+        }
+        Vector3 lo = Vector3.Min(min, max), hi = Vector3.Max(min, max), half = (hi - lo) * 0.5f;
+        if (half.X < 0.5f || half.Y < 0.5f || half.Z < 0.5f) return "the box must be at least a metre on every side";
+        Matrix4x4 world = source.WorldTransform;
+        if (MathF.Abs(world.M11 - 1f) > 1e-3f || MathF.Abs(world.M22 - 1f) > 1e-3f || MathF.Abs(world.M33 - 1f) > 1e-3f)
+            return $"{like} is turned or scaled - take a volume that stands square to the map as the pattern";
+
+        if (!File.Exists(TableFile)) return "the working copy of city_univers has no cityareas.bin";
+        CityAreasTable table = _table ?? CityAreasTable.Parse(File.ReadAllBytes(TableFile));
+        if (table.Add(name, district1, district2) is { } refused) return refused;
+
+        // The copy constructor takes every serialized field of the pattern - flags, name-table membership, the
+        // references to its parents - and shares its planes array, which is replaced below.
+        var clone = new FrameObjectArea(source) { Name = new HashName(name) };
+        var box = clone.Bounds;
+        box.Min = -half;
+        box.Max = half;
+        clone.Bounds = box;
+        // inside is n.p + d >= 0 in the volume's own space: an upper face looks down its axis, a lower one up
+        clone.Planes =
+        [
+            new Vector4(-1, 0, 0, half.X), new Vector4(1, 0, 0, half.X),
+            new Vector4(0, -1, 0, half.Y), new Vector4(0, 1, 0, half.Y),
+            new Vector4(0, 0, -1, half.Z), new Vector4(0, 0, 1, half.Z),
+        ];
+        clone.PlaneSize = clone.Planes.Length;
+
+        Frame.FrameObjects.Add(clone.RefID, clone);
+        Frames.FrameDuplicator.LinkParents(clone,
+            Frames.FrameDuplicator.ResolveRef(Frame, source, FrameEntryRefTypes.Parent1),
+            Frames.FrameDuplicator.ResolveRef(Frame, source, FrameEntryRefTypes.Parent2));
+
+        // its own origin at the box's centre: the pattern's place, carried by the difference between the centres
+        Matrix4x4 parent = (clone.Parent ?? clone.Root)?.WorldTransform ?? Matrix4x4.Identity;
+        var turn = new Matrix4x4(
+            parent.M11, parent.M12, parent.M13, 0f,
+            parent.M21, parent.M22, parent.M23, 0f,
+            parent.M31, parent.M32, parent.M33, 0f,
+            0f, 0f, 0f, 1f);
+        if (!Matrix4x4.Invert(turn, out Matrix4x4 unTurn))
+        {
+            Frame.FrameObjects.Remove(clone.RefID);
+            return $"{like} hangs on a frame whose transform cannot be inverted";
+        }
+        Matrix4x4 local = source.LocalTransform;
+        local.Translation += Vector3.TransformNormal(((lo + hi) * 0.5f) - world.Translation, unTurn);
+        clone.LocalTransform = local;
+
+        _table = table;
+        _volumeAdded = true;
+        _volumes[name] = clone;
+        _districts[name] = string.IsNullOrWhiteSpace(district2) ? [district1] : [district1, district2];
+        _ordered = null;
+        _toLocal.Clear();
+        return null;
+    }
+
+    /// <summary>
+    /// Takes a volume out of the scene, IN MEMORY, and its line out of the table of districts - what undoing a
+    /// <see cref="Create"/> is. <see cref="Save"/> writes the scene, the name table and the districts table.
+    /// </summary>
+    /// <returns>Null on success, otherwise why not; nothing is changed on a refusal.</returns>
+    public string? Delete(string name)
+    {
+        if (!_withNameTable) return "these zones were opened for moving, not for taking out";
+        if (!_volumes.TryGetValue(name ?? "", out FrameObjectArea? area)) return $"no load zone named '{name}'";
+        if (_ambiguous.Contains(name!)) return $"more than one volume of the scene is named '{name}' - which one is meant cannot be told";
+        if (Frame.FrameObjects.Values.OfType<FrameObjectBase>().Any(o => ReferenceEquals(o.Parent, area)))
+            return $"other objects of the scene hang on {name}";
+        if (!File.Exists(TableFile)) return "the working copy of city_univers has no cityareas.bin";
+        CityAreasTable table = _table ?? CityAreasTable.Parse(File.ReadAllBytes(TableFile));
+        table.Remove(name!);
+
+        area.SetParent(ParentInfo.ParentType.ParentIndex1, null);
+        area.SetParent(ParentInfo.ParentType.ParentIndex2, null);
+        foreach (FrameHeaderScene scene in Frame.FrameScenes.Values) scene.Children.Remove(area);
+        Frame.FrameObjects.Remove(area.RefID);
+
+        _table = table;
+        _volumeAdded = true;
+        _volumes.Remove(name!);
+        _districts.Remove(name!);
+        _ordered = null;
+        _toLocal.Remove(area);
+        return null;
+    }
+
+    /// <summary>
     /// Whether a scene an open editor holds has this volume exactly as this one has it - its place, its box and
     /// its planes. It has not when the volume was changed in that editor and not saved: a write made from the
     /// disk's copy would then be made from a state the editor is about to replace. A scene without the volume
@@ -390,7 +518,32 @@ public sealed class LoadZones
 
     /// <summary>Writes the scene into the working copy of <c>city_univers.sds</c>; a Build of that archive
     /// takes it into the game. Returns the file written.</summary>
-    public string Save() => SdsWriter.SaveFrameResource(Frame, Archive);
+    public string Save()
+    {
+        if (!_volumeAdded) return SdsWriter.SaveFrameResource(Frame, Archive);
+
+        // A new volume is three files - the scene, the name table that lists it and the districts table that
+        // names it - and one without the others is a scene the game has no use for. What each held is kept
+        // until the last is written, and put back if one fails.
+        List<string> files = [SceneFile, .. SdsManifest.Load(_extracted).GetFiles("FrameNameTable"), TableFile];
+        var before = files.Where(File.Exists).ToDictionary(f => f, File.ReadAllBytes);
+        try
+        {
+            string written = SdsWriter.SaveFrameResource(Frame, Archive);
+            SdsWriter.SaveFrameNameTable(Frame, Archive);
+            AtomicFile.WriteAllBytes(TableFile, _table!.ToBytes());
+            return written;
+        }
+        catch
+        {
+            foreach ((string file, byte[] bytes) in before)
+            {
+                try { File.WriteAllBytes(file, bytes); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* reported by the failure that brought us here */ }
+            }
+            throw;
+        }
+    }
 }
 
 /// <summary>One face of a load zone moved: which plane, from where to where on its axis (world), and the

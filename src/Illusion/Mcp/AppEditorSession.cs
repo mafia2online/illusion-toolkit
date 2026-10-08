@@ -1535,6 +1535,44 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 } || boxMin.Concat(boxMax).Any(v => !float.IsFinite(v)))
+            return "boxMin and boxMax are [x, y, z], finite numbers";
+        if (districts is not { Length: 1 or 2 } || districts.Any(string.IsNullOrWhiteSpace)) return "districts is one or two district names";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        // A new volume cannot be carried into a scene an editor already holds the way a moved one is: that
+        // editor would write its own scene, without the volume, over this one on its next save.
+        if (apply && (Assets.Sds.OpenArchives.HoldersOf(archive).Count > 0 || (Window?.Viewport.Streamer.IsLoading(archive) ?? false)))
+            return "city_univers is open in an editor (Whole map, or the resource editor) - leave it first";
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            var min = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
+            var max = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+            if (zones.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } refused) return refused;
+            if (apply)
+            {
+                zones.Save();
+                ZoneWrites.Landed(zones, name);
+            }
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi));
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not add the zone to city_univers: " + ex.Message;
+        }
+    }
+
     public string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results)
     {
         results = [];

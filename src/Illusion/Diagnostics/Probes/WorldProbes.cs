@@ -420,6 +420,61 @@ internal static class WorldProbes
                         return face[1] == 'x' ? side.X : face[1] == 'y' ? side.Y : side.Z;
                     }
 
+                    // A NEW zone: the districts table read and written back as it stands, a volume added to the scene
+                    // and a line to the table, and all of it found again in what would be written. In memory only.
+                    {
+                        string tableFile = Path.Combine(SdsMeshLoader.EnsureExtracted(zones.Archive), "missions", "CITY", "cityareas.bin");
+                        byte[] shipped = File.ReadAllBytes(tableFile);
+                        var table = Illusion.Formats.CityAreas.CityAreasTable.Parse(shipped);
+                        Check("cityareas.bin comes back out of its writer byte for byte", shipped.AsSpan().SequenceEqual(table.ToBytes()),
+                            $"{table.Entries.Count} entries, {table.Districts.Count} district names");
+                        Check("a line added to it reads back, its districts by name",
+                            table.Add("AREA900_PROBE", "greenfield", "kingstone") == null
+                            && Illusion.Formats.CityAreas.CityAreasTable.Parse(table.ToBytes()).Find("AREA900_PROBE") is { Target1: "greenfield", Target2: "kingstone", Flag: 1 });
+                        Check("a second line of that name is refused, and so is a name that is not plain text",
+                            table.Add("AREA900_PROBE", "greenfield", null) != null && table.Add("ЗОНА", "greenfield", null) != null);
+                        Check("a district the table has not named is added to its names",
+                            table.Add("AREA901_PROBE", "a_new_district", null) == null
+                            && Illusion.Formats.CityAreas.CityAreasTable.Parse(table.ToBytes()).Find("AREA901_PROBE") is { Target1: "a_new_district", Target2: null, Flag: 0 });
+
+                        LoadZones adding = LoadZones.Open(f => SdsMeshLoader.EnsureExtracted(f), districts, which, forNewZones: true);
+                        Check("the scene read with its name table comes back out of the writer byte for byte too",
+                            original.AsSpan().SequenceEqual(adding.Frame.WriteToStream()));
+                        Check("zones opened for moving refuse to be added to", zones.Create("AREA900_PROBE", South, new Vector3(0), new Vector3(10), "greenfield", null) != null);
+                        var far = new Vector3(9000f, 9000f, 0f);         // nothing of the city is out there
+                        int volumes = adding.Volumes.Count;
+                        string? unmade = adding.Create("AREA900_PROBE", South, far - new Vector3(50, 40, 10), far + new Vector3(50, 40, 30), "greenfield", "kingstone");
+                        Check("a new zone is added where no zone was", unmade == null && adding.Volumes.Count == volumes + 1
+                            && adding.At(far).Select(z => z.Name).SequenceEqual(["AREA900_PROBE"]) && adding.DistrictsAt(far).SequenceEqual(["greenfield", "kingstone"]),
+                            unmade ?? "");
+                        Check("...with the box it was asked for", unmade == null && Vector3.Distance(LoadZones.WorldBox(adding.Volumes["AREA900_PROBE"]).Min, far - new Vector3(50, 40, 10)) < 0.01f
+                            && Vector3.Distance(LoadZones.WorldBox(adding.Volumes["AREA900_PROBE"]).Max, far + new Vector3(50, 40, 30)) < 0.01f);
+                        Check("...and a point just outside it is outside", !adding.At(far + new Vector3(51, 0, 0)).Any());
+                        Check("a second zone of that name is refused", adding.Create("AREA900_PROBE", South, far, far + new Vector3(10), "greenfield", null) != null);
+                        string made = Path.Combine(Path.GetTempPath(), "illusion_zones_created.fr");
+                        File.WriteAllBytes(made, adding.Frame.WriteToStream());
+                        FrameObjectArea? found = new FrameResource(made).FrameObjects.Values.OfType<FrameObjectArea>().FirstOrDefault(a => a.Name.ToString() == "AREA900_PROBE");
+                        Check("the scene with the new volume reads back with it in place, six planes and all", found != null && found.Planes.Length == 6
+                            && Vector3.Distance(LoadZones.WorldBox(found).Min, far - new Vector3(50, 40, 10)) < 0.01f && LoadZones.Contains(found, far, out _),
+                            $"{new FileInfo(made).Length - original.Length} bytes longer");
+                        File.Delete(made);
+                        var names = new FrameNameTable();
+                        names.BuildDataFromResource(adding.Frame);
+                        Check("the name table built from it lists the new volume", (names.FrameData ?? []).Any(d => d.FrameIndex >= 0
+                            && adding.Frame.FrameObjects.Values.ElementAt(d.FrameIndex) is FrameObjectArea a && a.Name.ToString() == "AREA900_PROBE"));
+
+                        // Taken out again - what undoing the creation is: the scene is the shipped one once more.
+                        Check("a zone that is not there cannot be taken out", adding.Delete("AREA999_NOT_THERE") != null);
+                        string? kept = adding.Delete("AREA900_PROBE");
+                        Check("the new zone is taken out again, and the scene is what it was, byte for byte",
+                            kept == null && adding.Volumes.Count == volumes && !adding.At(far).Any()
+                            && original.AsSpan().SequenceEqual(adding.Frame.WriteToStream()), kept ?? "");
+                        var again = Illusion.Formats.CityAreas.CityAreasTable.Parse(shipped);
+                        Check("...and so is the districts table with its line added and removed",
+                            again.Add("AREA900_PROBE", "greenfield", "kingstone") == null && again.Remove("AREA900_PROBE") && !again.Remove("AREA900_PROBE")
+                            && shipped.AsSpan().SequenceEqual(again.ToBytes()));
+                    }
+
                     Plan(zones, "greenfield", -1760, 1120, -1380, 1600, 20, 5);
                 }
                 return;

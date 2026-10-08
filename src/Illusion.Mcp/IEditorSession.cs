@@ -203,4 +203,10 @@ public interface IEditorSession
     /// copy; archive_build then takes it into the game. The face is moved in the base copy, in the copy named, or -
     /// for "all" - in EVERY copy of city_univers.sds that has the zone, one result each. Null on success.</summary>
     string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results);
+
+    /// <summary>Adds a new load zone to the base copy of city_univers: a box between two world corners, made like
+    /// an existing zone, keeping the one or two districts named loaded. Without <paramref name="apply"/> nothing
+    /// is written. With it the scene, the frame name table and cityareas.bin are saved to the working copy.
+    /// Null on success.</summary>
+    string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone);
 }

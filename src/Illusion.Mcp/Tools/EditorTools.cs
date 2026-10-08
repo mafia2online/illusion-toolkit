@@ -1042,4 +1042,28 @@ public sealed class EditorTools
             return ToolResult.Fail(ex);
         }
     }
+
+    [McpServerTool(Name = "zone_create")]
+    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). Not undoable: to take it back, restore the archive's working copy. Refused while an editor holds city_univers (Whole map). Whether the game takes a zone it did not ship with has to be looked at in the game.")]
+    public static async Task<string> ZoneCreate(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The new zone's name, e.g. 'AREA900_SANDISLAND_TUNEL'. No object of the scene may have it.")] string name,
+        [Description("An existing zone to make it like, as zones_at lists it - one that stands square to the map.")] string like,
+        [Description("One corner of the box, world [x, y, z].")] float[] boxMin,
+        [Description("The opposite corner, world [x, y, z].")] float[] boxMax,
+        [Description("The districts it keeps loaded: one or two archive names, e.g. ['sandisland', 'tunel'].")] string[] districts,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? made = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneCreate(name, like, boxMin, boxMax, districts, apply, out made));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
 }
