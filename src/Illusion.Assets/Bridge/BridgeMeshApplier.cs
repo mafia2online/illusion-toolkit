@@ -466,6 +466,8 @@ public static class BridgeMeshApplier
                     if (TakePushedSkin(pushedIds, pushedWeights, resplit.Welded[i], rigBones,
                             vertices[i], global, i))
                     {
+                        // Blender's weights are floats; the file keeps bytes that must add up to 255.
+                        SnapWeightsToLattice(vertices[i]);
                         fromBlender++;
                     }
                 }
@@ -769,6 +771,9 @@ public static class BridgeMeshApplier
             }
             loopSplit[i] = split;
         }
+        // Which vertices Blender made up, before the fill below lends some of them a donor: those are the
+        // ones whose UV sets past the first are read off the source surface further down.
+        bool[] invented = donors.ConvertAll(d => d < 0).ToArray();
         // Face-mate donor fill: a brand-new vertex borrows its unmodeled channels (colors, extra
         // UV sets, damage groups) from a source vertex of the same face.
         for (int f = 0; f < faces; f++)
@@ -886,6 +891,19 @@ public static class BridgeMeshApplier
             && pushedWeights.Length >= payload.Positions.Length * 4;
         int fromBlender = 0;
 
+        // Where an invented vertex reads its hidden channels from: the source triangles of the material it
+        // is drawn with. See SourceSurface. Nothing is built until a vertex asks.
+        var surface = new SourceSurface(decoded.Positions, decoded.Indices, existingMats);
+        // The UV sets past the first are all a vertex with a donor takes from the surface - on a mesh that has
+        // none (most of the city) there is nothing to ask for.
+        bool moreUvSets = decoded.Declaration.HasFlag(VertexFlags.TexCoords1) || decoded.Declaration.HasFlag(VertexFlags.TexCoords2);
+        ulong[] materialOf = new ulong[newCount];
+        for (int slot = newMats.Length - 1; slot >= 0; slot--)
+        {
+            int end = Math.Min(newMats[slot].StartIndex + (newMats[slot].NumFaces * 3), newIndexData.Length);
+            for (int i = newMats[slot].StartIndex; i < end; i++) materialOf[newIndexData[i]] = newMats[slot].MaterialHash;
+        }
+
         var outVerts = new Vertex[newCount];
         var baseData = new byte[newCount * stride];
         int touched = 0;
@@ -918,6 +936,12 @@ public static class BridgeMeshApplier
                 donorVert.Color0.CopyTo(vert.Color0, 0);
                 donorVert.Color1.CopyTo(vert.Color1, 0);
                 vert.UVs[0] = new Half2(newUvs[v].X, newUvs[v].Y);
+                // A vertex that only BORROWED this donor from a face-mate stands somewhere else, and a whole
+                // new panel hung on one old vertex would lay every one of its corners on that vertex's texel.
+                if (invented[v] && moreUvSets && surface.Nearest(materialOf[v], newPositions[v]) is { } under)
+                {
+                    for (int set = 1; set < vert.UVs.Length; set++) vert.UVs[set] = under.Uv(donorAll, set);
+                }
                 if (!unchanged) touched++;
                 if (hasTangent)
                 {
@@ -954,10 +978,27 @@ public static class BridgeMeshApplier
                 // a donor came home with UV1 and UV2 at (0,0) — measured: 7323 of 7323 on an imported body
                 // against 0 of 6882 on the stock car, which carries all three sets on every LOD 0 vertex.
                 // A car's shader samples those sets; collapsing them onto one texel is not a neutral answer.
-                int near = NearestSourceVertex(decoded.Positions, newPositions[v]);
+                //
+                // WHICH neighbour is the other half of it. The nearest source vertex of the whole mesh is, as
+                // often as not, one of ANOTHER MATERIAL: a panel raised over a roof sits closest to the snow
+                // layer lying on that roof, a part on the body closest to the trim or the lining behind it.
+                // Those carry other masks in Color0 and UV sets that are not the paint's at all (the lining
+                // and the snow keep a position in centimetres there - measured on shubert_hearse: UV1 within
+                // -0.55..1.20 on every vertex of the body, -260..287 on the lining, -51296..31552 on the
+                // snow). 124 of the 183 vertices of a body panel added over that roof came home white with
+                // UV1 between -157 and 169, and the panel was lit like nothing else on the car. So the
+                // answer is looked for on the source surface OF THE MATERIAL THE VERTEX IS DRAWN WITH, and at
+                // the nearest POINT of it rather than the nearest corner: the UV sets are read across the
+                // triangle, so a new panel is laid over the old one's mapping instead of collapsing onto a
+                // handful of its texels. Only a material the source never had falls back to the whole mesh.
+                SourceSurface.Hit? hit = surface.Nearest(materialOf[v], newPositions[v]);
+                int near = hit?.Corner ?? NearestSourceVertex(decoded.Positions, newPositions[v]);
                 if (near >= 0)
                 {
-                    for (int set = 1; set < vert.UVs.Length; set++) vert.UVs[set] = donorAll[near].UVs[set];
+                    for (int set = 1; set < vert.UVs.Length; set++)
+                    {
+                        vert.UVs[set] = hit is { } on ? on.Uv(donorAll, set) : donorAll[near].UVs[set];
+                    }
                     donorAll[near].Color0.CopyTo(vert.Color0, 0);
                     donorAll[near].Color1.CopyTo(vert.Color1, 0);
                     if (isSkinned)
@@ -981,6 +1022,7 @@ public static class BridgeMeshApplier
             // guesses at one, and a guess is what put a new hood panel on the left door.
             if (pushedSkin && TakePushedSkin(pushedIds!, pushedWeights!, welds[v], rigBones, vert, newGlobal, v))
                 fromBlender++;
+            if (isSkinned) SnapWeightsToLattice(vert);
 
             outVerts[v] = vert;
         }
@@ -2217,6 +2259,48 @@ public static class BridgeMeshApplier
         return true;
     }
 
+    /// <summary>
+    /// Puts a vertex's weights on the lattice the file stores them on - a byte each - so that the four bytes add
+    /// up to exactly 255.
+    /// <para>
+    /// The codec rounds each weight to its byte on its own (measured, --probe-weight-lattice). Two weights that
+    /// add up to 1 then still add up to 255; three need not - 0.9816 + 0.0131 + 0.0053 is stored as 250 + 3 + 1 -
+    /// and the game does not renormalize: the missing 1/255 of the vertex is drawn with no bone at all, which
+    /// leaves it at the origin of the WORLD. On a car parked 1650 m from that origin four such vertices of a new
+    /// roof stood 6.5 m out of the body, as a blade pointing at the middle of the map; in the editor, which
+    /// renormalizes, they were where they belonged. Not one vertex of a shipped car is off the lattice (0 of 8796
+    /// on shubert_hearse), so this never changes a weight that came from the game.
+    /// </para>
+    /// </summary>
+    private static void SnapWeightsToLattice(Vertex vert)
+    {
+        float total = 0f;
+        for (int k = 0; k < 4; k++) total += MathF.Max(vert.BoneWeights[k], 0f);
+        if (total <= 0f) return;
+
+        Span<int> bytes = stackalloc int[4];
+        Span<float> rest = stackalloc float[4];
+        int sum = 0;
+        for (int k = 0; k < 4; k++)
+        {
+            float exact = MathF.Max(vert.BoneWeights[k], 0f) / total * 255f;
+            bytes[k] = (int)MathF.Floor(exact + 1e-4f);
+            rest[k] = exact - bytes[k];
+            sum += bytes[k];
+        }
+        // What the flooring left over goes, a byte at a time, to the weights that lost most by it.
+        while (sum < 255)
+        {
+            int most = 0;
+            for (int k = 1; k < 4; k++)
+                if (rest[k] > rest[most]) most = k;
+            bytes[most]++;
+            rest[most] = float.MinValue;
+            sum++;
+        }
+        for (int k = 0; k < 4; k++) vert.BoneWeights[k] = bytes[k] / 255f;
+    }
+
     /// <summary>The original vertex a new mesh's corner descends from, or -1 when Blender made it up.</summary>
     private static int DonorOf(uint[] indices, IReadOnlyList<int> donors, int corner)
     {
@@ -2225,9 +2309,285 @@ public static class BridgeMeshApplier
         return v >= 0 && v < donors.Count ? donors[v] : -1;
     }
 
+    /// <summary>
+    /// For a probe: asks the source surface of a mesh for the nearest point to <paramref name="samples"/> places
+    /// on and round the mesh, through the grid and by a scan of every triangle, and says how many times the two
+    /// disagree on how near it is (and how many triangles the largest material has). Zero is the only right answer.
+    /// </summary>
+    internal static (int Disagreements, int Asked, int LargestMaterial) SourceSurfaceAgreement(
+        Vector3[] positions, uint[] indices, MaterialStruct[] materials, int samples)
+    {
+        var surface = new SourceSurface(positions, indices, materials);
+        var random = new Random(20261009);
+        int disagreements = 0, asked = 0, largest = 0;
+        foreach (ulong material in materials.Select(m => m.MaterialHash).Distinct())
+        {
+            largest = Math.Max(largest, materials.Where(m => m.MaterialHash == material).Sum(m => m.NumFaces));
+            for (int i = 0; i < samples; i++)
+            {
+                // on the mesh, a hand's breadth off it, and (one in eight) well outside it
+                Vector3 at = positions[random.Next(positions.Length)];
+                float reach = i % 8 == 7 ? 6f : i % 2 == 0 ? 0.02f : 0.3f;
+                at += new Vector3((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f) * (2f * reach);
+                if (surface.Nearest(material, at) is not { } found || surface.NearestByScan(material, at) is not { } scanned) continue;
+                asked++;
+                float a = Vector3.Distance(at, (positions[found.A] * found.Wa) + (positions[found.B] * found.Wb) + (positions[found.C] * found.Wc));
+                float b = Vector3.Distance(at, (positions[scanned.A] * scanned.Wa) + (positions[scanned.B] * scanned.Wb) + (positions[scanned.C] * scanned.Wc));
+                if (MathF.Abs(a - b) > 1e-5f) disagreements++;
+            }
+        }
+        return (disagreements, asked, largest);
+    }
+
+    /// <summary>
+    /// The source mesh as surfaces, one per material: the triangles each material is drawn with. Answers
+    /// "what lies nearest to this point on the surface of THIS material" - the corner to inherit the
+    /// per-vertex masks and the skin from, and the weights to read the UV sets across the triangle with.
+    /// <para>
+    /// A push can ask this for every vertex of a mesh (a re-meshed body, a district block cut through), so a
+    /// material's triangles are put in a grid the first time the material is asked for and a question looks
+    /// only at the cells round its point, widening until nothing nearer can lie outside them. A push that
+    /// invents no vertex builds nothing.
+    /// </para>
+    /// </summary>
+    private sealed class SourceSurface
+    {
+        // Under this many triangles a plain scan is as fast as a grid and has nothing to build.
+        private const int GridFrom = 96;
+        private const int MaxCellsPerAxis = 48;
+
+        private readonly Vector3[] _positions;
+        private readonly uint[] _indices;
+        private readonly MaterialStruct[] _materials;
+        private readonly Dictionary<ulong, Surface?> _surfaces = [];
+
+        internal SourceSurface(Vector3[] positions, uint[] indices, MaterialStruct[] materials)
+        {
+            _positions = positions;
+            _indices = indices;
+            _materials = materials;
+        }
+
+        /// <summary>A point of a source triangle: its corners, the weights of the point between them, and
+        /// the corner it is closest to.</summary>
+        internal readonly record struct Hit(int A, int B, int C, float Wa, float Wb, float Wc)
+        {
+            internal int Corner => Wa >= Wb && Wa >= Wc ? A : Wb >= Wc ? B : C;
+
+            internal Half2 Uv(Vertex[] source, int set) => new(
+                ((float)source[A].UVs[set].X * Wa) + ((float)source[B].UVs[set].X * Wb) + ((float)source[C].UVs[set].X * Wc),
+                ((float)source[A].UVs[set].Y * Wa) + ((float)source[B].UVs[set].Y * Wb) + ((float)source[C].UVs[set].Y * Wc));
+        }
+
+        internal Hit? Nearest(ulong material, Vector3 to)
+        {
+            if (!_surfaces.TryGetValue(material, out Surface? surface)) _surfaces[material] = surface = Build(material);
+            return surface?.Nearest(_positions, to);
+        }
+
+        /// <summary>The same answer the slow way - every triangle of the material - for a probe to hold the grid against.</summary>
+        internal Hit? NearestByScan(ulong material, Vector3 to)
+        {
+            if (!_surfaces.TryGetValue(material, out Surface? surface)) _surfaces[material] = surface = Build(material);
+            return surface?.Nearest(_positions, to, scan: true);
+        }
+
+        private Surface? Build(ulong material)
+        {
+            var triangles = new List<(int A, int B, int C)>();
+            foreach (MaterialStruct slot in _materials)
+            {
+                if (slot.MaterialHash != material) continue;
+                int end = Math.Min(slot.StartIndex + (slot.NumFaces * 3), _indices.Length);
+                for (int i = slot.StartIndex; i + 2 < end; i += 3)
+                {
+                    int a = (int)_indices[i], b = (int)_indices[i + 1], c = (int)_indices[i + 2];
+                    if (a >= _positions.Length || b >= _positions.Length || c >= _positions.Length) continue;
+                    // A triangle folded onto a line has no inside to read across.
+                    if (Vector3.Cross(_positions[b] - _positions[a], _positions[c] - _positions[a]).LengthSquared() < 1e-14f) continue;
+                    triangles.Add((a, b, c));
+                }
+            }
+            return triangles.Count == 0 ? null : new Surface(_positions, [.. triangles]);
+        }
+
+        /// <summary>One material's triangles, in a grid when there are enough of them to be worth one.</summary>
+        private sealed class Surface
+        {
+            private readonly (int A, int B, int C)[] _triangles;
+            private readonly Vector3 _min;
+            private readonly float _cell;
+            private readonly int _nx, _ny, _nz;
+            private readonly int[]? _cellStart;         // per cell, where its triangles begin in _cellItems
+            private readonly int[]? _cellItems;
+            private readonly int[]? _seenAt;            // per triangle, the question that last looked at it
+            private int _question;
+
+            internal Surface(Vector3[] positions, (int A, int B, int C)[] triangles)
+            {
+                _triangles = triangles;
+                if (triangles.Length < GridFrom) return;
+
+                Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+                foreach ((int a, int b, int c) in triangles)
+                {
+                    min = Vector3.Min(min, Vector3.Min(positions[a], Vector3.Min(positions[b], positions[c])));
+                    max = Vector3.Max(max, Vector3.Max(positions[a], Vector3.Max(positions[b], positions[c])));
+                }
+                Vector3 size = max - min;
+                float longest = MathF.Max(size.X, MathF.Max(size.Y, size.Z));
+                if (!float.IsFinite(longest) || longest <= 0f) return;          // every triangle on one point: scan
+                int along = Math.Clamp((int)MathF.Round(MathF.Cbrt(triangles.Length)), 1, MaxCellsPerAxis);
+                _min = min;
+                _cell = longest / along;
+                _nx = Math.Clamp((int)MathF.Ceiling(size.X / _cell), 1, MaxCellsPerAxis);
+                _ny = Math.Clamp((int)MathF.Ceiling(size.Y / _cell), 1, MaxCellsPerAxis);
+                _nz = Math.Clamp((int)MathF.Ceiling(size.Z / _cell), 1, MaxCellsPerAxis);
+
+                // Each triangle goes into every cell its box touches: counted, then placed.
+                var counts = new int[(_nx * _ny * _nz) + 1];
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    for (int t = 0; t < triangles.Length; t++)
+                    {
+                        (int a, int b, int c) = triangles[t];
+                        Vector3 lo = Vector3.Min(positions[a], Vector3.Min(positions[b], positions[c]));
+                        Vector3 hi = Vector3.Max(positions[a], Vector3.Max(positions[b], positions[c]));
+                        (int x0, int y0, int z0) = CellOf(lo);
+                        (int x1, int y1, int z1) = CellOf(hi);
+                        for (int z = z0; z <= z1; z++)
+                        {
+                            for (int y = y0; y <= y1; y++)
+                            {
+                                for (int x = x0; x <= x1; x++)
+                                {
+                                    int cell = x + (_nx * (y + (_ny * z)));
+                                    if (pass == 0) counts[cell + 1]++;
+                                    else _cellItems![counts[cell]++] = t;
+                                }
+                            }
+                        }
+                    }
+                    if (pass == 0)
+                    {
+                        for (int cell = 0; cell < counts.Length - 1; cell++) counts[cell + 1] += counts[cell];
+                        _cellStart = (int[])counts.Clone();
+                        _cellItems = new int[counts[^1]];
+                    }
+                }
+                _seenAt = new int[triangles.Length];
+            }
+
+            private (int X, int Y, int Z) CellOf(Vector3 p) => (
+                Math.Clamp((int)((p.X - _min.X) / _cell), 0, _nx - 1),
+                Math.Clamp((int)((p.Y - _min.Y) / _cell), 0, _ny - 1),
+                Math.Clamp((int)((p.Z - _min.Z) / _cell), 0, _nz - 1));
+
+            internal Hit? Nearest(Vector3[] positions, Vector3 to, bool scan = false)
+            {
+                Hit? best = null;
+                float bestSquared = float.MaxValue;
+
+                void Try(int t)
+                {
+                    (int a, int b, int c) = _triangles[t];
+                    (float wa, float wb, float wc) = ClosestWeights(to, positions[a], positions[b], positions[c]);
+                    Vector3 at = (positions[a] * wa) + (positions[b] * wb) + (positions[c] * wc);
+                    float squared = Vector3.DistanceSquared(at, to);
+                    if (squared >= bestSquared) return;
+                    bestSquared = squared;
+                    best = new Hit(a, b, c, wa, wb, wc);
+                }
+
+                if (scan || _cellStart == null || _cellItems == null || _seenAt == null)
+                {
+                    for (int t = 0; t < _triangles.Length; t++) Try(t);
+                    return best;
+                }
+
+                // Shell by shell round the cell the point is in (or the nearest one, for a point outside the
+                // grid). A triangle no visited cell holds lies wholly outside the block of visited cells, so it
+                // is at least `reach` cells from the point's place in the grid - and no nearer to the point
+                // itself than that less the point's own distance from the grid.
+                if (++_question == int.MaxValue)
+                {
+                    Array.Clear(_seenAt);
+                    _question = 1;
+                }
+                Vector3 inside = Vector3.Clamp(to, _min, _min + (new Vector3(_nx, _ny, _nz) * _cell));
+                float outside = Vector3.Distance(inside, to);
+                (int cx, int cy, int cz) = CellOf(inside);
+                int furthest = Math.Max(Math.Max(Math.Max(cx, _nx - 1 - cx), Math.Max(cy, _ny - 1 - cy)), Math.Max(cz, _nz - 1 - cz));
+                for (int reach = 0; reach <= furthest; reach++)
+                {
+                    int x0 = Math.Max(cx - reach, 0), x1 = Math.Min(cx + reach, _nx - 1);
+                    int y0 = Math.Max(cy - reach, 0), y1 = Math.Min(cy + reach, _ny - 1);
+                    int z0 = Math.Max(cz - reach, 0), z1 = Math.Min(cz + reach, _nz - 1);
+                    for (int z = z0; z <= z1; z++)
+                    {
+                        for (int y = y0; y <= y1; y++)
+                        {
+                            for (int x = x0; x <= x1; x++)
+                            {
+                                // only the shell: the cells inside it were looked at on the way out
+                                if (Math.Max(Math.Max(Math.Abs(x - cx), Math.Abs(y - cy)), Math.Abs(z - cz)) != reach) continue;
+                                int cell = x + (_nx * (y + (_ny * z)));
+                                for (int i = _cellStart[cell]; i < _cellStart[cell + 1]; i++)
+                                {
+                                    int t = _cellItems[i];
+                                    if (_seenAt[t] == _question) continue;
+                                    _seenAt[t] = _question;
+                                    Try(t);
+                                }
+                            }
+                        }
+                    }
+                    float clear = (reach * _cell) - outside;
+                    if (best != null && clear > 0f && bestSquared <= clear * clear) break;
+                }
+                return best;
+            }
+        }
+
+        /// <summary>Barycentric weights of the point of triangle abc closest to p (Ericson, Real-Time
+        /// Collision Detection 5.1.5).</summary>
+        private static (float Wa, float Wb, float Wc) ClosestWeights(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+        {
+            Vector3 ab = b - a, ac = c - a, ap = p - a;
+            float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+            if (d1 <= 0f && d2 <= 0f) return (1f, 0f, 0f);
+            Vector3 bp = p - b;
+            float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+            if (d3 >= 0f && d4 <= d3) return (0f, 1f, 0f);
+            float vc = (d1 * d4) - (d3 * d2);
+            if (vc <= 0f && d1 >= 0f && d3 <= 0f)
+            {
+                float t = d1 / (d1 - d3);
+                return (1f - t, t, 0f);
+            }
+            Vector3 cp = p - c;
+            float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+            if (d6 >= 0f && d5 <= d6) return (0f, 0f, 1f);
+            float vb = (d5 * d2) - (d1 * d6);
+            if (vb <= 0f && d2 >= 0f && d6 <= 0f)
+            {
+                float t = d2 / (d2 - d6);
+                return (1f - t, 0f, t);
+            }
+            float va = (d3 * d6) - (d5 * d4);
+            if (va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f)
+            {
+                float t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+                return (0f, 1f - t, t);
+            }
+            float sum = va + vb + vc;
+            return (va / sum, vb / sum, vc / sum);
+        }
+    }
+
     /// <summary>Index of the source vertex closest to <paramref name="to"/>, or -1 when there are none.
-    /// Linear: this runs only for vertices Blender ADDED to a skinned mesh, which is a handful next to a
-    /// body's thousands, and a spatial index would be more machinery than the case is worth.</summary>
+    /// Linear, and asked only for a vertex Blender added in a material the source mesh never had - the
+    /// others are answered by <see cref="SourceSurface"/>.</summary>
     private static int NearestSourceVertex(Vector3[] source, Vector3 to)
     {
         int best = -1;
