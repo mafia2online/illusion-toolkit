@@ -46,6 +46,27 @@ public sealed record CarCloneInfo(string Name, int VehicleId, int TrafficRows, i
 /// not in the archive, and no longer in the manifest.
 public sealed record PackedArchive(string Archive, string? Backup, IReadOnlyList<string>? Dropped = null);
 
+/// <summary>One triangle of a mesh, in world space, with the material of its slot and its level of detail.</summary>
+public sealed record TriangleInfo(int Lod, string Material, float[] A, float[] B, float[] C);
+
+/// <summary>What a box takes out of a mesh: how many triangles on each level of detail, whether they were
+/// hidden or only found, and the first of them.</summary>
+public sealed record HiddenTrianglesInfo(int Triangles, IReadOnlyList<int> PerLod, bool Applied, IReadOnlyList<TriangleInfo> Sample);
+
+/// <summary>One material slot of a mesh: its index, the material it draws with (null when no loaded library
+/// knows the hash), how many triangles it covers, and whether this call re-pointed it.</summary>
+public sealed record MeshSlotInfo(int Slot, string? Material, int Triangles, bool Changed);
+
+/// <summary>One collision file of the open scene: its placements, the hulls it carried, how many of those no
+/// placement referenced, and whether they were removed or only counted.</summary>
+public sealed record UnusedHullsInfo(string Layer, int Placements, int Hulls, int Unused, bool Removed);
+
+/// <summary>One placement of a city_crash prop (a tree, a lamp, a bin): the prop's name, the placement's id in the
+/// table, where it stands, whether the other season holds the same placement, and whether the two are kept in
+/// step — an edit of a linked placement is made to its twin, and deleting it deletes both; one the user
+/// unlinked ("In all seasons" off) loses only the season on screen.</summary>
+public sealed record CrashPlacementInfo(string Prop, int Id, float[] Position, bool BothSeasons, bool SeasonLinked);
+
 /// <summary>One car built under another's name: the model name the replaced archives are keyed by, each archive
 /// with the backup of what it held, and what was left as it was.</summary>
 public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
@@ -126,3 +147,17 @@ public sealed record ObjectImportOutcome(
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
+
+/// <summary>One load zone at a point: the districts it keeps loaded, whether the point is inside its volume
+/// (and how far outside when not), its box in world space, whether it is of the kind that loads its districts
+/// for a player who appears inside it - which its name decides (two words after the number) - and whether it
+/// was added to the zones the game ships with.</summary>
+public sealed record LoadZoneInfo(string Name, IReadOnlyList<string> Districts, bool Inside, float OutsideBy, float[] BoxMin, float[] BoxMax,
+    bool LoadsOnArrival = false, bool Added = false);
+
+/// <summary>A face of a load zone moved - or, when not applied, what moving it would do: from where to where on
+/// its axis (world), the zone's box afterwards, the districts it asks for, and the working-copy file written.</summary>
+/// <paramref name="Copy"/> is which copy of city_univers.sds this is about: "base" or a DLC's folder name.
+public sealed record LoadZoneMoveInfo(
+    string Copy, string Zone, string Face, float From, float To, float[] BoxMin, float[] BoxMax, IReadOnlyList<string> Districts, bool Applied,
+    string? File, string Archive);

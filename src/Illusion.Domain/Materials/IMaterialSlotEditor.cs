@@ -13,4 +13,14 @@ public interface IMaterialSlotEditor : ISceneSource
 
     /// <summary>Repoints a slot at another material hash. False when the slot is out of range.</summary>
     bool SetSlotMaterial(int slotIndex, ulong hash);
+
+    /// <summary>
+    /// The hash every slot of every level binds, level by level. What an undo of a re-point puts back: the
+    /// mirror into further levels goes by the slot's OLD hash, and that cannot be run backwards - a level whose
+    /// slots were A and B is B and B after "A to B", and "B to A" makes it A and A.
+    /// </summary>
+    IReadOnlyList<ulong[]> GetSlotTable();
+
+    /// <summary>Puts a table taken with <see cref="GetSlotTable"/> back. False when it no longer fits the mesh.</summary>
+    bool SetSlotTable(IReadOnlyList<ulong[]> table);
 }

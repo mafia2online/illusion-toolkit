@@ -94,6 +94,10 @@ The last path is remembered. A green download arrow appears beside the gear when
 out; the same progress bar shows the download, and the toolkit restarts to install it.
 *(A "Resource Editor" tile exists but is a disabled stub.)*
 
+The library browser shows a picture of each character, wardrobe piece and car, drawn from its
+archive: people head and shoulders, a car on its wheels. Pictures are kept on disk and only the
+tiles on screen are read.
+
 ### Viewport and streaming
 
 - Area catalog of open-world districts and interiors, from `cityareas.bin`.
@@ -200,6 +204,9 @@ with it: *Blended* becomes a translucent surface (glass), anything else a cut-ou
 grille). The material is written to the library on Save and its textures are packed into the
 archive on Build.
 
+A skinned mesh - a car body - can gain vertices: its remap pools are rebuilt from the pushed skin.
+Two levels of detail of one object can go in one push. A person opens standing on their rig.
+
 Limits worth knowing: untouched geometry round-trips bit-exactly (that is how a real reshape is
 told apart from an untouched one); a topology rebuild leaves lower LODs and collision with the old
 shape; collision placements refuse scale and mirror pushes (resize the hull with the toolkit's own
@@ -209,9 +216,15 @@ split it into several objects.
 
 ### Saving, building, backups
 
-**Ctrl+S** writes edited FrameResources back to the extracted mirror. **Build** repacks every
-edited archive into its `.sds`, creating a timestamped versioned backup first; archives are packed
-independently, so one failure (the game holding a file open, say) does not block the rest.
+**Ctrl+S** writes edited FrameResources back to the extracted mirror. **Build** opens a window
+first: every archive edited in the session, ticked, and under each the files of its working copy that
+differ from the archive the game has now. A Build packs a whole working copy, so that list is
+everything that is about to change in the game - including a file changed in that folder in an
+earlier session and forgotten, which is marked and counted out loud. Untick an archive to leave it
+for a later Build; **Add archive…** packs one whose working copy was changed by hand (a script, a
+table). Each ticked archive is then repacked into its `.sds` with a timestamped versioned backup
+first; archives are packed independently, so one failure (the game holding a file open, say) does
+not block the rest.
 **Restore Backup** rolls a single archive back to an earlier version - replacing both the live
 `.sds` and its extracted mirror - from the File menu, the tree's context menu or the viewport's.
 *(Material-library edits are not covered by the backup flow.)*
@@ -233,6 +246,50 @@ beside the working copy in `illusion_memory.json`, and stated again on every Bui
 resource changed size. A repacked stock car states exactly what the original did
 (`--probe-car-clone`).
 
+### Tools menu
+
+What the MCP server can do to a scene, the menus can too: each item under **Tools** opens a window
+over the same job the matching tool runs, so a result does not depend on who asked for it.
+
+- **Hide triangles…** (map and resource editor) - cuts an opening in the selected mesh without
+  rebuilding it: a doorway in a stock wall, a pane of glass. With the window open the triangles are
+  picked by clicking them on the mesh in the viewport (a click on a marked one takes it back), or -
+  for many at once - by a box that holds them. What would be hidden is marked on the mesh, the count
+  says what goes on each level of detail, and Hide is one undo step.
+- **Mirror to winter…** (map editor) - carries the loaded district's edits into its winter archive.
+  The item is greyed out, and says why, when the district has no winter variant or the winter one is
+  what is loaded.
+- **Loading zones…** (map editor) - lists the zones of `city_univers` that hold a point (the
+  camera's, or one typed in), says which districts a player who appears there gets, and moves one
+  face of a zone. A district streams in where a zone named with two words after its number
+  (`AREA341_GREENFIELD_KINGSTONE`) holds the player; one named with a single word
+  (`AREA0019_GREENFIELD`) does not load it by itself. A moved face is written at once, redrawn in the Loading
+  zones layer, queued for Build, and is one step of the editor's Undo.
+  The zones are also edited in the viewport, with no window: with the **Loading zones** layer on, a
+  click picks the zone that spot is in (the same spot again takes the next one there) and the tool
+  shelf works on it - **Move** puts three arrows at the zone's centre and moves it whole, **Scale**
+  puts an arrow at the centre of each face and pulls that face alone. A side sliced off by a slanted
+  plane has no arrow. Letting go writes `city_univers` and queues it for Build; the right button or
+  Esc drops a drag, and Undo / Redo take back exactly what the drag changed. With **Whole map** on the
+  editor holds `city_univers` itself; a zone write is carried into that scene too, so the editor's own
+  save does not put the zone back.
+  The layer draws each zone as the edges of its box with a faint fill, hidden by the scene in front of
+  it and fading with distance (not in a parallel view); a zone with one word in its name - which does
+  not load its district by itself - is drawn fainter, the picked zone carries its name and
+  districts over it, and a zone that was added to the game's own has a second, near-white frame
+  round it (and "added" in its label and in the Loading zones list).
+  **New loading zone** (the button at the foot of the tool shelf, with the layer on) makes a zone
+  where the view looks: a name and the one or two districts it keeps loaded are asked, the box appears
+  picked, and Move and Scale put it in place. The name wants two words after its number
+  (`AREA900_DOCK_SOUTH`): that is what makes the game load the districts for a player who appears
+  inside, and the flyout says so when a name has one. It is written at once - the scene, its name
+  table and `cityareas.bin` - and Undo takes it out again. Not with Whole map on.
+- **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
+  line and group names), with every string it would change listed before anything is written and a
+  backup kept beside the file.
+- **Clone car…**, **Replace a car…**, **Export car for multiplayer…** (resource editor) - the three
+  car jobs described under the MCP server below, starting from the car on the stage.
+
 ### MCP server
 
 An MCP endpoint runs for the lifetime of the application at `http://127.0.0.1:2010/mcp` - loopback
@@ -240,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 76 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 86 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -254,11 +311,12 @@ map editor itself.
 | **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
 | **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
-| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
+| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games`, `ping` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
-| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import` |
+| **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
+| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create`, `zone_delete` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -270,6 +328,27 @@ and nothing reaches the game before `editor_build` (which keeps the usual timest
 `editor_target resource` points the same tools at the resource editor's stage (one archive, such as
 a car, opened with `resource_open`); `car_tuning` and `car_tuning_set` read and edit that car's
 entity-data tables the way the Tuning tab does.
+
+`mesh_hide_triangles` cuts an opening into a stock mesh without rebuilding it: the triangles inside
+a world-space box are hidden on every level of detail and no vertex is touched, so a stock facade
+keeps the channels Blender never sees. It reports by default and hides with `apply`.
+`mesh_materials` lists a mesh's material slots and re-points one at another material - no geometry
+and no UV is touched. `collision_unused_hulls` counts, and with `apply` removes, the hulls no placement references.
+`crash_placements` lists the crash-layer props (trees, lamps, bins) standing in a box and can
+delete them, the twin season included.
+
+`zones_at` lists the load zones of `city_univers` that hold a point and the districts they name,
+`zones_map` draws where a district is asked for as a text plan, and `zone_move_face` moves one face
+of a zone (its plane and its box together; reports by default, writes with `apply`). Measured in
+the game: a district streams in where a zone named with two words after its number holds the player
+- one named with a single word does not load it by itself - and free ride reads the base game's
+`city_univers`, not the copy a DLC ships.
+`zone_create` adds a new zone: a box between two corners, made like an existing zone, with a line in
+`cityareas.bin` for the districts it keeps loaded. Measured in the game, with new zones over one
+spot: a player who appears inside a zone named `AREA901_FOO_BAR` gets the district - with one
+district in the table or two - and inside one named `AREA902_FOOXBAR` he does not. With the map
+editor open the new zone is a step of its history; `zone_delete` takes an added zone out again (a
+zone the game ships with is refused). Zones are made in the base game's `city_univers` only.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and

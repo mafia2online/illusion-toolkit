@@ -145,14 +145,19 @@ internal sealed class ScenePersistence
     /// backup first (all archives in this build share one timestamp). Each archive is packed independently: a
     /// failure is captured (not thrown) so the remaining archives still build, and only the ones that packed
     /// leave the list — the rest stay buildable for a retry.</summary>
-    public D3DImageHost.BuildReport BuildEdits(bool createBackup = true)
+    public D3DImageHost.BuildReport BuildEdits(bool createBackup = true) => BuildArchives(_editedArchives.Values.ToList(), createBackup);
+
+    /// <summary><see cref="BuildEdits"/> for a chosen set: the archives ticked in the Build window. One that is
+    /// on the build list and is not among them stays on it; one that is not on the list at all - a working
+    /// copy changed by hand, added in the window - is packed like the rest.</summary>
+    public D3DImageHost.BuildReport BuildArchives(IReadOnlyList<FileInfo> archives, bool createBackup = true)
     {
         SaveEdits(); // ensure the extracted folders match memory before we pack them
 
         var packed = new List<SdsWriter.PackResult>();
         var failed = new List<D3DImageHost.BuildFailure>();
         DateTime when = DateTime.Now; // one stamp for the whole build, so co-packed archives group in backups\
-        foreach (FileInfo sds in _editedArchives.Values.ToList())
+        foreach (FileInfo sds in archives)
         {
             try
             {

@@ -263,17 +263,18 @@ internal sealed class AppEditorSession : IEditorSession
             if (nameContains != null && !node.Name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
             if (kind != null && !string.Equals(node.Kind, kind, StringComparison.OrdinalIgnoreCase)) continue;
 
-            // An instanced mesh's bounds span every copy across the map — not where this row is.
-            bool bounded = node.Mesh is { Instanced: false };
+            // What the row stands where: a drawn mesh, or — for a collision placement — its hull. An instanced
+            // mesh has neither: its bounds span every copy across the map, not where this row is.
+            Shape? shape = ShapeOf(node, lo is { } boxLo && hi is { } boxHi ? (boxLo, boxHi) : null);
             Vector3? position = node.Source is IFrameNode frame ? frame.WorldTransform.Translation : null;
             int? triangles = null;
             Vector3 insideMin = default, insideMax = default;
             if (lo is { } min && hi is { } max)
             {
-                if (bounded)
+                if (shape is { } solid)
                 {
-                    if (!Overlaps(node.Mesh!.BoundsMin, node.Mesh.BoundsMax, min, max)) continue;
-                    triangles = TrianglesInBox(node.Mesh, min, max, out insideMin, out insideMax);
+                    if (!Overlaps(solid.Min, solid.Max, min, max)) continue;
+                    triangles = TrianglesInBox(solid, min, max, out insideMin, out insideMax);
                     if (triangles == 0) continue;   // its box reaches in; its geometry does not
                 }
                 else if (position is not { } p || !Overlaps(p, p, min, max))
@@ -285,14 +286,14 @@ internal sealed class AppEditorSession : IEditorSession
             found.Add(new SceneObjectInfo(
                 node.Name, node.Kind, PathOf(node),
                 position is { } at ? [at.X, at.Y, at.Z] : null,
-                bounded ? [node.Mesh!.BoundsMin.X, node.Mesh.BoundsMin.Y, node.Mesh.BoundsMin.Z] : null,
-                bounded ? [node.Mesh!.BoundsMax.X, node.Mesh.BoundsMax.Y, node.Mesh.BoundsMax.Z] : null,
+                shape is { } b0 ? [b0.Min.X, b0.Min.Y, b0.Min.Z] : null,
+                shape is { } b1 ? [b1.Max.X, b1.Max.Y, b1.Max.Z] : null,
                 node.IsSelected,
                 triangles,
                 triangles > 0 ? [insideMin.X, insideMin.Y, insideMin.Z] : null,
                 triangles > 0 ? [insideMax.X, insideMax.Y, insideMax.Z] : null,
-                node.Mesh?.PickPositions?.Length,
-                node.Mesh?.PickIndices?.Length / 3));
+                shape?.Positions?.Length ?? node.Mesh?.PickPositions?.Length,
+                (shape?.Indices?.Length ?? node.Mesh?.PickIndices?.Length) / 3));
         }
 
         if (kind == null || string.Equals(kind, CrashCopyKind, StringComparison.OrdinalIgnoreCase))
@@ -396,16 +397,87 @@ internal sealed class AppEditorSession : IEditorSession
         return count;
     }
 
+    /// <summary>The triangles a row occupies and their world-space bounds. Positions are null for a mesh that
+    /// keeps no CPU geometry — its bounds still stand.</summary>
+    private readonly record struct Shape(Vector3[]? Positions, uint[]? Indices, Matrix4x4 World, Vector3 Min, Vector3 Max);
+
+    // Decoded hulls, by the cooked bytes they came from: a re-cooked hull is another array and is decoded again.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], Hull> Hulls = new();
+
+    // A decoded hull and the box of its vertices in its own space - what a placement of it is first tried against.
+    private sealed record Hull(Vector3[] Vertices, uint[] Triangles, Vector3 Min, Vector3 Max);
+
+    /// <param name="box">A world box the caller is asking about: a hull whose own box, stood where the placement
+    /// stands, does not reach it is answered with that looser box and without its vertices being put through
+    /// the placement's matrix - a search of a district tries every placement of every collision file.</param>
+    private static Shape? ShapeOf(SceneNode node, (Vector3 Min, Vector3 Max)? box = null)
+    {
+        if (node.Mesh is { Instanced: false } mesh)
+        {
+            return new Shape(mesh.PickPositions, mesh.PickIndices, mesh.World, mesh.BoundsMin, mesh.BoundsMax);
+        }
+        if (node.Source is not Assets.Adapters.CollisionInstanceAdapter placement) return null;
+
+        // by the file's own index of its hulls: a scan of the list for every placement was hulls x placements
+        byte[]? cooked = placement.Document.MeshFor(placement.Instance.Hash)?.CookedMesh;
+        if (cooked == null) return null;
+        Hull hull = Hulls.GetValue(cooked, static bytes =>
+        {
+            try
+            {
+                Formats.Collisions.CookedTriangleMesh decoded = Formats.Collisions.CookedTriangleMesh.Decode(bytes);
+                var lo = new Vector3(float.MaxValue);
+                var hi = new Vector3(float.MinValue);
+                foreach (Vector3 vertex in decoded.Vertices)
+                {
+                    lo = Vector3.Min(lo, vertex);
+                    hi = Vector3.Max(hi, vertex);
+                }
+                return new Hull(decoded.Vertices, Array.ConvertAll(decoded.Triangles, i => (uint)i), lo, hi);
+            }
+            catch (Formats.Collisions.CollisionDecodeException)
+            {
+                return new Hull([], [], default, default);
+            }
+        });
+        if (hull.Vertices.Length == 0) return null;
+
+        Matrix4x4 world = placement.WorldTransform;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        if (box is { } asked)
+        {
+            // the eight corners of the hull's own box: it holds every vertex, so a miss here is a miss
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = Vector3.Transform(new Vector3((i & 1) == 0 ? hull.Min.X : hull.Max.X,
+                    (i & 2) == 0 ? hull.Min.Y : hull.Max.Y, (i & 4) == 0 ? hull.Min.Z : hull.Max.Z), world);
+                min = Vector3.Min(min, corner);
+                max = Vector3.Max(max, corner);
+            }
+            if (!Overlaps(min, max, asked.Min, asked.Max)) return new Shape(hull.Vertices, hull.Triangles, world, min, max);
+            min = new Vector3(float.MaxValue);
+            max = new Vector3(float.MinValue);
+        }
+        foreach (Vector3 vertex in hull.Vertices)
+        {
+            Vector3 at = Vector3.Transform(vertex, world);
+            min = Vector3.Min(min, at);
+            max = Vector3.Max(max, at);
+        }
+        return new Shape(hull.Vertices, hull.Triangles, world, min, max);
+    }
+
     /// <summary>How many of a mesh's triangles reach into a world-space box, and the extent of those
     /// triangles clipped to it. Null when the mesh keeps no CPU geometry to ask.</summary>
     private static int? TrianglesInBox(
-        Rendering.Gpu.GpuMesh mesh, Vector3 boxMin, Vector3 boxMax, out Vector3 insideMin, out Vector3 insideMax)
+        Shape shape, Vector3 boxMin, Vector3 boxMax, out Vector3 insideMin, out Vector3 insideMax)
     {
         insideMin = new Vector3(float.MaxValue);
         insideMax = new Vector3(float.MinValue);
-        if (mesh.PickPositions is not { } positions || mesh.PickIndices is not { } indices) return null;
+        if (shape.Positions is not { } positions || shape.Indices is not { } indices) return null;
 
-        Matrix4x4 world = mesh.World;
+        Matrix4x4 world = shape.World;
         int count = 0;
         for (int i = 0; i + 2 < indices.Length; i += 3)
         {
@@ -1126,20 +1198,209 @@ internal sealed class AppEditorSession : IEditorSession
         return null;
     }
 
+    public string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample, string? shared,
+        out HiddenTrianglesInfo? result)
+    {
+        result = null;
+        if (TargetHost is not { } host) return TargetNotOpen;
+        GeometryEditController.SharedGeometry sharing;
+        if (string.IsNullOrWhiteSpace(shared)) sharing = GeometryEditController.SharedGeometry.Refuse;
+        else if (string.Equals(shared, "own", StringComparison.OrdinalIgnoreCase)) sharing = GeometryEditController.SharedGeometry.OwnCopy;
+        else if (string.Equals(shared, "all", StringComparison.OrdinalIgnoreCase)) sharing = GeometryEditController.SharedGeometry.All;
+        else return "shared is 'own' or 'all', or left out";
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 } || boxMin.Concat(boxMax).Any(v => !float.IsFinite(v)))
+            return "boxMin and boxMax are [x, y, z], finite numbers";
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        if (apply && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+        if (PlanHiddenTriangles(node!, new Vector3(boxMin[0], boxMin[1], boxMin[2]), new Vector3(boxMax[0], boxMax[1], boxMax[2]),
+                material, out Assets.Sds.TriangleHider.Plan? found) is { } notAMesh)
+        {
+            return notAMesh;
+        }
+        Assets.Sds.TriangleHider.Plan plan = found!;
+        if (apply && plan.Changes.Count > 0 && host.GeometryEditing.HideTriangles(node!, plan.Changes, sharing) is { } refused)
+        {
+            return sharing == GeometryEditController.SharedGeometry.Refuse && host.GeometryEditing.GeometrySharersOf(node!) is { Count: > 0 } others
+                ? $"{refused} ({others.Count}: {others.Names}) — shared: 'own' cuts this mesh alone, 'all' cuts every one of them"
+                : refused;
+        }
+
+        static float[] P(Vector3 v) => [v.X, v.Y, v.Z];
+        int levels = plan.Triangles.Count == 0 ? 0 : plan.Triangles.Max(t => t.Lod) + 1;
+        result = new HiddenTrianglesInfo(
+            plan.Triangles.Count,
+            [.. Enumerable.Range(0, levels).Select(l => plan.Triangles.Count(t => t.Lod == l))],
+            apply && plan.Changes.Count > 0,
+            [.. plan.Triangles.Take(Math.Clamp(sample, 0, 500)).Select(t => new TriangleInfo(t.Lod, t.Material, P(t.A), P(t.B), P(t.C)))]);
+        return null;
+    }
+
+    /// <summary>The triangles of a scene node's mesh whose corners all lie inside a world-space box, and the index
+    /// edits that hide them. One implementation for the tool and for Tools → Hide triangles. Null on success.</summary>
+    internal static string? PlanHiddenTriangles(SceneNode node, Vector3 min, Vector3 max, string? material,
+        out Assets.Sds.TriangleHider.Plan? plan)
+    {
+        plan = null;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
+        {
+            return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
+        }
+        plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform, min, max,
+            string.IsNullOrWhiteSpace(material) ? null : material);
+        return null;
+    }
+
+    /// <summary>The same for triangles picked one by one on the mesh's first level of detail (Tools → Hide
+    /// triangles, by clicking): the plan that hides them and what lies on them on the other levels, and how many
+    /// levels the mesh has. Null on success.</summary>
+    internal static string? PlanPickedTriangles(SceneNode node, IReadOnlyCollection<int> picked, out Assets.Sds.TriangleHider.Plan? plan,
+        out int levels)
+    {
+        plan = null;
+        levels = 0;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter)
+        {
+            return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
+        }
+        levels = mesh.Geometry?.LOD?.Length ?? 0;
+        plan = Assets.Sds.TriangleHider.FindPicked(mesh, ((IFrameNode)adapter).WorldTransform, picked);
+        return null;
+    }
+
+    public string? MeshMaterials(string name, int? slot, string? material, out IReadOnlyList<MeshSlotInfo> slots)
+    {
+        slots = [];
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        if (node!.Source is not Assets.Adapters.FrameNodeAdapter adapter || adapter.GetMaterials() is not { Count: > 0 } before)
+        {
+            return $"'{name}' is a {node.Kind} with no material slots";
+        }
+
+        int changed = -1;
+        if (slot != null || !string.IsNullOrWhiteSpace(material))
+        {
+            if (slot is not { } index || string.IsNullOrWhiteSpace(material)) return "to re-point a slot give both: slot and material";
+            if (index < 0 || index >= before.Count) return $"'{name}' has slots 0 to {before.Count - 1}";
+            if (host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+            if (Assets.MafiaMaterials.FindHashByName(material) is not { } hash)
+            {
+                return $"no material named '{material}' in the loaded libraries — search_materials has the names (the spelling is exact)";
+            }
+            // The slot is a row of the mesh's material block, and a block can serve several objects: all of them
+            // would change in the file and in the game, while this answer - and the viewport - showed one.
+            if (host.SlotAssignObstacle(node) is { } shared) return shared;
+            if (!host.AssignSlotMaterial(node, index, hash)) return $"slot {index} of '{name}' could not be re-pointed";
+            changed = index;
+        }
+        slots = [.. adapter.GetMaterials().Select((m, i) => new MeshSlotInfo(i, m.Name, m.TriangleCount, i == changed))];
+        return null;
+    }
+
+    public string? UnusedHulls(bool apply, out IReadOnlyList<UnusedHullsInfo> result)
+    {
+        result = [];
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (apply && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+
+        // Counted before the sweep: afterwards a layer's hull list no longer says what it carried.
+        var layers = AllNodes(host)
+            .Where(n => n.Source is Assets.Adapters.CollisionDocumentAdapter)
+            .Select(n => (Node: n, File: ((Assets.Adapters.CollisionDocumentAdapter)n.Source!).Collision))
+            .Select(l => (l.Node, Placements: l.File.Instances.Count, Hulls: l.File.Meshes.Count))
+            .ToList();
+        if (layers.Count == 0) return "the open scene has no collision file";
+
+        Dictionary<SceneNode, int> unused = host.CollisionEditing.SweepUnusedHulls(layers.Select(l => l.Node), apply)
+            .ToDictionary(l => l.Layer, l => l.Unused);
+        result = [.. layers.Select(l =>
+        {
+            int n = unused.GetValueOrDefault(l.Node);
+            return new UnusedHullsInfo(PathOf(l.Node), l.Placements, l.Hulls, n, apply && n > 0);
+        })];
+        return null;
+    }
+
+    public string? CrashPlacements(float[] boxMin, float[] boxMax, string? nameContains, bool delete, int limit, int maxDelete,
+        out IReadOnlyList<CrashPlacementInfo> result, out int total)
+    {
+        result = [];
+        total = 0;
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 }) return "boxMin and boxMax are [x, y, z]";
+        // A box that holds nothing by construction answers "count 0", and that reads as "nothing stands here".
+        if (boxMin.Concat(boxMax).Any(v => !float.IsFinite(v))) return "boxMin and boxMax must be finite numbers";
+        for (int axis = 0; axis < 3; axis++)
+        {
+            if (boxMin[axis] > boxMax[axis])
+            {
+                return $"boxMin is above boxMax on {"xyz"[axis]} ({boxMin[axis]} > {boxMax[axis]}) — such a box holds "
+                    + "nothing; give the lower corner first";
+            }
+        }
+        if (host.Streamer.CrashLayer is not { } layer) return "the crash layer is not in the scene — view_set crash=true first";
+        if (delete && host.BridgeEditedCount > 0) return "a Blender session is open — blender_end first";
+
+        var lo = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
+        var hi = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+        var hits = new List<(Formats.Translokator.Object Row, Formats.Translokator.Instance Placement)>();
+        foreach (Formats.Translokator.Object row in layer.Rows)
+        {
+            if (!string.IsNullOrWhiteSpace(nameContains)
+                && !row.Name.String.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (Formats.Translokator.Instance placement in row.Instances)
+            {
+                Vector3 p = placement.Position;
+                if (p.X >= lo.X && p.X <= hi.X && p.Y >= lo.Y && p.Y <= hi.Y && p.Z >= lo.Z && p.Z <= hi.Z)
+                    hits.Add((row, placement));
+            }
+        }
+
+        total = hits.Count;
+        // A wide box with no name is the whole city table — tens of thousands of placements and their twins as
+        // one edit, of which the list would show the first two hundred. Refused whole instead: the caller
+        // says how many it means to remove.
+        if (delete && hits.Count > Math.Max(0, maxDelete))
+        {
+            return $"{hits.Count} placements are in the box — more than maxDelete ({maxDelete}); nothing was deleted. "
+                + "List them first (delete=false), narrow the box or the name, or raise maxDelete";
+        }
+        // A delete lists everything it removed, whatever the listing limit: what went has to be readable.
+        result = [.. hits.Take(delete ? hits.Count : Math.Max(0, limit)).Select(h => new CrashPlacementInfo(
+            h.Row.Name.String, h.Placement.ID, [h.Placement.Position.X, h.Placement.Position.Y, h.Placement.Position.Z],
+            layer.Document.HasTwinOf(h.Placement, h.Row), layer.Document.Node(h.Placement, h.Row).SeasonLinked))];
+        if (!delete || hits.Count == 0) return null;
+
+        // The viewport's own delete, so the edit is the one the Delete key makes: undoable, the streaming grid
+        // kept in step, the twin in the other season gone with a linked placement.
+        List<SceneNode> nodes = [.. hits.Select(h => host.Streamer.CrashNodeFor(h.Placement, h.Row)).OfType<SceneNode>()];
+        if (nodes.Count != hits.Count) return "some placements could not be given a tree node — nothing was deleted";
+        // That delete works on the selection. What the user had selected is put back afterwards, less
+        // whatever of it was just deleted — a tool that lists and removes props has no business leaving the
+        // editor with nothing selected.
+        List<SceneNode> selectedBefore = [.. host.Selection.Selected];
+        SceneNode? activeBefore = host.Selection.Active;
+        host.Selection.SetSelection(nodes, nodes[^1]);
+        host.CrashEditing.DeleteSelected();
+        var gone = new HashSet<SceneNode>(nodes);
+        List<SceneNode> kept = [.. selectedBefore.Where(n => !gone.Contains(n))];
+        host.Selection.SetSelection(kept,
+            activeBefore != null && kept.Contains(activeBefore) ? activeBefore : kept.Count > 0 ? kept[^1] : null);
+        return null;
+    }
+
     public string? Undo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;
         if (!host.History.CanUndo) return "nothing to undo";
-        host.Undo();
-        return null;
+        return host.TryUndo();
     }
 
     public string? Redo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;
         if (!host.History.CanRedo) return "nothing to redo";
-        host.Redo();
-        return null;
+        return host.TryRedo();
     }
 
     // ── Scene tree helpers ──
@@ -1211,5 +1472,249 @@ internal sealed class AppEditorSession : IEditorSession
             if (element is T match) yield return match;
             foreach (T deeper in Descendants<T>(element)) yield return deeper;
         }
+    }
+
+    // The city's load zones, read afresh from the working copy of city_univers on every call: they are a few
+    // hundred small objects, and a tool that moves one must not answer from what stood there before.
+    private string? OpenLoadZones(string? copy, out Assets.World.LoadZones? zones)
+    {
+        zones = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        try
+        {
+            IReadOnlyList<FileInfo> copies = Assets.World.LoadZones.Copies();
+            FileInfo? which = string.IsNullOrWhiteSpace(copy)
+                ? copies[0]
+                : copies.FirstOrDefault(c => string.Equals(Assets.World.LoadZones.CopyName(c), copy, StringComparison.OrdinalIgnoreCase));
+            if (which == null)
+            {
+                return $"no copy of city_univers.sds named '{copy}' - there are: " + string.Join(", ", copies.Select(Assets.World.LoadZones.CopyName));
+            }
+            // The districts' names: the open map editor has them already; without one the city folder is read.
+            IReadOnlyCollection<string> districts = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } known
+                ? known
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), districts, which);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not read the load zones of city_univers: " + ex.Message;
+        }
+    }
+
+    private static float[] Xyz(Vector3 v) => [v.X, v.Y, v.Z];
+
+    public string? ZonesAt(float[] point, float near, string? copy, out IReadOnlyList<LoadZoneInfo> zones, out IReadOnlyList<string> districts,
+        out IReadOnlyList<string> copies)
+    {
+        zones = [];
+        districts = [];
+        copies = [];
+        if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
+        if (!float.IsFinite(near) || near < 0) return "near is a distance in metres, 0 or more";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+        copies = [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)];
+
+        var at = new Vector3(point[0], point[1], point[2]);
+        zones = [.. all!.At(at, near).Select(z =>
+        {
+            (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
+            return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max),
+                Assets.World.LoadZones.LoadsOnArrival(z.Name), !Assets.World.LoadZones.IsShipped(z.Name));
+        })];
+        districts = all.DistrictsAt(at);
+        return null;
+    }
+
+    public string? ZonesMap(string district, float[] from, float[] to, float step, float z, string? copy, out IReadOnlyList<string> rows)
+    {
+        rows = [];
+        if (string.IsNullOrWhiteSpace(district)) return "name the district, e.g. greenfield";
+        if (from is not { Length: 2 } || to is not { Length: 2 } || from.Concat(to).Any(v => !float.IsFinite(v)))
+            return "from and to are [x, y], finite numbers";
+        // Below a tenth of a metre a step is no longer a step at the city's coordinates: a float there is
+        // spaced a quarter of a millimetre apart, and a column "one step on" came out as the same column.
+        if (!float.IsFinite(step) || step < 0.1f || !float.IsFinite(z)) return "step is a distance of 0.1 m or more and z a height";
+        float x0 = MathF.Min(from[0], to[0]), x1 = MathF.Max(from[0], to[0]);
+        float y0 = MathF.Min(from[1], to[1]), y1 = MathF.Max(from[1], to[1]);
+        if ((x1 - x0) / step > 200 || (y1 - y0) / step > 200) return "that is more than 200 steps a side - take a larger step or a smaller box";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+
+        // Rows and columns are counted, and each stands at its own multiple of the step: adding the step to a
+        // running float drifts, and with a step too small to change the float it never arrives.
+        int columns = (int)MathF.Floor(((x1 - x0) / step) + 0.001f) + 1, lineCount = (int)MathF.Floor(((y1 - y0) / step) + 0.001f) + 1;
+        var lines = new List<string>(lineCount);
+        for (int line = 0; line < lineCount; line++)
+        {
+            float y = y1 - (line * step);
+            var row = new System.Text.StringBuilder($"{y,8:F0} ");
+            for (int column = 0; column < columns; column++)
+            {
+                float x = x0 + (column * step);
+                var holding = all!.At(new Vector3(x, y, z)).ToList();
+                row.Append(holding.Any(h => all.DistrictsOf(h.Name).Contains(district, StringComparer.OrdinalIgnoreCase)) ? '#'
+                    : holding.Count > 0 ? '+' : '.');
+            }
+            lines.Add(row.ToString());
+        }
+        rows = lines;
+        return null;
+    }
+
+    public string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 } || boxMin.Concat(boxMax).Any(v => !float.IsFinite(v)))
+            return "boxMin and boxMax are [x, y, z], finite numbers";
+        if (districts is not { Length: 1 or 2 } || districts.Any(string.IsNullOrWhiteSpace)) return "districts is one or two district names";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        // asked of a dry run too: one that says "it can be made" while the write would be refused says nothing
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            var min = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
+            var max = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+            // worked out in memory first: what the zone would be is the answer of a dry run, and of a write too
+            if (zones.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } refused) return refused;
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                // With the map editor open: written the way its own button writes, so the zone is a step of the
+                // editor's undo history - and the step is on the MAP editor's history (see ZoneMoveFace).
+                if (viewport.ZoneEditing.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } unmade) return unmade;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not add the zone to city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(name)) return "name is the zone to take out";
+        if (Assets.World.LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            if (!zones.Volumes.TryGetValue(name, out Formats.Frames.ObjectTypes.FrameObjectArea? volume)) return $"no load zone named '{name}'";
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(volume);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), false, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (zones.Delete(name) is { } refused) return refused;
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                if (viewport.ZoneEditing.Remove(name) is { } kept) return kept;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not take the zone out of city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results)
+    {
+        results = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        List<string> names = string.IsNullOrWhiteSpace(copy) ? ["base"]
+            : string.Equals(copy, "all", StringComparison.OrdinalIgnoreCase)
+                ? [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)]
+                : [copy];
+
+        // Everything is worked out, in memory, for every copy before any of them is written: a face that can
+        // be moved in one copy and not in another must not leave the two telling the game different things.
+        var moved = new List<(Assets.World.LoadZones Zones, Assets.World.LoadZoneFaceMove Move, string Copy)>();
+        var absent = new List<string>();
+        foreach (string name in names)
+        {
+            if (OpenLoadZones(name, out Assets.World.LoadZones? all) is { } failed) return failed;
+            if (!all!.Volumes.ContainsKey(zone ?? ""))
+            {
+                absent.Add(name);
+                continue;
+            }
+            // The scene is written whole, from what is on disk. An editor that holds the archive has a copy of
+            // its own and writes THAT whole on its next save: its copy of the zone must be what the disk has
+            // now, and is brought in step after the write (ZoneWrites).
+            if (apply && ZoneWrites.Blocked(all, zone!) is { } blocked) return $"{name}: {blocked} (editor_save)";
+            if (all.MoveFace(zone!, face, to, out Assets.World.LoadZoneFaceMove? move) is { } refused) return $"{name}: {refused}";
+            moved.Add((all, move!, name));
+        }
+        if (moved.Count == 0) return $"no load zone named '{zone}' in " + string.Join(", ", absent);
+
+        // The base copy alone, with the map editor open: written through the editor's own zone editing, the way
+        // its gizmo and its Loading zones window write - so the move is a step of the editor's undo history.
+        bool viaEditor = apply && moved.Count == 1 && Window?.Viewport is not null
+            && string.Equals(moved[0].Zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase);
+        if (viaEditor)
+        {
+            if (Window!.Viewport.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
+            // The step is on the MAP editor's history. Left pointing at the resource editor, the editor_undo
+            // that follows took back whatever that one did last and called it done.
+            _resourceTarget = false;
+        }
+
+        // Written one copy after another - and all of them, or none: the scene each copy had is kept until the
+        // last one is down, and a copy that fails puts the ones before it back.
+        var written = new List<(string File, byte[] Before)>();
+        if (apply && !viaEditor)
+        {
+            foreach ((Assets.World.LoadZones all, _, string name) in moved)
+            {
+                try
+                {
+                    byte[] before = File.ReadAllBytes(all.SceneFile);
+                    all.Save();
+                    written.Add((all.SceneFile, before));
+                }
+                catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+                {
+                    var stuck = new List<string>();
+                    foreach ((string file, byte[] before) in written)
+                    {
+                        try { File.WriteAllBytes(file, before); }
+                        catch (Exception back) when (back is IOException or UnauthorizedAccessException) { stuck.Add(file); }
+                    }
+                    return $"could not write the scene of city_univers ({name}): {ex.Message} - nothing was changed"
+                        + (stuck.Count > 0 ? ", EXCEPT that these could not be put back: " + string.Join(", ", stuck) : "");
+                }
+            }
+            foreach ((Assets.World.LoadZones all, _, _) in moved) ZoneWrites.Landed(all, zone!);
+        }
+
+        results = [.. moved.Select(m => new LoadZoneMoveInfo(m.Copy, m.Move.Zone, m.Move.Face, m.Move.From, m.Move.To, Xyz(m.Move.BoxMin),
+            Xyz(m.Move.BoxMax), m.Zones.DistrictsOf(m.Move.Zone), apply, apply ? m.Zones.SceneFile : null, m.Zones.Archive.FullName))];
+        return null;
     }
 }

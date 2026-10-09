@@ -34,13 +34,8 @@ internal sealed class CollisionEditController : ICollisionEditSink
     /// hulls" command would sweep. Zero disables it, so a modder can read the file's state off the menu instead
     /// of guessing whether a delete left anything behind.
     /// </summary>
-    public int UnusedHullCount()
-    {
-        int total = 0;
-        foreach ((CollisionDocumentAdapter doc, SceneNode layer) in SelectedCollisionLayers())
-            total += CollisionOrphanEdit.Build(this, doc, layer)?.Count ?? 0;
-        return total;
-    }
+    public int UnusedHullCount() =>
+        SweepUnusedHulls(SelectedCollisionLayers().Select(l => l.Layer), apply: false).Sum(l => l.Unused);
 
     /// <summary>
     /// Removes every hull no placement references, as one undoable edit per layer. Never runs on its own: a
@@ -49,20 +44,33 @@ internal sealed class CollisionEditController : ICollisionEditSink
     /// </summary>
     public void RemoveUnusedHulls()
     {
-        int removed = 0;
+        if (SweepUnusedHulls(SelectedCollisionLayers().Select(l => l.Layer), apply: true).Sum(l => l.Unused) == 0)
+            _host.RaiseNotice("no unused hulls — every hull in this .col is placed");
+    }
+
+    /// <summary>
+    /// The same sweep for layers named outright instead of reached through the selection — what the MCP tool
+    /// drives, having no selection to go by. Reports each layer's unused hulls; with <paramref name="apply"/>
+    /// removes them, all layers as one undoable edit.
+    /// </summary>
+    public IReadOnlyList<(SceneNode Layer, int Unused)> SweepUnusedHulls(IEnumerable<SceneNode> layers, bool apply)
+    {
+        var found = new List<(SceneNode Layer, int Unused)>();
         var edits = new List<IEditAction>();
-        foreach ((CollisionDocumentAdapter doc, SceneNode layer) in SelectedCollisionLayers())
+        foreach (SceneNode layer in layers)
         {
+            if (layer.Source is not CollisionDocumentAdapter doc) continue;
             CollisionOrphanEdit? edit = CollisionOrphanEdit.Build(this, doc, layer);
-            if (edit == null) continue;
+            found.Add((layer, edit?.Count ?? 0));
+            if (edit == null || !apply) continue;
             edit.Redo();
             edits.Add(edit);
-            removed += edit.Count;
         }
-        if (edits.Count == 0) { _host.RaiseNotice("no unused hulls — every hull in this .col is placed"); return; }
+        if (edits.Count == 0) return found;
 
         History.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits.ToArray()));
-        _host.RaiseNotice($"removed {removed} unused hull(s) — Ctrl+Z restores them");
+        _host.RaiseNotice($"removed {found.Sum(l => l.Unused)} unused hull(s) — Ctrl+Z restores them");
+        return found;
     }
 
     // The collision layers the selection reaches: the layer node itself when it is selected, or the layer behind
