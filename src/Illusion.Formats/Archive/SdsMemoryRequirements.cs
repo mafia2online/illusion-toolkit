@@ -38,6 +38,15 @@ public sealed class SdsMemoryRequirements
 
     public bool TryGet(string key, out SdsMemoryRequirement requirement) => _byKey.TryGetValue(key, out requirement!);
 
+    /// <summary>States an entry's figures - how a resource brought in from another working copy keeps what it
+    /// stated there instead of falling back to the packer's own.</summary>
+    public void Set(string key, SdsMemoryRequirement requirement)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        ArgumentNullException.ThrowIfNull(requirement);
+        _byKey[key] = requirement;
+    }
+
     /// <summary>The key of a manifest entry: its type and file, or its type and ordinal when it names no file.</summary>
     public static string Key(string type, string? file, int ordinal) =>
         file != null ? $"{type}|{file}" : $"{type}#{ordinal}";

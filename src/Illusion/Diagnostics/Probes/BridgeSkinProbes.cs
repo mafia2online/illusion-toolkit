@@ -495,8 +495,10 @@ internal static class BridgeSkinProbes
             Check("a skinned body with a face removed is accepted", applied != null, why ?? "");
             if (applied != null)
             {
-                // The REBUILT mesh's face count, not the model's index buffer: TryApply leaves the buffers
-                // untouched until the caller commits with ApplyNew, so the model still holds the old ones.
+                // Working a push out leaves the MODEL untouched as well as its buffers — the face ranges and
+                // pools ride in the result — so it is committed before the model is asked about them, and
+                // taken back at the end of this block for the cases that follow.
+                applied.ApplyNew();
                 int triangles = (applied.NewMesh?.Indices.Length ?? 0) / 3;
 
                 // The whole point: no range may name a face the mesh no longer has. A stale one is what
@@ -562,6 +564,7 @@ internal static class BridgeSkinProbes
                     applied.NewMesh == null ? "no replacement mesh built"
                         : $"ids {applied.NewMesh.BoneIndices?.Length ?? 0}, rig "
                           + $"{applied.NewMesh.Skeleton?.Bones.Count ?? 0} bones");
+                applied.RestoreOriginal();
             }
 
             // ── The mirror case: geometry ADDED ──
@@ -585,6 +588,7 @@ internal static class BridgeSkinProbes
                 Check("a skinned body with a face ADDED is accepted", grown != null, growWhy ?? "");
                 if (grown != null)
                 {
+                    grown.ApplyNew(); // the model is asked about its face ranges below
                     int triangles = (grown.NewMesh?.Indices.Length ?? 0) / 3;
                     int verts = grown.NewMesh?.Positions.Length ?? 0;
                     Check("the added geometry really arrived",
@@ -645,7 +649,6 @@ internal static class BridgeSkinProbes
                         $"{onWanted} of {checkedNew} added vertices on bone {wantBone} "
                             + $"(nearest would have given {nearBone})");
 
-                    grown.ApplyNew();
                     Check("the grown model survives the writer and comes back",
                         SurvivesRoundTrip(model3, verts, triangles, out string? tripWhy),
                         tripWhy ?? "");
@@ -733,6 +736,32 @@ internal static class BridgeSkinProbes
                     (int zeroedSets, int carriedSets) = EmptyUvSets(fresh);
                     Check("welded vertices keep the UV sets past the first",
                         zeroedSets == 0, $"{zeroedSets} vertices lost one of the {carriedSets} sets");
+
+                    // …and from a neighbour OF THEIR OWN MATERIAL. The nearest vertex of the whole mesh is
+                    // as often one of another material - the snow lying on a roof, the lining behind a panel
+                    // - whose colour mask and UV sets mean something else entirely (the lining keeps a
+                    // position in centimetres in UV1). A body panel filled from those is lit like nothing
+                    // else on the car, and only the game shows it.
+                    (int strangers, int found) = ForeignChannels(fresh, far);
+                    Check("a welded vertex takes its hidden channels from its own material's surface",
+                        found == 3 && strangers == 0,
+                        $"{strangers} of {found} welded vertices carry a colour or a UV set no vertex of their material has");
+
+                    // The weights as the FILE holds them: a byte each, and the game takes the four as they are.
+                    // A vertex whose bytes add up to 254 is drawn 1/255 with no bone - at the origin of the
+                    // world - and stands metres out of the car wherever the car is far from it.
+                    // Where an invented vertex looks for its hidden channels: the nearest point of its material's
+                    // source surface, found through a grid. The grid must find what a scan of every triangle finds.
+                    if (SdsMeshLoader.DecodeLod(fresh, 0) is { } gridMesh && fresh.Material?.Materials is { Count: > 0 } gridSlots)
+                    {
+                        (int disagree, int asked, int largest) = BridgeMeshApplier.SourceSurfaceAgreement(gridMesh.Positions, gridMesh.Indices, gridSlots[0], 400);
+                        Check("the source surface's grid finds the nearest point a scan of every triangle finds",
+                            disagree == 0 && asked > 0, $"{disagree} of {asked} questions answered differently; the largest material has {largest} triangles");
+                    }
+
+                    int offLattice = WeightsOffLattice(fresh);
+                    Check("every vertex's weights add up to 255 in the file",
+                        offLattice == 0, offLattice < 0 ? "the level did not decode with weights - nothing was looked at" : $"{offLattice} vertices do not");
 
                     int outside = PiecesEscaping(fresh);
                     Check("every piece's hit box still contains its own geometry after the weld",
@@ -853,7 +882,7 @@ internal static class BridgeSkinProbes
     /// is perfectly fine in memory and simply makes the car vanish in game.
     /// </para>
     /// </summary>
-    private static bool SurvivesRoundTrip(FrameObjectModel model, int verts, int faces, out string? why)
+    internal static bool SurvivesRoundTrip(FrameObjectModel model, int verts, int faces, out string? why)
     {
         why = null;
         try
@@ -910,7 +939,7 @@ internal static class BridgeSkinProbes
     /// id read against the wrong pool binds geometry to whatever bone happens to sit at that offset.
     /// </para>
     /// </summary>
-    private static (int Checked, int Wrong, int Groups) ResolvesThroughPools(
+    internal static (int Checked, int Wrong, int Groups) ResolvesThroughPools(
         FrameObjectModel model, BridgeMeshApplier.ApplyResult applied, byte[] pools, byte[] remap)
     {
         MeshData? mesh = applied.NewMesh;
@@ -1000,7 +1029,7 @@ internal static class BridgeSkinProbes
         return m;
     }
 
-    private static IFrameNode? FindModelNode(SdsFrameNode node)
+    internal static IFrameNode? FindModelNode(SdsFrameNode node)
     {
         if (node.Source is IFrameNode f && IsModel(f)) return f;
         foreach (SdsFrameNode c in node.Children)
@@ -1278,6 +1307,82 @@ internal static class BridgeSkinProbes
             zeroed += empty;
         }
         return (zeroed, sets);
+    }
+
+    /// <summary>
+    /// The triangle welded on at <paramref name="far"/>, judged against the rest of the material it is drawn
+    /// with: how many of its vertices carry a Color0 no other vertex of that material has, or a UV set past the
+    /// first outside the range the material's other vertices span. Returns (such vertices, welded vertices found).
+    /// </summary>
+    private static (int Strangers, int Found) ForeignChannels(FrameObjectModel model, Vector3 far)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh == null || model.Material?.Materials is not { Count: > 0 } levels || levels[0] == null) return (0, 0);
+        Vertex[] verts = VertexTranslator.DecompressBuffer(
+            mesh.RawVertexData, mesh.NumVerts, mesh.Declaration,
+            mesh.DecompressionOffset, mesh.DecompressionFactor);
+        Vector3[] corners = [far, far + new Vector3(0.12f, 0, 0), far + new Vector3(0, 0, 0.12f)];
+        bool IsWelded(uint v) => Array.Exists(corners, c => Vector3.Distance(c, mesh.Positions[v]) < 2e-3f);
+
+        foreach (MaterialStruct slot in levels[0])
+        {
+            int end = Math.Min(slot.StartIndex + (slot.NumFaces * 3), mesh.Indices.Length);
+            var welded = new HashSet<uint>();
+            for (int i = slot.StartIndex; i + 2 < end; i += 3)
+            {
+                if (!IsWelded(mesh.Indices[i]) || !IsWelded(mesh.Indices[i + 1]) || !IsWelded(mesh.Indices[i + 2])) continue;
+                welded.UnionWith([mesh.Indices[i], mesh.Indices[i + 1], mesh.Indices[i + 2]]);
+            }
+            if (welded.Count == 0) continue;
+
+            var colours = new HashSet<uint>();
+            var lo = new float[4];
+            var hi = new float[4];
+            Array.Fill(lo, float.MaxValue);
+            Array.Fill(hi, float.MinValue);
+            for (int i = slot.StartIndex; i < end; i++)
+            {
+                if (welded.Contains(mesh.Indices[i])) continue;
+                Vertex own = verts[mesh.Indices[i]];
+                colours.Add(BitConverter.ToUInt32(own.Color0, 0));
+                for (int k = 0; k < 4; k++)
+                {
+                    float value = k % 2 == 0 ? (float)own.UVs[1 + (k / 2)].X : (float)own.UVs[1 + (k / 2)].Y;
+                    lo[k] = Math.Min(lo[k], value);
+                    hi[k] = Math.Max(hi[k], value);
+                }
+            }
+
+            int strangers = 0;
+            foreach (uint v in welded)
+            {
+                bool strange = !colours.Contains(BitConverter.ToUInt32(verts[v].Color0, 0));
+                for (int k = 0; k < 4 && !strange; k++)
+                {
+                    float value = k % 2 == 0 ? (float)verts[v].UVs[1 + (k / 2)].X : (float)verts[v].UVs[1 + (k / 2)].Y;
+                    strange = value < lo[k] - 1e-3f || value > hi[k] + 1e-3f;
+                }
+                if (strange) strangers++;
+            }
+            return (strangers, welded.Count);
+        }
+        return (0, 0);
+    }
+
+    /// <summary>How many LOD 0 vertices carry weights whose stored bytes do not add up to 255; -1 when the
+    /// level has no weights to look at (which is not "none are off").</summary>
+    private static int WeightsOffLattice(FrameObjectModel model)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh?.BoneWeights is not { } weights) return -1;
+        int off = 0;
+        for (int v = 0; v < mesh.NumVerts; v++)
+        {
+            int sum = 0;
+            for (int k = 0; k < 4; k++) sum += (int)MathF.Round(weights[(v * 4) + k] * 255f);
+            if (sum != 255) off++;
+        }
+        return off;
     }
 
     private static int PiecesEscaping(FrameObjectModel model)

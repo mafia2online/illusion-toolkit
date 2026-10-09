@@ -398,6 +398,48 @@ public sealed class SceneDocumentAdapter : ISceneDocument
         return sharers;
     }
 
+    /// <summary>
+    /// The other frame objects that draw from one of the given index buffers through a geometry block of their
+    /// OWN - which <see cref="GeometrySharers"/> does not see. No shipped district has one (measured: 0 of 1310
+    /// buffers in uppertown); an object imported twice with a level's draw distance changed in between does.
+    /// </summary>
+    public IReadOnlyList<FrameObjectSingleMesh> IndexBufferSharers(FrameObjectSingleMesh mesh, IReadOnlySet<ulong> indexBuffers)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(indexBuffers);
+        var sharers = new List<FrameObjectSingleMesh>();
+        foreach (object? value in _frame.FrameObjects.Values)
+        {
+            if (value is not FrameObjectSingleMesh other || ReferenceEquals(other, mesh)
+                || other.Geometry is not { LOD: { } levels } || ReferenceEquals(other.Geometry, mesh.Geometry))
+            {
+                continue;
+            }
+            for (int lod = 0; lod < levels.Length; lod++)
+            {
+                if (other.GetIndexBuffer(lod) is { } buffer && indexBuffers.Contains(buffer.Hash))
+                {
+                    sharers.Add(other);
+                    break;
+                }
+            }
+        }
+        return sharers;
+    }
+
+    /// <summary>The other frame objects that draw with the same material block: re-pointing one of its slots
+    /// re-points it for all of them. Rare in the shipped districts (8 of 3099 mesh frames in uppertown).</summary>
+    public IReadOnlyList<FrameObjectSingleMesh> MaterialSharers(FrameObjectSingleMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        // Asked through the reference table first: the Material property makes an empty block for a mesh that
+        // has none, and a question must not leave every such mesh of the scene with one.
+        if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Material) || mesh.Material is not { } material) return [];
+        return [.. _frame.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
+            .Where(other => !ReferenceEquals(other, mesh) && other.Refs.ContainsKey(FrameEntryRefTypes.Material)
+                            && ReferenceEquals(other.Material, material))];
+    }
+
     /// <summary>The canonical <see cref="IFrameNode"/> adapter for a frame object of this document.</summary>
     public FrameNodeAdapter Node(FrameObjectBase frame)
     {

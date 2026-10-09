@@ -179,26 +179,26 @@ public class MaterialSampler_v57 : IMaterialSampler
     public MaterialSampler_v57(IMaterialSampler OtherSampler) : base(OtherSampler)
     {
         ID = OtherSampler.ID;
-        SamplerStates = OtherSampler.SamplerStates;
+        SamplerStates = [.. OtherSampler.SamplerStates ?? []];
 
         // TODO: Setup is essentially the same, maybe we can somehow make v57 and v58 share the same interface?
         if (OtherSampler.GetVersion() == MaterialVersion.V_57)
         {
             MaterialSampler_v57 CastedSampler = (OtherSampler as MaterialSampler_v57)!;
-            UnkSet0 = CastedSampler.UnkSet0;
+            UnkSet0 = [.. CastedSampler.UnkSet0 ?? []];
             TextureName = new HashName(CastedSampler.TextureName);
             TexType = CastedSampler.TexType;
             UnkZero = CastedSampler.UnkZero;
-            UnkSet1 = CastedSampler.UnkSet1;
+            UnkSet1 = [.. CastedSampler.UnkSet1 ?? []];
         }
         else if (OtherSampler.GetVersion() == MaterialVersion.V_58)
         {
             MaterialSampler_v58 CastedSampler = (OtherSampler as MaterialSampler_v58)!;
-            UnkSet0 = CastedSampler.UnkSet0;
+            UnkSet0 = [.. CastedSampler.UnkSet0 ?? []];
             TextureName = new HashName(CastedSampler.TextureName);
             TexType = CastedSampler.TexType;
             UnkZero = CastedSampler.UnkZero;
-            UnkSet1 = CastedSampler.UnkSet1;
+            UnkSet1 = [.. CastedSampler.UnkSet1 ?? []];
         }
         else
         {

@@ -92,7 +92,8 @@ public partial class App : Application
             ConfigureServices = services => services
                 .AddSingleton<IUiThreadMarshal>(new WpfUiThreadMarshal(Dispatcher))
                 .AddSingleton<IGameEnvironment, AppGameEnvironment>()
-                .AddSingleton<IEditorSession, AppEditorSession>(),
+                .AddSingleton<IEditorSession, AppEditorSession>()
+                .AddSingleton<ICarWorkshop, AppCarWorkshop>(),
         });
 
         _ = McpServer.StartAsync();

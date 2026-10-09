@@ -69,6 +69,13 @@ internal static class McpProbes
         "archive_build",
         "car_export_m2o",
         "car_substitute",
+        "mesh_hide_triangles",
+        "mesh_materials",
+        // CarTools
+        "material_variant", "archive_texture", "material_delete",
+        "car_lights", "car_light_set", "car_light_remove", "car_bone_add", "car_beacon",
+        "car_collisions", "car_collision_add", "car_collision_remove",
+        "car_materials", "car_material_like", "car_winter", "car_check",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional

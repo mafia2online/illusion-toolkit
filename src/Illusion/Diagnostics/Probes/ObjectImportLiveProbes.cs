@@ -102,12 +102,12 @@ internal static class ObjectImportLiveProbes
 
             // ── numbers that are not numbers ──
             Check("a position that is not finite is refused",
-                session.ImportObject(probeSds.FullName, source, "probe_live_nan", [float.PositiveInfinity, 0, 0], null, null, 1, out _) != null);
+                session.ImportObject(probeSds.FullName, source, "probe_live_nan", [float.PositiveInfinity, 0, 0], null, null, 1, null, out _) != null);
             Check("a heading that is not finite is refused",
-                session.ImportObject(probeSds.FullName, source, "probe_live_nan", at, float.NaN, null, 1, out _) != null);
+                session.ImportObject(probeSds.FullName, source, "probe_live_nan", at, float.NaN, null, 1, null, out _) != null);
 
             // ── import with a cooked box: one hull, linked ──
-            string? why = session.ImportObject(probeSds.FullName, source, "probe_live", at, null, "box", 1, out ObjectImportOutcome? outcome);
+            string? why = session.ImportObject(probeSds.FullName, source, "probe_live", at, null, "box", 1, null, out ObjectImportOutcome? outcome);
             Check("the mesh is imported with a box for collision", why == null && outcome != null,
                 why ?? $"{outcome!.Collision}; {outcome.NamedSo} thing(s) named '{source}' in the source");
             if (why != null) return;
@@ -288,7 +288,7 @@ internal static class ObjectImportLiveProbes
             host.Redo();
 
             // ── another imported object renamed ONTO this one's name: this one's record is not written over ──
-            why = session.ImportObject(probeSds.FullName, source, "probe_live_b", [at[0] + 40f, at[1], at[2]], null, "box", 1, out _);
+            why = session.ImportObject(probeSds.FullName, source, "probe_live_b", [at[0] + 40f, at[1], at[2]], null, "box", 1, null, out _);
             if (why == null)
             {
                 IReadOnlyList<ImportLinks.Link> mine = [.. ImportLinks.HullsOf(dir, "probe_live_renamed")];
@@ -393,7 +393,7 @@ internal static class ObjectImportLiveProbes
                 ImportLinks.HullsOf(dir, "probe_live").Count == 0 && ImportLinks.HullsOf(dir, "probe_live_renamed").Count == 0);
 
             // ── the n-th of a name ──
-            why = session.ImportObject(probeSds.FullName, source, "probe_live_far", at, null, "none", 9999, out _);
+            why = session.ImportObject(probeSds.FullName, source, "probe_live_far", at, null, "none", 9999, null, out _);
             Check("an occurrence past the last one is refused, saying how many there are", why != null && why.Contains("thing(s) named"), why ?? "imported");
 
             // ── an import that fails after the copy leaves nothing ──
@@ -403,8 +403,8 @@ internal static class ObjectImportLiveProbes
                 File.WriteAllBytes(file, whole[..Math.Max(16, whole.Length / 3)]);
             }
             int objectsBefore = Frames(host, district);
-            string? first = session.ImportObject(probeSds.FullName, source, "probe_live_fail", at, null, null, 1, out _);
-            string? second = session.ImportObject(probeSds.FullName, source, "probe_live_fail", at, null, null, 1, out _);
+            string? first = session.ImportObject(probeSds.FullName, source, "probe_live_fail", at, null, null, 1, null, out _);
+            string? second = session.ImportObject(probeSds.FullName, source, "probe_live_fail", at, null, null, 1, null, out _);
             Check("an import whose source collision cannot be read is refused, and says nothing was left",
                 first != null && first.Contains("nothing of it was left"), first ?? "imported");
             Check("the same import again gets the same answer — the name is not 'already taken' by leftovers",
@@ -428,7 +428,7 @@ internal static class ObjectImportLiveProbes
                 {
                     byte[] manifestBefore = File.ReadAllBytes(Path.Combine(dir, "SDSContent.xml"));
                     var namesBefore = new HashSet<string>(Directory.GetFiles(dir).Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
-                    why = session.ImportObject(interiorSds.FullName, door.EntityName, taken, at, null, null, 1, out _);
+                    why = session.ImportObject(interiorSds.FullName, door.EntityName, taken, at, null, null, 1, null, out _);
                     if (why == null)
                     {
                         sb.AppendLine($"    (the pack took an actor named '{taken}' a second time — nothing to check; undone)");

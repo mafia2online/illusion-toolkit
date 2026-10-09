@@ -47,6 +47,21 @@ public sealed class CarPrefab
 
     public IReadOnlyList<ulong> Wipers => _car.WipersFrameName;
 
+    /// <summary>
+    /// The car's lights as the game reads them: the frame (a bone) whose piece of the body is lit, two numbers
+    /// that say what kind of light it is and which group it switches with, how strongly the piece glows and
+    /// how it pulses, the bones that must be whole for it to work, and the model of the light it casts.
+    /// The meaning of the unnamed numbers is not established; they are given as stored.
+    /// </summary>
+    public IReadOnlyList<Light> Lights =>
+        [.. _car.ShaderEffects.SelectMany(e => e.Lights).Select(l => new Light(l.FrameName, l.Unk1, l.Unk2, l.Unk3, l.Unk4,
+            l.EmissivePower, l.EmissiveMiddle, l.EmissiveSpeed0, l.EmissiveSpeed1, [.. l.CheckBoneName], l.LightModelHash,
+            l.ParticleBreakId, l.Unk12))];
+
+    /// <summary>Where the car's light sources stand, in the model's space: a place and three axes each.</summary>
+    public IReadOnlyList<(Vector3 Translation, Vector3 Row0, Vector3 Row1, Vector3 Row2)> LightMatrices =>
+        [.. (Other?.LightMatrices ?? []).Select(m => (m.Translation, m.Row0, m.Row1, m.Row2))];
+
     /// <summary>How many deformable parts the body is split into (the damage model).</summary>
     public int DeformPartCount => Deformation?.DeformParts.Count ?? 0;
 
@@ -70,6 +85,10 @@ public sealed class CarPrefab
     public IReadOnlyList<Axle> Axles =>
         [.. _car.Axles.Select(a => new Axle(a.AxleName, a.BrakeDrumName, a.RotWingName, a.AxleType,
             a.Wheel.BrakeDrumRadius, a.Wheel.BrakeDrumMass, a.Wheel.AxleMass))];
+
+    /// <summary>One light of the car (see <see cref="Lights"/>).</summary>
+    public sealed record Light(ulong Frame, int Unk1, int Unk2, uint Unk3, uint Unk4, float EmissivePower, float EmissiveMiddle,
+        float EmissiveSpeed0, float EmissiveSpeed1, IReadOnlyList<ulong> CheckBones, ulong LightModel, uint ParticleBreakId, uint Unk12);
 
     /// <summary>Every frame-name hash this prefab references, for resolving against the archive's frames.</summary>
     public IEnumerable<ulong> AllFrameReferences

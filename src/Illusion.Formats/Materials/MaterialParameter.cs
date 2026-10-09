@@ -28,7 +28,8 @@ public class MaterialParameter
     public MaterialParameter(MaterialParameter OtherParameter)
     {
         ID = OtherParameter.ID;
-        Paramaters = OtherParameter.paramaters;
+        // values of its own: a copy that shared the array changed the original with every edit
+        Paramaters = [.. OtherParameter.paramaters ?? []];
     }
 
     public override string ToString()
