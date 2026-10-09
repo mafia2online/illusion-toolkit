@@ -55,8 +55,10 @@ internal static class InteriorSceneProbes
 
             // ── the interiors: flagged like a district's backdrops, and shown all the same ──
             FileInfo? staged = null;
-            foreach (string interior in interiors)
+            foreach (string asked in interiors)
             {
+                // named with or without the extension
+                string interior = asked.EndsWith(".sds", StringComparison.OrdinalIgnoreCase) ? asked[..^4] : asked;
                 var file = new FileInfo(Path.Combine(sdsFolder, interior + ".sds"));
                 if (!file.Exists) { sb.AppendLine($"    ({interior}: no such archive — skipped)"); continue; }
                 (List<SdsFrameNode> roots, _, _) = SdsMeshLoader.LoadHierarchy(file);
@@ -76,6 +78,9 @@ internal static class InteriorSceneProbes
                     + (hidden.Count == 0 ? "" : "; hidden: " + string.Join(", ", hidden.Take(6).Select(h => h.Name))));
                 staged ??= file;
             }
+
+            // The interiors are what this probe is about: with none of them opened it has shown nothing.
+            Check("at least one interior was opened", staged != null, $"none of: {string.Join(", ", interiors)}");
 
             // ── a district: still sorted, its proxy scenes still hidden ──
             var district = new FileInfo(Path.Combine(MafiaEnvironment.CityFolder, "greenfield.sds"));

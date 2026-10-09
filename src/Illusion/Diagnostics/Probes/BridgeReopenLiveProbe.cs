@@ -112,7 +112,7 @@ internal static class BridgeReopenLiveProbe
                 Check("a reload ends the session whose rows it unloaded",
                     fresh != null && !ReferenceEquals(fresh, row) && !host.Tree.IsInScene(row) && host.BridgeEditedCount == 0,
                     $"{host.BridgeEditedCount} object(s) still counted as open in Blender");
-                Check("…and says so", said.Any(n => n.Error && n.Text.Contains("left the scene", StringComparison.Ordinal)),
+                Check("…and says so", said.Any(n => n.Error && n.Text.Contains("no longer in the scene", StringComparison.Ordinal)),
                     string.Join(" | ", said.Select(n => n.Text)));
 
                 PushAckMessage ack = Push(row, sent, m => RemapPoolProbes.Edited(m, f => f % 9 == 0, _ => false), out int pushed);

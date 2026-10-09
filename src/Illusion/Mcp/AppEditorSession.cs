@@ -527,7 +527,7 @@ internal sealed class AppEditorSession : IEditorSession
     public string? EndBlenderSession()
     {
         if (TargetHost is not { } host) return TargetNotOpen;
-        if (host.BridgeEditedCount == 0) return "no Blender edit session is open";
+        if (!host.BridgeSessionToEnd) return "no Blender edit session is open";
         host.EndBridgeEditSession();
         return null;
     }

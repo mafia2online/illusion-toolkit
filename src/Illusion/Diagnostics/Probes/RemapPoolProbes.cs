@@ -848,9 +848,11 @@ internal static class RemapPoolProbes
     }
 
     /// <summary>
-    /// Push, end the session, open the same level again, push again - on one model held in memory, the way a
-    /// modeller works through an afternoon. The second push is a rebuild of a mesh the first one already
-    /// rebuilt, and it has to land: seen on a car as a push that reported "applied" and left the mesh as it was.
+    /// Push, export the same level again, push again - on one model held in memory, the way a modeller works
+    /// through an afternoon. The second push is a rebuild of a mesh the first one already rebuilt, and it has
+    /// to land. This is the EXPORTER and the APPLIER on a twice-rebuilt mesh, called directly: no edit session
+    /// is opened here (the session's own part - what it remembers across an end and another open, and a scene
+    /// reloaded under it - is the section after this one and --probe-bridge-reopen-live).
     /// </summary>
     private static void PushAfterReopen(StringBuilder sb, string focus)
     {
@@ -863,7 +865,11 @@ internal static class RemapPoolProbes
         }
 
         var car = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", focus + ".sds"));
-        if (!car.Exists) return;
+        if (!car.Exists)
+        {
+            sb.AppendLine($"  (no cars\\{focus}.sds - nothing was pushed)");
+            return;
+        }
         try
         {
             (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(car);
@@ -950,12 +956,29 @@ internal static class RemapPoolProbes
         check("the body is sent to Blender", sent != null && host.BridgeEditedCount == 1, "");
         if (sent == null) return;
 
+        // A row an undo takes out of the tree and a redo puts back is the same row: out of the session while it
+        // is gone, in it again when it is back (it used to stay refused for good).
+        if (row.Parent is { } parent)
+        {
+            int at = parent.Children.IndexOf(row);
+            parent.Children.RemoveAt(at);
+            bridge.ForgetUnloaded();
+            bool leftWithIt = host.BridgeEditedCount == 0 && bridge.UnloadedCount == 1 && host.BridgeSessionToEnd;
+            parent.Children.Insert(at, row);
+            bridge.ForgetUnloaded();
+            check("a row taken out of the scene leaves the session, and is in it again when it is put back",
+                leftWithIt && host.BridgeEditedCount == 1 && bridge.UnloadedCount == 0 && bridge.IsEditedNode(row),
+                $"{host.BridgeEditedCount} edited, {bridge.UnloadedCount} set aside");
+            said.Clear();
+        }
+
         byte[] before = model.Resource.WriteToStream();
         host.PrepareForArchiveRestore();    // the scene unloaded, as a reload or a restore unloads it
         check("the session ends with the scene it was opened on", host.BridgeEditedCount == 0 && !host.Tree.IsInScene(row),
             $"{host.BridgeEditedCount} object(s) still counted as open in Blender");
+        check("…and what Blender still holds is a session that can be ended", host.BridgeSessionToEnd, "");
         check("…and says that what Blender holds has lost its scene",
-            said.Any(n => n.Error && n.Text.Contains("left the scene", StringComparison.Ordinal)), "");
+            said.Any(n => n.Error && n.Text.Contains("no longer in the scene", StringComparison.Ordinal)), "");
 
         string file = Path.Combine(Path.GetTempPath(), $"illusion_remap_pools_push_{Environment.ProcessId}.ilx");
         try

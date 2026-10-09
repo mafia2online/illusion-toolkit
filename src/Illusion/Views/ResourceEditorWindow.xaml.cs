@@ -75,6 +75,7 @@ public partial class ResourceEditorWindow : Window
         UpdateBridgeUi();
 
         Browser.EntryActivated += StageEntry;
+        Browser.MayActivate = MayStage;
         Browser.ResourceActivated += ShowResource;
         Browser.CollapsedChanged += UpdateBrowserRow;
         Browser.ArchiveEdited += OnArchiveEdited;
@@ -184,6 +185,21 @@ public partial class ResourceEditorWindow : Window
     /// memory can no longer be saved from it. What is saved but not yet packed stays on the build list: that
     /// list is about folders on disk, and staging something else does not make them any less unpacked.
     /// </summary>
+    // Asked by the browser BEFORE it both stages an archive and steps into it. With a Blender session open
+    // another archive is not staged - and then the browser must not step into it either: its tiles would show
+    // the staged car's parts and tuning under the other archive's name.
+    private bool MayStage(LibraryEntry entry)
+    {
+        if (Stage.BridgeEditedCount == 0
+            || string.Equals(_staged?.File.FullName, entry.File.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        PostNotice($"{entry.Name} was not opened: {Stage.BridgeEditedCount} object(s) of {_staged?.Name} are open "
+            + "in Blender, and opening another archive would end that session. Leave it first (Esc).", true);
+        return false;
+    }
+
     private void StageEntry(LibraryEntry entry)
     {
         CommitFocusedField();
@@ -431,9 +447,12 @@ public partial class ResourceEditorWindow : Window
         {
             if (Stage.BridgeEditedCount > 0) { Stage.EndBridgeEditSession(); return true; }
             if (Stage.SelectedNodes.Count > 0) { Stage.OpenInBlender(); return true; }
+            // Nothing being edited and nothing selected, but Blender still holds objects whose rows left the
+            // scene: the toggle lets them go. (With a selection it sends that instead, which replaces them.)
+            if (Stage.BridgeSessionToEnd) { Stage.EndBridgeEditSession(); return true; }
             return false;   // nothing selected and no session: Tab still means focus traversal
         }
-        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Stage.BridgeEditedCount > 0)
+        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Stage.BridgeSessionToEnd)
         {
             Stage.EndBridgeEditSession();
             return true;
@@ -448,6 +467,7 @@ public partial class ResourceEditorWindow : Window
         ToolShelf.RevertBlenderToggle(Stage.BridgeEditedCount > 0);
         if (Stage.BridgeEditedCount > 0) Stage.EndBridgeEditSession();
         else if (Stage.SelectedNodes.Count > 0) Stage.OpenInBlender();
+        else if (Stage.BridgeSessionToEnd) Stage.EndBridgeEditSession();
     }
 
     private void UpdateBridgeUi()

@@ -1099,6 +1099,11 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     /// <summary>How many objects are currently open in Blender (0 = no active edit session).</summary>
     public int BridgeEditedCount => BridgeSession.ExportedCount;
 
+    /// <summary>Whether there is a Blender session to END: objects being edited, or objects Blender still
+    /// holds for rows that left the scene. Nothing can be edited in the second kind, but ending it is what
+    /// takes them out of Blender and stops their pushes being refused one by one.</summary>
+    public bool BridgeSessionToEnd => BridgeSession.ExportedCount > 0 || BridgeSession.UnloadedCount > 0;
+
     /// <inheritdoc cref="Bridge.BridgeSessionController.RequestPush"/>
     public bool RequestBridgePush() => BridgeSession.RequestPush();
 

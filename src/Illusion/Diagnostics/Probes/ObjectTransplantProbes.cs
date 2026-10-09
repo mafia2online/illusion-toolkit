@@ -821,7 +821,8 @@ internal static class ObjectTransplantProbes
             .FirstOrDefault(m => m.Name.String == "mesh" && m.Parent?.Name.String == "LFH_zidle");
         if (chair == null || !Matrix4x4.Invert(chair.WorldTransform, out Matrix4x4 toOwn))
         {
-            sb.AppendLine("    (no mesh under LFH_zidle in shops\\franhome.sds — the chair steps were skipped)");
+            // The archive is there and the chair is what it is opened for: not finding it is a failure, not a skip.
+            check("shops\\franhome.sds holds the tilted chair the heading steps are measured on (mesh under LFH_zidle)", false, "not found");
             return;
         }
 

@@ -207,9 +207,12 @@ public partial class MainWindow : Window
         {
             if (Viewport.BridgeEditedCount > 0) { Viewport.EndBridgeEditSession(); return true; }
             if (Viewport.SelectedNodes.Count > 0) { Viewport.OpenInBlender(); return true; }
+            // Nothing being edited and nothing selected, but Blender still holds objects whose rows left the
+            // scene: the toggle lets them go. (With a selection it sends that instead, which replaces them.)
+            if (Viewport.BridgeSessionToEnd) { Viewport.EndBridgeEditSession(); return true; }
             return false;   // nothing selected and no session: Tab still means focus traversal
         }
-        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Viewport.BridgeEditedCount > 0)
+        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Viewport.BridgeSessionToEnd)
         {
             Viewport.EndBridgeEditSession();
             return true;
@@ -739,6 +742,7 @@ public partial class MainWindow : Window
         ToolShelf.RevertBlenderToggle(Viewport.BridgeEditedCount > 0); // undo WPF's automatic flip
         if (Viewport.BridgeEditedCount > 0) Viewport.EndBridgeEditSession();
         else if (Viewport.SelectedNodes.Count > 0) Viewport.OpenInBlender();
+        else if (Viewport.BridgeSessionToEnd) Viewport.EndBridgeEditSession();
     }
 
     // A focused transform field (Vector3Box) commits its typed value only on LostFocus / Enter. Before persisting,
