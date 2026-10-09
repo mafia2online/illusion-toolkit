@@ -189,6 +189,42 @@ internal static class ObjectTransplantProbes
                 FrameTransplant.TryTransplant(document, theirs, scenery, "probe_scenery",
                     FrameTransplant.Standing.Scenery, sceneryWorld, out reason) == null && reason != null, reason ?? "");
 
+            // ── Scenery hung under a frame of the receiving scene: an interior's furniture under its holder ──
+            // The parent here is the scenery just placed, turned and away from the origin, so the child's own
+            // matrix has to be worked out against it for the child to stand where it is told to.
+            Matrix4x4 childWorld = Matrix4x4.CreateRotationZ(1.1f) * Matrix4x4.CreateTranslation(-40f, 7f, 1.5f);
+            TransplantedObject? carriedChild = FrameTransplant.TryTransplant(document, theirs, scenery, "probe_child",
+                FrameTransplant.Standing.Scenery, childWorld, shared: null, under: sceneryRoot, out reason);
+            Check("scenery is copied under a frame of the scene", carriedChild != null, reason ?? "");
+            if (carriedChild == null) return;
+            var childRoot = (FrameObjectSingleMesh)carriedChild.Root;
+            Check("it is its parent's child, naming the parent's scene in the second slot as a shipped interior's pieces do: no anchored-mesh bit, off the name table",
+                ReferenceEquals(childRoot.Parent, sceneryRoot) && sceneryRoot.Children.Contains(childRoot)
+                && childRoot.Refs.TryGetValue(FrameEntryRefTypes.Parent2, out int childAnchor)
+                && ours.FrameScenes.TryGetValue(childAnchor, out Formats.Frames.Resources.FrameHeaderScene? childScene)
+                && ReferenceEquals(childScene, BridgeObjectFactory.PickMainScene(ours)) && !childRoot.IsOnFrameTable
+                && !childRoot.SingleMeshFlags.HasFlag(SingleMeshFlags.ParentIndex2_Flag)
+                && ours.FrameScenes.Values.All(folder => !folder.Children.Contains(childRoot)) && !carriedChild.IsOnNameTable);
+            Matrix4x4 stands = childRoot.WorldTransform;
+            Check("and stands in the world where it was told to, turned as told",
+                ProbeAssert.Approx(stands.Translation, new Vector3(-40f, 7f, 1.5f))
+                && MathF.Abs(stands.M11 - childWorld.M11) < 1e-3f && MathF.Abs(stands.M12 - childWorld.M12) < 1e-3f
+                && MathF.Abs(stands.M21 - childWorld.M21) < 1e-3f && MathF.Abs(stands.M22 - childWorld.M22) < 1e-3f,
+                $"at {stands.Translation}, x-axis ({stands.M11:F3}, {stands.M12:F3}) against ({childWorld.M11:F3}, {childWorld.M12:F3})");
+            carriedChild.Detach();
+            bool gone = !sceneryRoot.Children.Contains(childRoot) && !carriedChild.IsAttached;
+            carriedChild.Reattach();
+            Check("taken out it leaves its parent, put back it is the child again, where it stood",
+                gone && ReferenceEquals(childRoot.Parent, sceneryRoot) && sceneryRoot.Children.Contains(childRoot)
+                && ProbeAssert.Approx(childRoot.WorldTransform.Translation, new Vector3(-40f, 7f, 1.5f)));
+            Check("a parent that is no frame of the receiving scene is refused",
+                FrameTransplant.TryTransplant(document, theirs, scenery, "probe_child_2", FrameTransplant.Standing.Scenery,
+                    childWorld, shared: null, under: scenery, out reason) == null && reason != null, reason ?? "");
+            Check("and so is a parent for an actor's prototype",
+                FrameTransplant.TryTransplant(document, theirs, scenery, "probe_child_3", FrameTransplant.Standing.Prototype,
+                    childWorld, shared: null, under: sceneryRoot, out reason) == null && reason != null, reason ?? "");
+            carriedChild.Detach();
+
             // ── Undo: the scene is byte for byte what it was; redo: everything is back ──
             int objectsWith = ours.FrameObjects.Count;
             carriedScenery.Detach();

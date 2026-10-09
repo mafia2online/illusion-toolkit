@@ -133,9 +133,12 @@ internal sealed class ObjectImportController
     /// counting from 1: its actors of that name first, then its frame objects — the ones that draw and that no
     /// actor places before the helpers that share their name. Shipped scenes repeat names heavily (one interior
     /// has 87 objects called 'lahev'), and without this only the first could ever be asked for.</param>
+    /// <param name="under">The row of a frame of <paramref name="destination"/> to hang a piece of scenery
+    /// under, instead of standing it in the scene by itself — an interior's holder, which carries its children
+    /// to wherever the interior is placed. The copy still lands on <paramref name="at"/> in the world.</param>
     public string? Import(FileInfo destination, string sourceArchive, string name, string newName, Vector3 at,
         float? yawDegrees, out Mcp.ObjectImportOutcome? outcome, Assets.Collisions.CollisionChoice hulls = default,
-        int occurrence = 1)
+        int occurrence = 1, SceneNode? under = null)
     {
         outcome = null;
         if (_host.BridgeEditedCount > 0) return "a Blender edit session is open — end it first";
@@ -153,6 +156,16 @@ internal sealed class ObjectImportController
         }
         SceneNode? actorsRow = AllNodes().FirstOrDefault(
             n => n.Source is Assets.Adapters.ActorDocumentAdapter a && ReferenceEquals(a.Scene, scene));
+        FrameObjectBase? parent = null;
+        if (under != null)
+        {
+            if (under.Source is not FrameNodeAdapter { Frame: { } wanted }
+                || !scene.Frame.FrameObjects.TryGetValue(wanted.RefID, out object? held) || !ReferenceEquals(held, wanted))
+            {
+                return $"'{under.Name}' is not a frame of {destination.Name} — only one of its own frames can be the parent";
+            }
+            parent = wanted;
+        }
 
         var sds = new FileInfo(Path.IsPathRooted(sourceArchive)
             ? sourceArchive
@@ -240,6 +253,7 @@ internal sealed class ObjectImportController
                 {
                     return $"'{name}' places no object of its archive's scene — it travels with actor_import";
                 }
+                if (parent != null) return $"'{name}' is an actor's object — its actor places it, so it takes no parent";
                 if (actorsRow == null) return $"{destination.Name} has no actor pack to add an actor to";
                 if (theirPlacements.PackOf(actor) is not { } theirPack) return $"'{name}' belongs to no pack";
 
@@ -283,7 +297,7 @@ internal sealed class ObjectImportController
                 world.Translation = at - Vector3.TransformNormal(standsOn, world);
 
                 carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, frame, newName,
-                    Assets.Frames.FrameTransplant.Standing.Scenery, world, shared, out reason);
+                    Assets.Frames.FrameTransplant.Standing.Scenery, world, shared, parent, out reason);
                 if (carried == null) return reason ?? "the object could not be copied";
                 carry = Carry(carried);
                 ImportScenery(frameRow, carried,
@@ -520,9 +534,15 @@ internal sealed class ObjectImportController
         }
 
         // A scenery object hangs under its scene's row, as the loader would put it; a prototype is a true
-        // top-level frame and hangs under the FrameResource row itself.
+        // top-level frame and hangs under the FrameResource row itself; one that was hung under a frame is
+        // under that frame's row.
         SceneNode parent = frameRow;
-        if (carried.Anchor != null)
+        if (carried.Under != null)
+        {
+            parent = AllNodes().FirstOrDefault(
+                n => n.Source is FrameNodeAdapter held && ReferenceEquals(held.Frame, carried.Under)) ?? frameRow;
+        }
+        else if (carried.Anchor != null)
         {
             parent = frameRow.Children.FirstOrDefault(
                 c => c.Source is FrameSceneAdapter scene && ReferenceEquals(scene.Scene, carried.Anchor)) ?? frameRow;

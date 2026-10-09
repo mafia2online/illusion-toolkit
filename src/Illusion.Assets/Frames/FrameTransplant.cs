@@ -60,6 +60,10 @@ public static class FrameTransplant
         internal readonly Dictionary<FrameObjectBase, FrameObjectBase> Copies = new();   // source → copy
         internal FrameHeaderScene? Anchor;
 
+        /// <summary>The frame of the receiving scene the copy's root was hung under, when it was asked to be
+        /// someone's child; null for a root that stands in the scene by itself.</summary>
+        public FrameObjectBase? Under { get; internal set; }
+
         /// <summary>The copy's root — what an actor places, or the scenery object itself.</summary>
         public FrameObjectBase Root { get; internal set; } = null!;
 
@@ -206,7 +210,18 @@ public static class FrameTransplant
     /// </summary>
     public static TransplantedObject? TryTransplant(ISceneDocument document, FrameResource source,
         FrameObjectBase root, string name, Standing standing, Matrix4x4 world, ImportGeometry? shared,
-        out string? skipReason)
+        out string? skipReason) =>
+        TryTransplant(document, source, root, name, standing, world, shared, under: null, out skipReason);
+
+    /// <summary>
+    /// The same, with the copy's root hung under <paramref name="under"/> — a frame of the receiving scene —
+    /// instead of standing in the scene by itself: the shape an interior's furniture ships in, every piece a child
+    /// of the frame that carries the interior to its place. <paramref name="world"/> is still where the copy
+    /// stands in the world; its own matrix is worked out against the parent's. Scenery only.
+    /// </summary>
+    public static TransplantedObject? TryTransplant(ISceneDocument document, FrameResource source,
+        FrameObjectBase root, string name, Standing standing, Matrix4x4 world, ImportGeometry? shared,
+        FrameObjectBase? under, out string? skipReason)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(root);
@@ -223,6 +238,25 @@ public static class FrameTransplant
             return null;
         }
         if (!CanTransplant(root, out skipReason)) return null;
+        Matrix4x4 underInverse = Matrix4x4.Identity;
+        if (under != null)
+        {
+            if (standing != Standing.Scenery)
+            {
+                skipReason = "only scenery can be hung under a frame — an actor places its own object";
+                return null;
+            }
+            if (!resource.FrameObjects.TryGetValue(under.RefID, out object? held) || !ReferenceEquals(held, under))
+            {
+                skipReason = "the parent is not a frame of the receiving scene";
+                return null;
+            }
+            if (!Matrix4x4.Invert(under.WorldTransform, out underInverse))
+            {
+                skipReason = $"'{under.Name}' has a matrix that cannot be undone — nothing can be placed under it";
+                return null;
+            }
+        }
         if (string.IsNullOrWhiteSpace(name) || resource.FrameObjects.Values.OfType<FrameObjectBase>()
                 .Any(o => string.Equals(o.Name.String, name, StringComparison.OrdinalIgnoreCase)))
         {
@@ -244,7 +278,17 @@ public static class FrameTransplant
         var subtree = new List<FrameObjectBase>();
         Collect(root, subtree, new HashSet<FrameObjectBase>());
 
-        var result = new TransplantedObject { Resource = resource, Adapter = adapter, Anchor = anchor };
+        var result = new TransplantedObject { Resource = resource, Adapter = adapter, Anchor = anchor, Under = under };
+        // What a child of `under` records in its second slot: the top of the parent's chain hangs off it — an
+        // object, or the scene folder that holds that top; nothing when the chain ends at a rootless frame.
+        FrameEntry? underAnchor = null;
+        if (under != null)
+        {
+            FrameObjectBase top = under;
+            var climbed = new HashSet<FrameObjectBase> { top };
+            while (top.Parent is { } next && climbed.Add(next)) top = next;
+            underAnchor = top.Root as FrameEntry ?? resource.FrameScenes.Values.FirstOrDefault(folder => folder.Children.Contains(top));
+        }
         string unique = Guid.NewGuid().ToString("N")[..8];
         var reused = new HashSet<ulong>(); // source buffers this copy draws from without copying them
         if (!CopyBuffers(source, resource, subtree, name, unique, result, shared, reused,
@@ -295,7 +339,10 @@ public static class FrameTransplant
             FrameObjectBase copy = result.Copies[original];
             if (ReferenceEquals(original, root))
             {
-                result.Parents[copy] = (null, anchor);
+                // Under a frame: the parent in the first slot and, in the second, what the parent's own chain
+                // hangs off — the way a shipped interior's pieces name both the frame that carries them and
+                // the scene that frame stands in.
+                result.Parents[copy] = under != null ? (under, underAnchor) : (null, anchor);
                 continue;
             }
             // Inside the subtree a link follows its target's copy. A second-slot link that pointed OUTSIDE it
@@ -303,12 +350,27 @@ public static class FrameTransplant
             // whatever the root hangs off, or the root itself when it hangs off nothing.
             FrameEntry? parent1 = Mapped(original.Parent, result.Copies);
             FrameEntry? parent2 = original.Refs.ContainsKey(FrameEntryRefTypes.Parent2)
-                ? Mapped(original.Root, result.Copies) ?? (FrameEntry?)anchor ?? result.Root
+                ? Mapped(original.Root, result.Copies) ?? (under != null ? underAnchor : anchor) ?? result.Root
                 : null;
             result.Parents[copy] = (parent1, parent2);
         }
 
-        if (standing == Standing.Scenery)
+        if (under != null)
+        {
+            // A child is found through its parent: not on the spawn list, and a matrix of its own that is told
+            // against the parent's. The anchored-mesh bit as the shipped files have it on a child: set when the
+            // second slot names an object (a door's leaf under its frame), clear when it names the scene (an
+            // interior's furniture under its holder) or nothing.
+            result.Root.IsOnFrameTable = false;
+            if (result.Root is FrameObjectSingleMesh childMesh)
+            {
+                childMesh.SingleMeshFlags = underAnchor is FrameObjectBase
+                    ? childMesh.SingleMeshFlags | SingleMeshFlags.ParentIndex2_Flag
+                    : childMesh.SingleMeshFlags & ~SingleMeshFlags.ParentIndex2_Flag;
+            }
+            result.Root.LocalTransform = world * underInverse;
+        }
+        else if (standing == Standing.Scenery)
         {
             // The stock drawable shape, as the bridge's object factory builds it: anchored through the
             // second slot, on the spawn list, normal-season flags, and the anchored-mesh bit a mesh in that
