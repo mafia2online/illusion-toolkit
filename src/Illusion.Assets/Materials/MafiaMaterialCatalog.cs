@@ -106,6 +106,34 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
         return created.GetMaterialHash();
     }
 
+    /// <summary>
+    /// Adds a COPY of a material under a new name: shader, flags, every sampler with its states and every
+    /// parameter are the source's, so the copy draws exactly as the source does until one of its textures is
+    /// re-pointed. This is how a model gets a picture of its own on a shader no preset describes - a car's
+    /// paint with its own normal map, a second lamp atlas. The copy goes to <paramref name="library"/>, which
+    /// must be of the source's version. Null when the source is unknown, the name or its hash is taken, or the
+    /// versions differ.
+    /// </summary>
+    public ulong? CloneMaterial(ulong sourceHash, string newName, string library)
+    {
+        IMaterial? source = MafiaMaterials.Collection?.FindByHash(sourceHash);
+        MaterialLibrary? lib = FindLibrary(library);
+        if (source == null || lib == null || string.IsNullOrWhiteSpace(newName)) return null;
+        if (source.GetMTLVersion() != lib.Version) return null;
+        if (lib.LookupMaterialByName(newName) != null) return null;
+
+        IMaterial copy = source is Material_v58 ? new Material_v58(source) : new Material_v57(source);
+        copy.SetName(newName);
+        if (lib.Materials.ContainsKey(copy.GetMaterialHash())) return null;
+        var swapped = new Dictionary<ulong, IMaterial>(lib.Materials)
+        {
+            [copy.GetMaterialHash()] = copy,
+        };
+        lib.Materials = swapped;
+        MarkDirty(lib);
+        return copy.GetMaterialHash();
+    }
+
     public ulong? RenameMaterial(ulong hash, string newName, ulong? restoreHash = null)
     {
         MaterialLibrary? lib = FindOwningLibrary(hash);
@@ -148,6 +176,20 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
         mat.SetName(name);
         mat.MaterialName.Hash = hash;
     }
+
+    /// <summary>Whether the material is one the game ships, defined as it ships it - by the list of shipped
+    /// materials the toolkit carries. False for an unknown hash and for an edition the list does not cover.</summary>
+    public bool IsShipped(ulong hash) =>
+        MafiaMaterials.Collection?.FindByHash(hash) is { } material
+        && ShippedMaterials.Covers(material.GetMTLVersion())
+        && ShippedMaterials.OriginOf(material) != MaterialOrigin.Added;
+
+    /// <summary>Whether the material is KNOWN to be one the toolkit (or a modder) added: the game's own list
+    /// covers this edition and does not have it. False for a shipped or changed material - and false when
+    /// nothing is known, which is the answer a delete has to refuse on.</summary>
+    public bool IsAdded(ulong hash) =>
+        MafiaMaterials.Collection?.FindByHash(hash) is { } material
+        && ShippedMaterials.OriginOf(material) == MaterialOrigin.Added;
 
     public object? RemoveMaterial(ulong hash)
     {

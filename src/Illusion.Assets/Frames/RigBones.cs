@@ -33,7 +33,9 @@ public static class RigBones
     /// reaches from it on each axis (the box the engine keeps per bone).
     /// </summary>
     /// <param name="index">Where the bone stands in the rig afterwards.</param>
-    /// <returns>Null on success, otherwise why not; the model is unchanged on a refusal.</returns>
+    /// <returns>Null on success, otherwise why not. Every refusal but the last leaves the model unchanged; the
+    /// last one - the skeleton's account of the pools could not be rebuilt - comes after the bone is in, and
+    /// the model must then be thrown away, not saved.</returns>
     public static string? Insert(FrameObjectModel model, string name, string parent, Vector3 at, Vector3 reach, out int index)
     {
         ArgumentNullException.ThrowIfNull(model);
