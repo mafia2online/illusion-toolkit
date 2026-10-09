@@ -1553,6 +1553,9 @@ internal sealed class DistrictStreamer
         }
         if (load.Archive is { } archive) OpenArchives.Release(archive, _host);
         _loadedDistricts.Remove(name);
+        // Last, with the rows out of the tree: what Blender holds of this district no longer stands for
+        // anything in the scene.
+        _host.BridgeSession.ForgetUnloaded();
     }
 
     // Shared reset+enqueue: clears the current scene and queues a new set of .sds for incremental loading.
@@ -1595,6 +1598,9 @@ internal sealed class DistrictStreamer
         _host.Tree.Clear();
         _loadedDistricts.Clear();
         OpenArchives.ReleaseAll(_host); // nothing of ours is loaded any more
+        // A Blender edit session does not outlive the scene it was opened on. Left holding the rows of the
+        // scene that has just gone, it computed the next push against them and applied it to nothing.
+        _host.BridgeSession.ForgetUnloaded();
     }
 
     /// <summary>

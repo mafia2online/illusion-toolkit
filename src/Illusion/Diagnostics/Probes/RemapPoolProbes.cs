@@ -363,6 +363,7 @@ internal static class RemapPoolProbes
             }
             PushCases(sb, focus);
             UndoAndLevels(sb, focus);
+            PushAfterReopen(sb, focus);
             sb.Append(dump);
         }
         catch (Exception ex)
@@ -844,6 +845,195 @@ internal static class RemapPoolProbes
             Check("no exception", false, ex.ToString());
         }
         sb.AppendLine($"\n  UNDO AND LEVELS: {pass} passed, {fail} failed");
+    }
+
+    /// <summary>
+    /// Push, end the session, open the same level again, push again - on one model held in memory, the way a
+    /// modeller works through an afternoon. The second push is a rebuild of a mesh the first one already
+    /// rebuilt, and it has to land: seen on a car as a push that reported "applied" and left the mesh as it was.
+    /// </summary>
+    private static void PushAfterReopen(StringBuilder sb, string focus)
+    {
+        sb.AppendLine("\n════ push, end, open again, push ════");
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        var car = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", focus + ".sds"));
+        if (!car.Exists) return;
+        try
+        {
+            (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(car);
+            IFrameNode? node = null;
+            foreach (SdsFrameNode r in roots) node ??= BridgeSkinProbes.FindModelNode(r);
+            if (node == null || document == null) { Check("the car rides the bridge", false); return; }
+            var model = (FrameObjectModel)((FrameNodeAdapter)node).Frame;
+
+            // First session: faces deleted.
+            MeshObjectPayload? first = BridgeMeshExporter.TryExport(node, document, out string? noFirst);
+            if (first == null) { Check("the level is exported", false, noFirst ?? ""); return; }
+            int faces0 = first.FaceMaterials.Length;
+            MeshObjectPayload cut = Edited(first, drop: f => f % 9 == 0, twice: _ => false);
+            BridgeMeshApplier.ApplyResult? one = BridgeMeshApplier.TryApplyAfter([], node, cut, out string? why1);
+            Check("the first push rebuilds", one is { TopologyRebuilt: true, Unchanged: false }, why1 ?? "");
+            if (one == null) return;
+            one.ApplyNew();
+            DecodedMesh? after1 = SdsMeshLoader.DecodeLod(model, 0);
+            sb.AppendLine($"    {faces0} faces -> {cut.FaceMaterials.Length} pushed -> {after1?.Indices.Length / 3} in the model, {after1?.NumVerts} vertices");
+            Check("…and the model holds what was pushed", after1 != null && after1.Indices.Length / 3 == cut.FaceMaterials.Length);
+
+            // Second session: the level as it now stands goes out again, with a map of its own.
+            MeshObjectPayload? second = BridgeMeshExporter.TryExport(node, document, out string? noSecond);
+            if (second == null) { Check("the level is exported again", false, noSecond ?? ""); return; }
+            Check("the re-export is the mesh the first push left", second.FaceMaterials.Length == cut.FaceMaterials.Length,
+                $"{second.FaceMaterials.Length} faces");
+            int faces1 = second.FaceMaterials.Length;
+            MeshObjectPayload more = Edited(second, drop: f => f % 11 == 3, twice: f => f % 5 == 1);
+            byte[] vertexBefore = model.GetVertexBuffer(0)!.Data;
+            BridgeMeshApplier.ApplyResult? two = BridgeMeshApplier.TryApplyAfter([], node, more, out string? why2);
+            Check("the second push rebuilds", two is { TopologyRebuilt: true, Unchanged: false }, why2 ?? "");
+            if (two == null) return;
+            two.ApplyNew();
+            DecodedMesh? after2 = SdsMeshLoader.DecodeLod(model, 0);
+            sb.AppendLine($"    {faces1} faces -> {more.FaceMaterials.Length} pushed -> {after2?.Indices.Length / 3} in the model, {after2?.NumVerts} vertices");
+            Check("…and the model holds what was pushed", after2 != null && after2.Indices.Length / 3 == more.FaceMaterials.Length,
+                $"{after2?.Indices.Length / 3} faces against {more.FaceMaterials.Length}");
+            Check("the vertex buffer is another one", !ReferenceEquals(vertexBefore, model.GetVertexBuffer(0)!.Data));
+            Check("the skin still reads through its pools", SdsMeshLoader.GlobalBoneIds(model, 0) != null);
+
+            ReloadedUnderSession(sb, car, Check);
+        }
+        catch (Exception ex)
+        {
+            Check("no exception", false, ex.ToString());
+        }
+        sb.AppendLine($"\n  PUSH AFTER REOPEN: {pass} passed, {fail} failed");
+    }
+
+    /// <summary>
+    /// The scene reloaded from under an open session, through the session itself — the case that was seen. The
+    /// rows the session holds are then rows of a scene that is gone, while their frames are still in memory
+    /// with the very mesh Blender was sent: a push computes against them without complaint and has nowhere to
+    /// land. It was reported "1 object(s) applied". Staged without a renderer, which is enough: a push that
+    /// is refused never reaches one.
+    /// </summary>
+    private static void ReloadedUnderSession(StringBuilder sb, FileInfo car, Action<string, bool, string> check)
+    {
+        if (!ComponentTreeProbes.Stage(car, out _, out Viewport.D3DImageHost? host) || host == null)
+        {
+            check("the car stages", false, car.Name);
+            return;
+        }
+        Scene.SceneNode? row = null;
+        var open = new Stack<Scene.SceneNode>(host.Roots);
+        while (row == null && open.Count > 0)
+        {
+            Scene.SceneNode at = open.Pop();
+            if (at is { Lod: 0, Source: FrameNodeAdapter { Frame: FrameObjectModel } }
+                && (at.Kind == "Lod" || at.Children.All(c => c.Kind != "Lod")))
+            {
+                row = at;
+            }
+            foreach (Scene.SceneNode child in at.Children) open.Push(child);
+        }
+        if (row == null) { check("the car has a body to send", false, car.Name); return; }
+        var model = (FrameObjectModel)((FrameNodeAdapter)row.Source!).Frame;
+
+        Illusion.Bridge.BridgeSessionController bridge = host.BridgeSession;
+        var said = new List<(string Text, bool Error)>();
+        bridge.Notice += (text, error) => said.Add((text, error));
+
+        MeshObjectPayload? sent = bridge.OpenDetached([row]).FirstOrDefault();
+        check("the body is sent to Blender", sent != null && host.BridgeEditedCount == 1, "");
+        if (sent == null) return;
+
+        byte[] before = model.Resource.WriteToStream();
+        host.PrepareForArchiveRestore();    // the scene unloaded, as a reload or a restore unloads it
+        check("the session ends with the scene it was opened on", host.BridgeEditedCount == 0 && !host.Tree.IsInScene(row),
+            $"{host.BridgeEditedCount} object(s) still counted as open in Blender");
+        check("…and says that what Blender holds has lost its scene",
+            said.Any(n => n.Error && n.Text.Contains("left the scene", StringComparison.Ordinal)), "");
+
+        string file = Path.Combine(Path.GetTempPath(), $"illusion_remap_pools_push_{Environment.ProcessId}.ilx");
+        try
+        {
+            var container = new ExchangeContainer { Session = bridge.SessionId, Producer = "probe" };
+            MeshPayloadCodec.Add(container, Edited(sent, drop: f => f % 9 == 0, twice: _ => false));
+            ExchangeWriter.Write(file, container);
+            said.Clear();
+            Illusion.Bridge.Protocol.PushAckMessage ack = bridge.ApplyPush(new Illusion.Bridge.Protocol.PushMessage { File = file });
+            string summary = string.Join(" | ", said.Select(n => n.Text.Replace("\n", " / ")));
+            sb.AppendLine("    " + summary);
+            check("a push into the unloaded scene is refused, object by object",
+                ack.Applied.Count == 0 && ack.Skipped.Any(s => s.Id == sent.Id && s.Reason.Contains("reloaded", StringComparison.Ordinal)),
+                $"applied {ack.Applied.Count}, skipped {ack.Skipped.Count}");
+            check("…and is not reported as applied",
+                said.Any(n => n.Error && n.Text.Contains("Blender push: 0 object(s) applied", StringComparison.Ordinal))
+                && !said.Any(n => n.Text.Contains("vertices changed", StringComparison.Ordinal)), summary);
+            check("…and the model it was sent from is byte for byte what it was",
+                before.AsSpan().SequenceEqual(model.Resource.WriteToStream()), "");
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    /// <summary>The same mesh after an edit of its faces: those <paramref name="drop"/> names are gone, those
+    /// <paramref name="twice"/> names are there a second time on corners of their own, a little way off - new
+    /// to the archive, as a duplicate made in Blender is.</summary>
+    internal static MeshObjectPayload Edited(MeshObjectPayload mesh, Func<int, bool> drop, Func<int, bool> twice)
+    {
+        var positions = new List<Vector3>(mesh.Positions);
+        var ids = new List<byte>(mesh.BoneIndices);
+        var weights = new List<float>(mesh.BoneWeights);
+        bool skin = mesh.BoneIndices.Length >= mesh.Positions.Length * 4 && mesh.BoneWeights.Length >= mesh.Positions.Length * 4;
+        var corners = new List<uint>();
+        var normals = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var origins = new List<int>();
+        var materials = new List<ushort>();
+        var offset = new Vector3(0.013f, 0.011f, 0.012f);
+        for (int f = 0; f < mesh.FaceMaterials.Length; f++)
+        {
+            if (drop(f)) continue;
+            for (int copy = 0; copy < (twice(f) ? 2 : 1); copy++)
+            {
+                for (int l = f * 3; l < (f * 3) + 3; l++)
+                {
+                    uint welded = mesh.LoopVertexIndices[l];
+                    if (copy == 1)
+                    {
+                        positions.Add(mesh.Positions[welded] + offset);
+                        if (skin)
+                        {
+                            ids.AddRange(mesh.BoneIndices.AsSpan((int)welded * 4, 4));
+                            weights.AddRange(mesh.BoneWeights.AsSpan((int)welded * 4, 4));
+                        }
+                        welded = (uint)(positions.Count - 1);
+                    }
+                    corners.Add(welded);
+                    normals.Add(mesh.LoopNormals[l]);
+                    uvs.Add(mesh.LoopUvs[l]);
+                    origins.Add(copy == 1 ? -1 : mesh.LoopOrigIndex[l]);
+                }
+                materials.Add(mesh.FaceMaterials[f]);
+            }
+        }
+        // Changed in place, so that everything else the export said about the mesh - its rig, its materials,
+        // its lattice - comes back as Blender sends it back.
+        mesh.Positions = [.. positions];
+        mesh.BoneIndices = [.. ids];
+        mesh.BoneWeights = [.. weights];
+        mesh.LoopVertexIndices = [.. corners];
+        mesh.LoopNormals = [.. normals];
+        mesh.LoopUvs = [.. uvs];
+        mesh.LoopOrigIndex = [.. origins];
+        mesh.FaceMaterials = [.. materials];
+        return mesh;
     }
 
     private static bool IsSubsequence(int[] part, int[] whole)

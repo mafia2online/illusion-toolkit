@@ -188,6 +188,20 @@ public partial class ResourceEditorWindow : Window
     {
         CommitFocusedField();
 
+        // A double click on a card both stages the archive and steps into it, and staging reloads the scene —
+        // from under a Blender edit session, if one is open: its objects would be left standing for rows that
+        // are gone. The archive already on the stage stays as it is (stepping into it is all that was asked);
+        // another one waits until the session has been ended, as it does when the tools ask for it.
+        if (Stage.BridgeEditedCount > 0)
+        {
+            if (!string.Equals(_staged?.File.FullName, entry.File.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                PostNotice($"{entry.Name} was not opened: {Stage.BridgeEditedCount} object(s) of {_staged?.Name} are open "
+                    + "in Blender, and opening another archive would end that session. Leave it first (Esc).", true);
+            }
+            return;
+        }
+
         // One extracted working copy per archive, shared by every window that opens it. Two editors on the
         // same one are two pictures of the same folder, and whichever saves last wins silently. Say so before
         // the loss rather than after — but do not refuse: looking at a district in both windows is a fair
@@ -546,6 +560,16 @@ public partial class ResourceEditorWindow : Window
 
     private void ShowRestoreDialog(FileInfo? preselect)
     {
+        if (Stage.BridgeEditedCount > 0)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Restore Backup",
+                Icon = DialogIcon.Info,
+                Text = "Leave the Blender edit session first (Esc) — a restore reloads the scene under it.",
+            });
+            return;
+        }
         if (Stage.FrameDocumentNodes().Count == 0)
         {
             AppDialog.Show(this, new DialogOptions

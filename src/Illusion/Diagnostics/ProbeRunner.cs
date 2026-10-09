@@ -546,6 +546,13 @@ internal static class ProbeRunner
             case "--probe-bridge-rebuild":
                 BridgeProbes.RunRebuildProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Blender bridge, a session over an afternoon, in a real resource editor window: push, end, open
+            // the same level again, push again; and the scene reloaded from under an open session, whose push
+            // must be refused rather than reported as applied. Blender is not launched and nothing is saved.
+            // Optional arg = the car. Output: %TEMP%\illusion_bridge_reopen_live.txt
+            case "--probe-bridge-reopen-live":
+                BridgeReopenLiveProbe.Run(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // Blender bridge: object-level ops (world↔local re-localization incl. parented frames,
             // material reassignment via the rebuild).
             case "--probe-bridge-transform":
