@@ -102,8 +102,10 @@ public interface IEditorSession
     /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's rotation; null keeps
     /// the rotation the original has.</param>
     /// <param name="collision">For scenery: auto (its own hulls, else its convex hull), convex, box, mesh or none.</param>
+    /// <param name="parent">A frame of the receiving archive to hang a piece of scenery under; null stands it
+    /// in the scene by itself.</param>
     string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        string? collision, int occurrence, out ObjectImportOutcome? outcome);
+        string? collision, int occurrence, string? parent, out ObjectImportOutcome? outcome);
 
     /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
     string? DuplicateSelected(out IReadOnlyList<string> copies);
@@ -216,4 +218,40 @@ public interface IEditorSession
     /// volume, its place in the frame name table and its line in cityareas.bin. Without <paramref name="apply"/>
     /// nothing is written. A zone the game ships with is refused. Null on success.</summary>
     string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone);
+
+    /// <summary>The interiors the game keeps under <c>shops\</c> and the places they stand at, as cityshops.bin has
+    /// them. For the one named by <paramref name="shop"/> its archive is read too, so its places come with where
+    /// their markers stand and which volumes hold them. Null on success.</summary>
+    string? ShopPlaces(string? shop, out IReadOnlyList<ShopInfo> shops);
+
+    /// <summary>Adds a place for an interior: a marker in its archive at <paramref name="point"/>, a pair of box
+    /// volumes round it in city_univers, and the rows of cityshops.bin. Without <paramref name="apply"/> nothing is
+    /// written. With it the working copies of both archives are saved; <paramref name="archives"/> names the two to
+    /// build. Null on success.</summary>
+    string? ShopPlaceAdd(string shop, float[] point, float turn, float loadHalf, float unloadHalf, float halfHeight, bool apply,
+        out ShopPlaceInfo? place, out IReadOnlyList<string> archives);
+
+    /// <summary>Takes a place that was ADDED out again: its marker, its volumes and its rows. A place the game ships
+    /// with is refused. Without <paramref name="apply"/> nothing is written. Null on success.</summary>
+    string? ShopPlaceDelete(string marker, bool apply, out ShopPlaceInfo? place, out IReadOnlyList<string> archives);
+
+    /// <summary>Makes an interior of one's own: a copy of one of the table's interiors under a new name - an
+    /// archive of its own under <c>shops\</c> and a row of its own - standing at <paramref name="point"/>.
+    /// Without <paramref name="apply"/> nothing is written. With it the working copies are saved and the NEW
+    /// archive is packed (nothing of the game is overwritten); <paramref name="archives"/> names what is still
+    /// to be built, <paramref name="notes"/> what the caller should know. Null on success.</summary>
+    string? ShopCreate(string name, string like, float[] point, float turn, float loadHalf, float unloadHalf, float halfHeight, bool apply,
+        out ShopPlaceInfo? place, out IReadOnlyList<string> archives, out IReadOnlyList<string> notes);
+
+    /// <summary>Takes an interior that was ADDED out of the table again: its row, its area rows and their volumes.
+    /// Its archive and working copy are left where they are. Without <paramref name="apply"/> nothing is
+    /// written. Null on success.</summary>
+    string? ShopDelete(string name, bool apply, out ShopInfo? shop, out IReadOnlyList<string> archives);
+
+    /// <summary>The materials an archive's meshes are drawn with, read from the archive file as it stands and the
+    /// material libraries on disk: each in full, told as the game's own, changed or added. <paramref name="archive"/>
+    /// is a full path or a path under <c>pc\sds</c>. With <paramref name="saveTo"/> the document is also written to
+    /// that file, and with <paramref name="libraryTo"/> the added and changed materials are written as a material
+    /// library (.mtl) of their own. Nothing of the game is written. Null on success.</summary>
+    string? ArchiveMaterials(string archive, bool all, string? saveTo, string? libraryTo, out ArchiveMaterialsInfo? result);
 }

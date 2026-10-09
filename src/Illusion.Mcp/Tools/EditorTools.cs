@@ -846,7 +846,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "actor_import")]
-    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). Only actors that place no object of their own scene travel this way: lights, sounds — for one that places an object (a door, a prop) use object_import. Undoable. Find candidates with decode_actors on the source .act file.")]
+    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). With the resource editor as the target (editor_target) the copy goes into the archive open there instead — how an interior under shops\\ gets its lights. Only actors that place no object of their own scene travel this way: lights, sounds — for one that places an object (a door, a prop) use object_import. Undoable. Find candidates with decode_actors on the source .act file.")]
     public static async Task<string> ImportActor(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -869,7 +869,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "object_import")]
-    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
+    [Description("Copy an object out of ANOTHER archive into the loaded area — or, with the resource editor as the target (editor_target), into the archive open there, which is how an interior under shops\\ is furnished: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
     public static async Task<string> ImportObject(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -879,16 +879,17 @@ public sealed class EditorTools
         [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
         [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null,
         [Description("Collision for scenery: 'auto' (default — the hulls that stand inside its box in the source archive, taken as its own, else its convex hull; for a shelf or a room that includes the hulls of what stood on or in it), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null,
-        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1)
+        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1,
+        [Description("Scenery only: a frame of the receiving archive to hang the copy under (name or path suffix) instead of standing it in the scene by itself. An interior's pieces are children of its holder — the '…_translocator_00' frame, which carries them to every place the interior stands at — so furniture for an interior takes the holder here. The copy still lands on 'position' in the archive's own world, and it is not put on the spawn list. Omit for a district.")] string? parent = null)
     {
         try
         {
             if (position is not { Length: 3 }) return ToolResult.Invalid("position takes three numbers");
             ObjectImportOutcome? outcome = null;
             string? refused = await ui.RunAsync(
-                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, out outcome));
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, parent, out outcome));
             if (refused != null) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, imported = outcome, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -1081,6 +1082,143 @@ public sealed class EditorTools
             LoadZoneInfo? gone = null;
             string? refused = await ui.RunAsync(() => editor.ZoneDelete(name, apply, out gone));
             return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = gone });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_places")]
+    [Description("The INTERIORS the game stands in the open city - gun shops, clothes shops, diners, bars, garages, flats - and the places they stand at. Such an interior is an archive under shops\\ that the game loads when the player comes near; one archive can stand at several places (the gun shop at eleven). Without a name: every interior of cityshops.bin with its archive, its actor file and its places as the table has them (marker name, map position). With 'shop': that interior's archive is read too, so each place comes with where its marker stands, how it is turned, the pair of volumes of city_univers that load it there ('LoadZone') and let it go ('UnloadZone'), and whether it was added here ('Added'). A place is added with shop_place_add.")]
+    public static async Task<string> ShopPlaces(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("An interior's name as the table has it ('Gunshop') or its archive's ('gunshop'). Omit for the list of all.")] string? shop = null)
+    {
+        try
+        {
+            IReadOnlyList<ShopInfo> shops = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaces(shop, out shops));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, count = shops.Count, shops });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_place_add")]
+    [Description("Stand an interior of shops\\ at ONE MORE PLACE of the city - the way the game itself stands one gun shop at eleven. Three things are written together: a marker frame in the interior's archive at 'point', a pair of box volumes round it in city_univers.sds (inside the smaller the interior is loaded, outside the wider it is let go), and the rows of cityshops.bin. 'point' is where the interior's OWN ORIGIN goes - see with shop_places how an existing marker stands against its room (the gun shop's is 2.08 m above its floor, in the middle of the room). By default it only REPORTS; apply=true writes the working copies - then archive_build BOTH archives named in the answer. Refused while either archive is open in an editor. Seen in the game (a multiplayer client): a twelfth gun shop added this way loads and its shop menu opens; an interior has no outside, so it is see-through from the street unless it stands inside a building. 'turn' follows the game's own markers, which are turned; a turned place added here has not been looked at in the game yet. Take a place out again with shop_place_delete.")]
+    public static async Task<string> ShopPlaceAdd(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The interior, as shop_places lists it: 'Gunshop', 'Odevy', 'vitohouseb12'...")] string shop,
+        [Description("Where the interior's own origin goes, world [x, y, z].")] float[] point,
+        [Description("Turn about the vertical, degrees, counter-clockwise seen from above. Default 0: as the interior was built.")] float turn = 0,
+        [Description("Half the side of the box inside which the interior is loaded, metres. Default 35.")] float loadHalf = 35,
+        [Description("Half the side of the wider box outside which it is let go. Default 60.")] float unloadHalf = 60,
+        [Description("Half the height of both boxes. Default 23.")] float halfHeight = 23,
+        [Description("Write the change to the working copies. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaceAdd(shop, point, turn, loadHalf, unloadHalf, halfHeight, apply, out place, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_place_delete")]
+    [Description("Take a place of an interior that was ADDED (shop_place_add - shop_places marks it 'Added') out again: its marker in the interior's archive, its pair of volumes in city_univers.sds and its rows in cityshops.bin. A place the game ships with is refused. By default it only REPORTS; apply=true writes the working copies - then archive_build BOTH archives named in the answer. Refused while either archive is open in an editor.")]
+    public static async Task<string> ShopPlaceDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The place's marker, as shop_places lists it, e.g. 'GUNSHOP_translocator_14'.")] string marker,
+        [Description("Write the change to the working copies. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaceDelete(marker, apply, out place, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_create")]
+    [Description("Make an INTERIOR OF YOUR OWN the way the game keeps its shops and flats: a copy of one of the table's interiors under a new name, standing at 'point'. The copy is an archive of its own - shops\\<name>.sds, made from the working copy of 'like', with its marker frames named after the new interior - and gets a row of its own in cityshops.bin, a marker for its first place and a pair of box volumes round it in city_univers.sds. What stands inside is then changed like any other archive (open it, delete, import, push from Blender); more places are added with shop_place_add. Pick a small interior to copy - 'elgreco' is one room with one sector. By default it only REPORTS; apply=true writes the working copies and packs the NEW archive (no file of the game is overwritten) - then archive_build city_univers.sds, named in the answer. Refused while city_univers is open in an editor. Take it out of the table again with shop_delete.")]
+    public static async Task<string> ShopCreate(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The new interior's name: 3 to 31 lower-case letters, digits and '_', starting with a letter. It is its archive's name too.")] string name,
+        [Description("The interior to copy, as shop_places lists it, e.g. 'elgreco'.")] string like,
+        [Description("Where the interior's own origin goes, world [x, y, z] - where the copied interior's marker stood against its room.")] float[] point,
+        [Description("Turn about the vertical, degrees, counter-clockwise seen from above. Default 0.")] float turn = 0,
+        [Description("Half the side of the box inside which the interior is loaded, metres. Default 35.")] float loadHalf = 35,
+        [Description("Half the side of the wider box outside which it is let go. Default 60.")] float unloadHalf = 60,
+        [Description("Half the height of both boxes. Default 23.")] float halfHeight = 23,
+        [Description("Write the change. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            IReadOnlyList<string> notes = [];
+            string? refused = await ui.RunAsync(() => editor.ShopCreate(name, like, point, turn, loadHalf, unloadHalf, halfHeight, apply, out place, out archives, out notes));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives, notes });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_delete")]
+    [Description("Take an interior that was ADDED (shop_create) out of cityshops.bin again: its row, its area rows and their volumes in city_univers.sds - after which the game never asks for it. Its archive under shops\\ and its working copy are left where they are. An interior the game ships with is refused. By default it only REPORTS; apply=true writes the working copy - then archive_build city_univers.sds. Refused while city_univers is open in an editor.")]
+    public static async Task<string> ShopDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The interior, as shop_places lists it.")] string name,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopInfo? shop = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopDelete(name, apply, out shop, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, shop, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "archive_materials")]
+    [Description("What an archive needs REGISTERED to draw as it was made: the materials its meshes are drawn with, each in full, and which of them the game does not have. A mesh names its materials by hash; the definitions are not in the archive but in the game's material libraries (edit\\materials\\*.mtl) - so an archive handed to someone else (a multiplayer server, another modder) is missing every material that was added or changed here. The archive FILE is read as it stands in pc\\sds (build it first) and the libraries from disk. Each material comes with its 'origin' against the game as it ships - 'added', 'changed' (the game's own, defined differently here), 'shipped', or 'unknown' when there is no list for this edition (the list covers Mafia II, library version 57; not the Definitive Edition) - and with name, hash, flags, shader id and hash, the library's nameless fields, every sampler (texture, whether that texture is INSIDE the archive, sampler states) and every parameter. By default the document holds only the materials that have to travel with the archive; all=true lists every one. 'missing' are hashes the archive names and no library has - those parts draw with no material. 64-bit hashes are hex text, safe for a JavaScript reader. saveTo also writes the document to a file to send along. Nothing of the game is written.")]
+    public static async Task<string> ArchiveMaterials(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The archive: a full path to an .sds, or a path under pc\\sds such as 'cars/shubert_38_custom.sds' or 'city/southport'.")] string archive,
+        [Description("List every material the archive uses, the game's own too. Default false: only added and changed ones.")] bool all = false,
+        [Description("Full path of a .json file to also write the document to. Default: none.")] string? saveTo = null,
+        [Description("Full path of an .mtl file to also write the added and changed materials to, as a material library of their own - the file a multiplayer host loads beside the game's libraries (Mafia II Online: stream/materials/<name>.mtl, names of a-z 0-9 _ only and not default*). An archive that adds nothing writes no file (LibraryMaterials 0). Never inside the game's edit\\materials. Default: none.")] string? libraryTo = null)
+    {
+        try
+        {
+            ArchiveMaterialsInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.ArchiveMaterials(archive, all, saveTo, libraryTo, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, result });
         }
         catch (Exception ex)
         {

@@ -741,14 +741,16 @@ internal sealed class AppEditorSession : IEditorSession
 
     public string? ImportActor(string sourceActFile, string actorName, string newName, float[] position)
     {
-        if (Window is not { } window) return NotOpen;
-        D3DImageHost host = window.Viewport;
+        // The pack of the editor the tools are pointed at: the loaded area's, or - with the resource editor as
+        // the target - that of the archive open there (an interior under shops\ is no area of the map editor,
+        // and this is how it is given lights).
+        if (TargetHost is not { } host) return _resourceTarget ? "the resource editor has no archive open — resource_open first" : NotOpen;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
         if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
         if (!File.Exists(sourceActFile)) return $"no such file: {sourceActFile}";
 
         SceneNode? actorsRow = AllNodes(host).FirstOrDefault(n => n.Source is Assets.Adapters.ActorDocumentAdapter);
-        if (actorsRow == null) return "the loaded area has no actor pack to add to";
+        if (actorsRow == null) return _resourceTarget ? "the open archive has no actor pack to add to" : "the loaded area has no actor pack to add to";
 
         Formats.Actors.ActorsFile source;
         try
@@ -766,34 +768,47 @@ internal sealed class AppEditorSession : IEditorSession
         SceneNode? node = host.ActorEditing.Import(
             actorsRow, source, actor, newName, new Vector3(position[0], position[1], position[2]), out string? reason);
         if (node == null) return reason ?? "the pack refused the actor";
-        _resourceTarget = false;          // a map-only tool: what follows it is about the map
         return null;
     }
 
     public string? ImportObject(string sourceArchive, string name, string newName, float[] position, float? yawDegrees,
-        string? collision, int occurrence, out ObjectImportOutcome? outcome)
+        string? collision, int occurrence, string? parent, out ObjectImportOutcome? outcome)
     {
         outcome = null;
         if (position is not { Length: 3 } || position.Any(v => !float.IsFinite(v))) return "position takes three finite numbers";
         if (yawDegrees is { } yaw && !float.IsFinite(yaw)) return "yawDegrees is not a finite number";
-        if (Window is not { } window) return NotOpen;
-        D3DImageHost host = window.Viewport;
-        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
-        if (window.WholeMapCheck.IsChecked == true || window.AreaCombo.SelectedItem is not MapArea area)
+        // The archive the copy goes into: the loaded district's, or - with the resource editor as the target -
+        // the one open there (an interior under shops\ is no area of the map editor, and this is how it is
+        // furnished).
+        D3DImageHost host;
+        FileInfo destination;
+        if (_resourceTarget)
         {
-            return "load one district first — an import needs one archive to go into";
+            if (ResourceWindow is not { StagedEntry: { } staged } resources) return "the resource editor has no archive open — resource_open first";
+            host = resources.Stage;
+            destination = staged.File;
         }
-        FileInfo destination = area.FileFor(window.WinterToggle.IsChecked == true);
+        else
+        {
+            if (Window is not { } window) return NotOpen;
+            host = window.Viewport;
+            if (window.WholeMapCheck.IsChecked == true || window.AreaCombo.SelectedItem is not MapArea area)
+            {
+                return "load one district first — an import needs one archive to go into";
+            }
+            destination = area.FileFor(window.WinterToggle.IsChecked == true);
+        }
+        if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
+        SceneNode? under = null;
+        if (!string.IsNullOrWhiteSpace(parent) && Resolve(host, parent, out under) is { } unresolved) return unresolved;
 
         Assets.Collisions.CollisionChoice hulls = Assets.Collisions.CollisionChoice.Auto;
         if (!string.IsNullOrEmpty(collision) && !Enum.TryParse(collision, ignoreCase: true, out hulls))
         {
             return $"collision '{collision}' is none of auto, convex, box, mesh, none";
         }
-        string? refused = host.ObjectImporting.Import(destination, sourceArchive, name, newName,
-            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls, occurrence);
-        if (refused == null) _resourceTarget = false;     // a map-only tool: what follows it is about the map
-        return refused;
+        return host.ObjectImporting.Import(destination, sourceArchive, name, newName,
+            new Vector3(position[0], position[1], position[2]), yawDegrees, out outcome, hulls, occurrence, under);
     }
 
     public string? DuplicateSelected(out IReadOnlyList<string> copies)
@@ -1640,6 +1655,184 @@ internal sealed class AppEditorSession : IEditorSession
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
         {
             return "could not take the zone out of city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ArchiveMaterials(string archive, bool all, string? saveTo, string? libraryTo, out ArchiveMaterialsInfo? result)
+    {
+        result = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(archive)) return "archive is a full path to an .sds, or a path under pc\\sds such as 'cars/shubert_38.sds'";
+        string asked = archive.Trim().Replace('/', Path.DirectorySeparatorChar);
+        if (!asked.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)) asked += ".sds";
+        var file = new FileInfo(Path.IsPathRooted(asked) ? asked : Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", asked));
+        if (!file.Exists) return $"no such archive: {file.FullName}";
+        string? target = string.IsNullOrWhiteSpace(saveTo) ? null : saveTo.Trim();
+        if (target != null && !Path.IsPathRooted(target)) return "saveTo is the full path of the file to write";
+        if (target != null && Directory.Exists(target)) return "saveTo names a folder - give the file to write, e.g. ...\\materials.json";
+        string? library = string.IsNullOrWhiteSpace(libraryTo) ? null : libraryTo.Trim();
+        if (library != null && !Path.IsPathRooted(library)) return "libraryTo is the full path of the .mtl file to write";
+        if (library != null && Directory.Exists(library)) return "libraryTo names a folder - give the file to write, e.g. ...\\my_interior.mtl";
+        if (library != null && !library.EndsWith(".mtl", StringComparison.OrdinalIgnoreCase)) return "libraryTo is a material library - name it .mtl";
+        // Never one of the game's own: a library written over default.mtl would be the game with a handful of materials.
+        if (library != null && Path.GetFullPath(library).StartsWith(
+                Path.GetFullPath(Path.Combine(Assets.MafiaEnvironment.GameRoot, "edit", "materials")) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return "libraryTo is inside the game's own edit\\materials - write the library somewhere else";
+        }
+        try
+        {
+            IReadOnlyList<Formats.Materials.MaterialLibrary> libraries = Assets.Materials.ArchiveMaterials.LoadLibraries(Assets.MafiaEnvironment.GameRoot);
+            Assets.Materials.ArchiveMaterials.Report report = Assets.Materials.ArchiveMaterials.Read(file, libraries);
+            System.Text.Json.Nodes.JsonObject document = Assets.Materials.ArchiveMaterials.ToJson(report, all);
+            if (target != null) Assets.Materials.ArchiveMaterials.Save(document, target);
+            int inLibrary = library != null ? Assets.Materials.ArchiveMaterials.SaveLibrary(report, libraries, library) : 0;
+            int Of(Assets.Materials.MaterialOrigin origin) => report.Materials.Count(m => m.Origin == origin);
+            result = new ArchiveMaterialsInfo(report.Archive, file.FullName, report.OriginKnown, report.Materials.Count + report.Missing.Count,
+                Of(Assets.Materials.MaterialOrigin.Added), Of(Assets.Materials.MaterialOrigin.Changed), Of(Assets.Materials.MaterialOrigin.Shipped),
+                report.Missing.Count, document, target, inLibrary > 0 ? library : null, inLibrary);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex) || ex is NotSupportedException)
+        {
+            return "could not read the archive's materials: " + ex.Message;
+        }
+    }
+
+    private static ShopPlaceInfo Told(Assets.World.ShopPlaces.PlaceInfo p) =>
+        new(p.Shop, p.Archive, p.Marker, p.At is { } at ? Xyz(at) : null, p.Turn, [p.MapX, p.MapY], p.LoadZone, p.UnloadZone, p.Added);
+
+    public string? ShopPlaces(string? shop, out IReadOnlyList<ShopInfo> shops)
+    {
+        shops = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        string? asked = string.IsNullOrWhiteSpace(shop) ? null : shop.Trim();
+        try
+        {
+            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            IReadOnlyList<Assets.World.ShopPlaces.ShopInfo> all = places.Shops(asked);
+            if (asked != null)
+            {
+                all = [.. all.Where(s => string.Equals(s.Name, asked, StringComparison.OrdinalIgnoreCase) || string.Equals(s.Archive, asked, StringComparison.OrdinalIgnoreCase))];
+                if (all.Count == 0) return $"the table has no interior named '{asked}' - call it without a name for the list";
+            }
+            shops = [.. all.Select(s => new ShopInfo(s.Name, s.Archive, s.ActorFile, s.Entities, [.. s.Places.Select(Told)]))];
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not read the interiors: " + ex.Message;
+        }
+    }
+
+    public string? ShopPlaceAdd(string shop, float[] point, float turn, float loadHalf, float unloadHalf, float halfHeight, bool apply,
+        out ShopPlaceInfo? place, out IReadOnlyList<string> archives)
+    {
+        place = null;
+        archives = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(shop)) return "shop is the interior's name, as shop_places lists it";
+        if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
+        return ChangeShopPlaces(apply, "add the place", out place, out archives,
+            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? made) =>
+                places.Add(shop.Trim(), new Vector3(point[0], point[1], point[2]), turn, loadHalf, unloadHalf, halfHeight, out made));
+    }
+
+    public string? ShopPlaceDelete(string marker, bool apply, out ShopPlaceInfo? place, out IReadOnlyList<string> archives)
+    {
+        place = null;
+        archives = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(marker)) return "marker is the place's marker, as shop_places lists it";
+        return ChangeShopPlaces(apply, "take the place out", out place, out archives,
+            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? gone) => places.Remove(marker.Trim(), out gone));
+    }
+
+    public string? ShopCreate(string name, string like, float[] point, float turn, float loadHalf, float unloadHalf, float halfHeight, bool apply,
+        out ShopPlaceInfo? place, out IReadOnlyList<string> archives, out IReadOnlyList<string> notes)
+    {
+        place = null;
+        archives = [];
+        notes = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(name)) return "name is the new interior's name";
+        if (string.IsNullOrWhiteSpace(like)) return "like is the interior to copy, as shop_places lists it";
+        if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
+        var told = new List<string>();
+        string? refused = ChangeShopPlaces(apply, "make the interior", out place, out archives,
+            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? made) =>
+                places.Create(name.Trim(), like.Trim(), new Vector3(point[0], point[1], point[2]), turn, loadHalf, unloadHalf, halfHeight, out made),
+            told);
+        notes = told;
+        return refused;
+    }
+
+    public string? ShopDelete(string name, bool apply, out ShopInfo? shop, out IReadOnlyList<string> archives)
+    {
+        shop = null;
+        archives = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(name)) return "name is the interior to take out, as shop_places lists it";
+        try
+        {
+            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            if (ZoneWrites.StructureBlocked(places.CityArchive) is { } blocked) return blocked;
+            if (places.Delete(name.Trim(), out Assets.World.ShopPlaces.ShopInfo? gone) is { } refused) return refused;
+            shop = new ShopInfo(gone!.Name, gone.Archive, gone.ActorFile, gone.Entities, [.. gone.Places.Select(Told)]);
+            archives = [places.CityArchive.FullName];
+            if (!apply) return null;
+            places.Save();
+            ZoneWrites.Written(places.CityArchive);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not take the interior out: " + ex.Message;
+        }
+    }
+
+    private delegate string? ShopPlaceChange(Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? place);
+
+    // A place is two archives changed together. Neither may be open in an editor: that editor holds a scene of
+    // its own and its next save would write it whole, over the marker or the volumes written here.
+    private static string? ChangeShopPlaces(bool apply, string what, out ShopPlaceInfo? place, out IReadOnlyList<string> archives, ShopPlaceChange change,
+        List<string>? notes = null)
+    {
+        place = null;
+        archives = [];
+        try
+        {
+            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            if (ZoneWrites.StructureBlocked(places.CityArchive) is { } blocked) return blocked;
+            if (change(places, out Assets.World.ShopPlaces.PlaceInfo? changed) is { } refused) return refused;
+            FileInfo shopArchive = places.ShopArchive!;
+            bool isNew = places.ShopArchiveIsNew;
+            if (!isNew && ZoneWrites.HeldByAnEditor(shopArchive) is { } held) return held;
+            place = Told(changed!);
+            archives = isNew ? [places.CityArchive.FullName] : [shopArchive.FullName, places.CityArchive.FullName];
+            if (!apply) return null;
+            places.Save();
+            if (isNew)
+            {
+                // an archive the game does not have yet: packed here, where nothing is overwritten - and the game
+                // finds archives through a cached list of files that a new one is not in
+                Assets.Sds.SdsWriter.PackResult packed = Assets.Sds.SdsWriter.PackSds(shopArchive, createBackup: false);
+                notes?.Add($"packed the new archive {packed.Archive}");
+                notes?.Add(Assets.Sds.GameFileIndex.Reset()
+                    ? "the game's file list (vfs.bin) was reset - the next start rebuilds it with the new archive"
+                    : $"the game's file list was not reset - remove {Assets.Sds.GameFileIndex.Path} before starting the game, or it will not find the new archive");
+            }
+            else
+            {
+                ZoneWrites.Written(shopArchive);
+            }
+            ZoneWrites.Written(places.CityArchive);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return $"could not {what}: " + ex.Message;
         }
     }
 

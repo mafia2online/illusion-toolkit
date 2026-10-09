@@ -155,6 +155,24 @@ public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float 
 public sealed record LoadZoneInfo(string Name, IReadOnlyList<string> Districts, bool Inside, float OutsideBy, float[] BoxMin, float[] BoxMax,
     bool LoadsOnArrival = false, bool Added = false);
 
+/// <summary>What an archive's meshes are drawn with: how many materials it names and how they stand against the game
+/// as it ships (<paramref name="OriginKnown"/> false: no list for this edition, the counts by origin are then zero),
+/// the hashes no library has, and the document for whoever takes the archive - by default only the materials that
+/// have to travel with it. <paramref name="SavedTo"/> is the file the document was written to, if one was asked for.</summary>
+public sealed record ArchiveMaterialsInfo(string Archive, string Path, bool OriginKnown, int Used, int Added, int Changed, int Shipped, int Missing,
+    System.Text.Json.Nodes.JsonObject Document, string? SavedTo, string? Library = null, int LibraryMaterials = 0);
+
+/// <summary>One place an interior of <c>shops\</c> stands at: the marker frame of its archive, where that marker
+/// stands and how it is turned about the vertical (degrees; both null when the archive was not read), where the map
+/// draws the place, and the pair of volumes of city_univers that load and let go of the interior there.
+/// <paramref name="Added"/> is false for a place the game ships with.</summary>
+public sealed record ShopPlaceInfo(string Shop, string Archive, string Marker, float[]? At, float? Turn, float[] Map, string? LoadZone, string? UnloadZone,
+    bool Added);
+
+/// <summary>An interior of cityshops.bin: its name there, its archive under <c>shops\</c> (null when there is no such
+/// file), its actor file, how many entities that file has, and its places.</summary>
+public sealed record ShopInfo(string Name, string? Archive, string ActorFile, int Entities, IReadOnlyList<ShopPlaceInfo> Places);
+
 /// <summary>A face of a load zone moved - or, when not applied, what moving it would do: from where to where on
 /// its axis (world), the zone's box afterwards, the districts it asks for, and the working-copy file written.</summary>
 /// <paramref name="Copy"/> is which copy of city_univers.sds this is about: "base" or a DLC's folder name.
