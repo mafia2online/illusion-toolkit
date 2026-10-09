@@ -160,6 +160,30 @@ public interface IEditorSession
     /// materials the car adds, stream/materials/); nothing of the game is written. Null on success.</summary>
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
+    /// <summary>Finds — and with <paramref name="apply"/> hides, as one undoable edit — the triangles of a mesh
+    /// whose corners all lie inside a world-space box, without rebuilding the mesh. <paramref name="shared"/>
+    /// says what to do when other objects draw the same geometry: null refuses, "own" gives the mesh a copy of
+    /// its own first, "all" hides the triangles on every one of them. Null on success.</summary>
+    string? HideTriangles(string name, float[] boxMin, float[] boxMax, string? material, bool apply, int sample, string? shared,
+        out HiddenTrianglesInfo? result);
+
+    /// <summary>The material slots of a mesh; with <paramref name="slot"/> and <paramref name="material"/>, that
+    /// slot is first re-pointed at the named material, as one undoable edit. No geometry and no UV is touched.
+    /// Null on success.</summary>
+    string? MeshMaterials(string name, int? slot, string? material, out IReadOnlyList<MeshSlotInfo> slots);
+
+    /// <summary>Counts — and with <paramref name="apply"/> removes, as one undoable edit — the hulls no placement
+    /// references, in every collision file of the open scene. Null on success.</summary>
+    string? UnusedHulls(bool apply, out IReadOnlyList<UnusedHullsInfo> result);
+
+    /// <summary>Lists — and with <paramref name="delete"/> removes, as one undoable edit and in both seasons where
+    /// the placement is linked — the city_crash props standing inside a world-space box. <paramref name="total"/>
+    /// is how many the box holds; the list stops at <paramref name="limit"/> — except for a delete, which lists
+    /// every placement it removed. A delete of more than <paramref name="maxDelete"/> placements is refused
+    /// whole. Null on success.</summary>
+    string? CrashPlacements(float[] boxMin, float[] boxMax, string? nameContains, bool delete, int limit, int maxDelete,
+        out IReadOnlyList<CrashPlacementInfo> result, out int total);
+
     string? Undo();
 
     string? Redo();

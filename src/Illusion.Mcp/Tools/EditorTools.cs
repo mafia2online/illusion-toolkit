@@ -225,6 +225,110 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "mesh_hide_triangles")]
+    [Description("Cut an opening into a mesh WITHOUT rebuilding it: the triangles of the named mesh whose three corners all lie inside a world-space box are hidden on every level of detail (their indices are pointed at one vertex). No vertex is touched, so a stock facade keeps the channels Blender never sees (shadow-map UVs) — use this, not a Blender push, to open a painted door or garage shutter of a stock building. By default it only REPORTS what the box would take (count per LOD and the first triangles with their material and corners); pass apply=true to hide them as one undoable edit. Saved by editor_save, packed by editor_build. A mesh that shares its geometry with other objects is refused unless 'shared' says what to do about them.")]
+    public static async Task<string> MeshHideTriangles(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The mesh, by name or path suffix (scene_find has the names).")] string name,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only triangles whose material name contains this. Omit for any material.")] string? material = null,
+        [Description("Hide the triangles. Default false: report only.")] bool apply = false,
+        [Description("How many of the found triangles to list (0-500). Default 40.")] int sample = 40,
+        [Description("What to do when other objects draw the same geometry (the districts reuse it heavily): omit to refuse, 'own' gives this mesh a copy of the geometry of its own first and cuts it alone, 'all' hides the triangles on every object that draws it.")] string? shared = null)
+    {
+        try
+        {
+            HiddenTrianglesInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.HideTriangles(name, boxMin, boxMax, material, apply, sample, shared, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, hidden = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "mesh_materials")]
+    [Description("The material slots of a mesh - which material each part of it is drawn with, and how many triangles that part has. With 'slot' and 'material', that slot is first re-pointed at another material (what the Materials tab's 'assign to slot' does): one undoable edit that touches no geometry and no UV, so the new texture is laid out the way the old one was - look at the result. Further levels of detail follow wherever they used the slot's old material. The material is named exactly as search_materials spells it. A district's winter archive is edited separately. The hull's surface type (what footsteps sound like, where grass tufts grow) is the collision's own and does not change with this.")]
+    public static async Task<string> MeshMaterials(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The mesh: its name, or its path when the name is not unique (scene_find gives both).")] string name,
+        [Description("Slot to re-point. Omit, with 'material', to only list the slots.")] int? slot = null,
+        [Description("Material to point the slot at, by exact name.")] string? material = null)
+    {
+        try
+        {
+            IReadOnlyList<MeshSlotInfo> slots = [];
+            string? refused = await ui.RunAsync(() => editor.MeshMaterials(name, slot, material, out slots));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, changed = slots.Any(s => s.Changed), slots });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "collision_unused_hulls")]
+    [Description("Count the collision hulls no placement references — dead weight a delete, a re-cook or a resize leaves behind in the .col (deleting a placement never removes its hull, so undo can put the file back). For every collision file of the open scene: its placements, its hulls and how many of those are unused. By default it only REPORTS; pass apply=true to remove them, all files as one undoable edit. Placements are never touched, so nothing changes in the game except the archive's size. Saved by editor_save, packed by editor_build; run editor_mirror_winter afterwards so the winter district loses them too.")]
+    public static async Task<string> CollisionUnusedHulls(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Remove the unused hulls. Default false: count only.")] bool apply = false)
+    {
+        try
+        {
+            IReadOnlyList<UnusedHullsInfo> layers = [];
+            string? refused = await ui.RunAsync(() => editor.UnusedHulls(apply, out layers));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new { success = true, unused = layers.Sum(l => l.Unused), removed = apply, layers });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "crash_placements")]
+    [Description("The city_crash props — trees, bushes, lamps, bins, mailboxes — standing inside a world-space box: each one's prop name, placement id, position and whether the other season holds the same placement. scene_find only shows the prop TYPES of that layer ('lampLuxus — 31'); this is how to see where the copies stand. The layer must be in the scene (view_set crash=true). By default it only LISTS; pass delete=true to remove every placement the box (and the name filter) takes, as one undoable edit — a placement linked to the other season is removed there too. city_crash is ONE archive for the whole city: keep the box tight. Saved by editor_save, packed by editor_build.")]
+    public static async Task<string> CrashPlacements(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only props whose name contains this. Omit for every prop.")] string? nameContains = null,
+        [Description("Delete the placements found. Default false: list only.")] bool delete = false,
+        [Description("How many placements to list (the count is always complete; a delete lists everything it removed). Default 200.")] int limit = 200,
+        [Description("The most placements one delete may remove. With more than this in the box the call is refused and nothing is deleted. Default 100.")] int maxDelete = 100)
+    {
+        try
+        {
+            IReadOnlyList<CrashPlacementInfo> placements = [];
+            int total = 0;
+            string? refused = await ui.RunAsync(() =>
+                editor.CrashPlacements(boxMin, boxMax, nameContains, delete, limit, maxDelete, out placements, out total));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new
+                {
+                    success = true,
+                    count = total,
+                    deleted = delete ? total : 0,
+                    // Gone from the OTHER season as well: only the linked ones. An unlinked placement that
+                    // has a twin keeps it.
+                    deletedInOtherSeasonToo = delete ? placements.Count(p => p.BothSeasons && p.SeasonLinked) : 0,
+                    placements,
+                });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "car_substitute")]
     [Description("Build one car under ANOTHER car's name: pc\\sds\\cars\\<target>.sds is replaced by the source car's model, with the root frame, name table, prefab entry, entity data and buffers keyed by the target's model name. No table is touched — the game lists the target as before and finds the source's shape and tuning in its archive. For trying a car where nothing can be registered (a multiplayer that spawns from a fixed list of names). A timestamped backup of each replaced archive is kept in cars\\backups; the winter _z twin is replaced only where both cars have one. This OVERWRITES game files and the target's working copy: the game must not be running.")]
     public static async Task<string> CarSubstitute(
@@ -332,7 +436,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "scene_find")]
-    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Crash-layer copies (kind CrashInstance: trees, lamps, bins) are searched from the placement table whether or not their rows are expanded in the tree; a copy matches a name by its own label or by its prop's name, and a box by its prop's triangles at the copy's placement. Use it also to learn exact names before scene_select.")]
+    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Crash-layer copies (kind CrashInstance: trees, lamps, bins) are searched from the placement table whether or not their rows are expanded in the tree; a copy matches a name by its own label or by its prop's name, and a box by its prop's triangles at the copy's placement. Use it also to learn exact names before scene_select. A collision placement (kind 'CollisionInstance', named 'instance N') is found by its HULL: its bounds, vertex and triangle counts are the hull's, and a box is tested against the hull's triangles.")]
     public static async Task<string> Find(
         IEditorSession editor,
         IUiThreadMarshal ui,

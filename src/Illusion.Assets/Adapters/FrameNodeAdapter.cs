@@ -150,6 +150,29 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
         return true;
     }
 
+    public IReadOnlyList<ulong[]> GetSlotTable()
+    {
+        if (Lod0Structs() == null || _frame is not FrameObjectSingleMesh mesh) return [];
+        return [.. mesh.Material.Materials.Select(level => (level ?? []).Select(slot => slot.MaterialHash).ToArray())];
+    }
+
+    public bool SetSlotTable(IReadOnlyList<ulong[]> table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        if (Lod0Structs() == null || _frame is not FrameObjectSingleMesh mesh) return false;
+        List<MaterialStruct[]> levels = mesh.Material.Materials;
+        if (levels.Count != table.Count) return false;
+        for (int lod = 0; lod < levels.Count; lod++)
+        {
+            if ((levels[lod]?.Length ?? 0) != table[lod].Length) return false;
+        }
+        for (int lod = 0; lod < levels.Count; lod++)
+        {
+            for (int slot = 0; slot < table[lod].Length; slot++) levels[lod][slot].MaterialHash = table[lod][slot];
+        }
+        return true;
+    }
+
     // The LOD0 material table, with the same construct-as-side-effect guard GetMaterials uses.
     private MaterialStruct[]? Lod0Structs()
     {

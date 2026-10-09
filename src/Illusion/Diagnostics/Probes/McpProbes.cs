@@ -69,6 +69,7 @@ internal static class McpProbes
         "archive_build",
         "car_export_m2o",
         "car_substitute",
+        "mesh_hide_triangles",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional

@@ -497,38 +497,11 @@ public partial class ResourceEditorWindow : Window
         finally { Mouse.OverrideCursor = null; }
     }
 
+    // The Build window comes first, as in the map editor: what differs from the game, per archive, with ticks.
     private void Build_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-        if (Stage.PendingBuildArchives().Count == 0)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Info,
-                Text = "No edits to build — change something on the stage first.",
-            });
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            Viewport.D3DImageHost.BuildReport report = Stage.BuildEdits(createBackup: true);
-            Mouse.OverrideCursor = null;
-            ShowBuildResult(report);
-        }
-        catch (Exception ex)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Error,
-                Heading = "Build failed",
-                Text = ex.Message,
-            });
-        }
-        finally { Mouse.OverrideCursor = null; }
+        if (BuildWindow.Run(this, Stage) is { } report) ShowBuildResult(report);
     }
 
     private void PostNotice(string message, bool isError)
