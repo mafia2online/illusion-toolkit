@@ -156,8 +156,8 @@ public interface IEditorSession
     /// no table. Null on success.</summary>
     string? SubstituteCar(string source, string target, out CarSubstituteInfo? result);
 
-    /// <summary>Exports a built car as a multiplayer resource folder (package.json and stream/sds/cars/, with
-    /// the materials the car adds embedded in its archive); nothing of the game is written. Null on success.</summary>
+    /// <summary>Exports a built car as a multiplayer resource folder (package.json, stream/sds/cars/ and, for the
+    /// materials the car adds, stream/materials/); nothing of the game is written. Null on success.</summary>
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
     string? Undo();

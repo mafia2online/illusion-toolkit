@@ -51,10 +51,10 @@ public sealed record PackedArchive(string Archive, string? Backup, IReadOnlyList
 public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
 
 /// <summary>A car exported as a multiplayer resource: the folder and the resource's name, the model, its title
-/// and the car it was cloned from, how many cars the folder holds now, the materials embedded in its archive,
+/// and the car it was cloned from, how many cars the folder holds now, the materials written into its library,
 /// the files written and what the one shipping it should know.</summary>
 public sealed record M2oExportInfo(string Folder, string Resource, string Model, string? Title, string? BasedOn,
-    int Vehicles, IReadOnlyList<string> EmbeddedMaterials, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
+    int Vehicles, IReadOnlyList<string> Materials, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
 
 /// <summary>One entity-data table of a car — a car ships several (the stock one and its tuned variants); the
 /// label names its mass and power, which is what tells them apart.</summary>

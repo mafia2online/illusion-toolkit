@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Illusion.Assets.Sds;
 using Illusion.Assets.Text;
-using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.EntityData;
 using Illusion.Formats.Frames;
@@ -18,19 +17,20 @@ using Illusion.Formats.ResourceFormats;
 namespace Illusion.Assets.Cars;
 
 /// <summary>
-/// A car as a resource a Mafia II Online server streams: a folder with the resource's <c>package.json</c> and the
-/// car's archive (with its winter twin) under <c>stream/sds/cars/&lt;name&gt;.sds</c>. That is all a server owner
-/// ships: the server registers every archive in that folder by its file name, a stock car's name replacing that
-/// car, and checks each one before any player downloads it.
+/// A car as a resource a Mafia II Online server streams: a folder with the resource's <c>package.json</c>, the
+/// car's archive (with its winter twin) under <c>stream/sds/cars/&lt;name&gt;.sds</c>, and — when the car uses
+/// materials the game did not ship with — a material library under <c>stream/materials/&lt;name&gt;.mtl</c>. A
+/// server owner ships the folder as it comes out: the server registers every archive by its file name, a stock
+/// car's name replacing that car, and checks each one before any player downloads it.
 ///
 /// <para>
-/// One file per car means everything the car needs is inside its archive. Textures already are. Materials are
-/// not: the meshes name them by hash and the game resolves the hash against <c>edit\materials\default.mtl</c>,
-/// which no server can change on a player's machine. So a material the car uses that the game did not ship with
-/// — one the toolkit created for it — is embedded: written as an MTL library of just those materials, carried in
-/// the archive as a <c>MemFile</c> named <c>&lt;name&gt;.mtl</c>, and added by the multiplayer through the game's
-/// own <c>LoadMTL</c> when the car arrives. A server refuses a car that adds textures no material uses, so an
-/// archive exported without its materials does not ship.
+/// Textures travel inside the archive. Materials cannot: the meshes name them by hash and the game resolves the
+/// hash against the libraries in <c>edit\materials</c>, which no server can change on a player's machine. The game
+/// already loads a library in addition to <c>default.mtl</c> — a mission pack's, through the same
+/// <c>C_MaterialManager::LoadMTL</c>, released again when the mission closes — and the multiplayer streams
+/// libraries the same way, for any content (cars, city parts, crash objects). So a material the car uses that
+/// the game did not ship with — one the toolkit created for it — is written into the car's library. A server
+/// refuses a car that adds textures no streamed material uses.
 /// </para>
 /// <para>
 /// A car is exported only when its archive is its own: the root frame, the first name-table entry, the prefab
@@ -46,8 +46,9 @@ public static partial class CarM2oExport
     /// <summary>Where a resource's car archives go: the stream lane, at the path the game loads a car from.</summary>
     public const string CarsFolder = "stream/sds/cars";
 
-    /// <summary>The MemFile resource version the game's car archives carry.</summary>
-    private const ushort MemFileVersion = 2;
+    /// <summary>Where a resource's material libraries go: the stream lane, loaded by the multiplayer in addition
+    /// to the game's own libraries.</summary>
+    public const string MaterialsFolder = "stream/materials";
 
     // The layout before cars were streamed; an export folder still holding it is not written into.
     private const string LegacyVehiclesFile = "vehicles.json";
@@ -64,6 +65,11 @@ public static partial class CarM2oExport
 
     [GeneratedRegex("^[a-z0-9][a-z0-9._-]{0,63}$")]
     private static partial Regex ResourcePattern();
+
+    // The file names a server streams: its asset policy takes stream/sds/cars/<name>.sds and
+    // stream/materials/<name>.mtl only under these, and no library named like the game's own (default*).
+    [GeneratedRegex("^[a-z0-9_]+$")]
+    private static partial Regex StreamedNamePattern();
 
     /// <summary>The resource name a car gets when none is given: <c>car-shubert-38-custom</c>.</summary>
     public static string DefaultResource(string car) =>
@@ -197,6 +203,11 @@ public static partial class CarM2oExport
         }
 
         string stem = Path.GetFileNameWithoutExtension(sources.Archive.Name).ToLowerInvariant();
+        if (!StreamedNamePattern().IsMatch(stem))
+        {
+            refusal = $"{sources.Archive.Name}: a server streams only cars named with a-z, 0-9 and _";
+            return null;
+        }
         var notes = new List<string>();
 
         // The vehicle table names the model as the archive's insides must; an unregistered car is named by its frame.
@@ -251,10 +262,15 @@ public static partial class CarM2oExport
                 refusal = $"{sources.Archive.Name} uses materials no library has ({string.Join(", ", missing)}) — create them before exporting";
                 return null;
             }
+            if (added.Count > 0 && stem.StartsWith("default", StringComparison.Ordinal))
+            {
+                refusal = $"{sources.Archive.Name} adds materials, and its library {stem}.mtl would be named like the game's own (default*), which a server refuses — clone the car under another name";
+                return null;
+            }
         }
         else
         {
-            notes.Add("no material libraries were given — any material the car adds is not embedded, and a server refuses a car whose new textures no material uses");
+            notes.Add("no material libraries were given — any material the car adds is not exported, and a server refuses a car whose new textures no material uses");
         }
 
         string? title = null;
@@ -271,20 +287,28 @@ public static partial class CarM2oExport
         string cars = Path.Combine(output, CarsFolder.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(cars);
         var written = new List<string>();
-        foreach ((FileInfo? source, Inspection? inspected) in new[] { (sources.Archive, car), (sources.WinterArchive, winter) })
+        foreach (FileInfo? source in new[] { sources.Archive, sources.WinterArchive })
         {
-            if (source == null || inspected == null) continue;
+            if (source == null) continue;
             string target = Path.Combine(cars, source.Name.ToLowerInvariant());
-            var needed = inspected.Materials.Where(added.ContainsKey).Select(h => added[h]).ToList();
-            if (needed.Count == 0)
-            {
-                File.Copy(source.FullName, target, overwrite: true);
-            }
-            else
-            {
-                EmbedMaterials(source, target, stem + ".mtl", needed, sources.MaterialVersion);
-            }
+            File.Copy(source.FullName, target, overwrite: true);
             written.Add(target);
+        }
+
+        // The car's own library: every material it adds, under its name. A car that adds none leaves no
+        // library behind, and an earlier export's is removed.
+        string materials = Path.Combine(output, MaterialsFolder.Replace('/', Path.DirectorySeparatorChar));
+        string library = Path.Combine(materials, stem + ".mtl");
+        if (added.Count > 0)
+        {
+            Directory.CreateDirectory(materials);
+            var content = new MaterialLibrary(sources.MaterialVersion) { Materials = added.Values.ToDictionary(m => m.GetMaterialHash()) };
+            AtomicFile.WriteAllBytes(library, content.ToBytes());
+            written.Add(library);
+        }
+        else if (File.Exists(library))
+        {
+            File.Delete(library);
         }
 
         WritePackage(packageFile, resource, model, title);
@@ -295,37 +319,6 @@ public static partial class CarM2oExport
         refusal = null;
         return new CarM2oExportResult(output, resource, model, title, sources.BasedOn, carsInFolder,
             [.. added.Values.Select(m => m.MaterialName.String)], written, notes);
-    }
-
-    // The archive with the materials written into it as a MemFile named `name`, which the multiplayer reads back
-    // and hands to the game's LoadMTL. The rest of the archive is repacked as it was, with the memory each
-    // resource asks for kept from the original.
-    private static void EmbedMaterials(FileInfo source, string target, string name, IReadOnlyList<IMaterial> materials, MaterialVersion version)
-    {
-        string scratch = Path.Combine(Path.GetTempPath(), "illusion_m2o_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            SdsMemoryRequirements memory = SdsMemoryRequirements.Extract(SdsArchive.Open(source.FullName), scratch);
-            var library = new MaterialLibrary(version)
-            {
-                Materials = materials.ToDictionary(m => m.GetMaterialHash()),
-            };
-            library.WriteMatFile(Path.Combine(scratch, name));
-            SdsManifest.Load(scratch).AddEntry("MemFile", name, MemFileVersion, [("Unk2_V4", "0")]);
-
-            SdsArchive packed = SdsArchive.Pack(scratch, GameProfile.MafiaII, memory);
-            string temp = target + ".tmp";
-            using (FileStream stream = File.Create(temp))
-            {
-                packed.Save(stream, new SdsWriteOptions());
-            }
-            File.Move(temp, target, overwrite: true);
-        }
-        finally
-        {
-            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { /* scratch left behind */ }
-        }
     }
 
     private static string PackerFigures(string archive) =>
