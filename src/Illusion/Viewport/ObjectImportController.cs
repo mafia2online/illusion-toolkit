@@ -127,7 +127,8 @@ internal sealed class ObjectImportController
     /// scenery with its collision. Null on success; otherwise why not.
     /// </summary>
     /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
-    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's; null keeps it.</param>
+    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's heading — its tilt
+    /// stays, so what stands upright in the source stands upright here; null keeps the heading too.</param>
     /// <param name="hulls">What collision scenery brings (an actor's object always brings its own).</param>
     /// <param name="occurrence">Which of the things answering to <paramref name="name"/> in the source,
     /// counting from 1: its actors of that name first, then its frame objects — the ones that draw and that no
@@ -206,10 +207,6 @@ internal sealed class ObjectImportController
             (Formats.Frames.ExtractedSds source, Assets.Actors.ActorPlacements? read) = SourceOf(sourceDir);
             if (source.FrameResource is not { } theirs || read is not { } theirPlacements) return $"{sds.Name} carries no scene";
 
-            Quaternion? facing = yawDegrees is { } yaw
-                ? Quaternion.CreateFromAxisAngle(Vector3.UnitZ, yaw * MathF.PI / 180f)
-                : null;
-
             // Everything in the source that answers to the name: its actors, then its frame objects — those
             // that draw and that no actor places first, which is what a library card of that name shows.
             List<object> named =
@@ -261,6 +258,10 @@ internal sealed class ObjectImportController
                     Assets.Frames.FrameTransplant.Standing.Prototype, Matrix4x4.Identity, shared, out reason);
                 if (carried == null) return reason ?? "the object could not be copied";
                 carry = Carry(carried);
+                // The actor's heading replaced, its tilt kept — the same rule a piece of scenery is turned by.
+                Quaternion? facing = yawDegrees is { } yaw
+                    ? Assets.Frames.FrameTransplant.WithHeading(actor.Rotation, yaw * MathF.PI / 180f)
+                    : null;
                 if (ImportPlaced(actorsRow, frameRow, theirPack, actor, newName, at, facing,
                         carried, out reason) is not { Source: ActorNodeAdapter placed })
                 {
@@ -283,18 +284,13 @@ internal sealed class ObjectImportController
             {
                 var frame = (FrameObjectBase)named[occurrence - 1];
 
-                // Turned and scaled as it was — the matrix an actor gives it folded in, since a prototype's own
-                // is the origin — and STANDING where it is asked to: the middle of the bottom of its geometry
-                // lands on the point, since a district mesh's origin can be anywhere in or around it.
-                Matrix4x4 world = frame.WorldTransform * theirPlacements.For(frame);
-                Matrix4x4 sourceWorld = world;
-                if (facing is { } heading)
-                {
-                    Formats.Mathematics.MatrixExtensions.TryDecomposeRS(world, out Vector3 scale, out _, out _);
-                    world = Formats.Mathematics.MatrixExtensions.SetMatrix(heading, scale, Vector3.Zero);
-                }
-                Vector3 standsOn = Assets.Frames.FrameTransplant.BaseOf(frame) ?? Vector3.Zero;
-                world.Translation = at - Vector3.TransformNormal(standsOn, world);
+                // Tilted and scaled as it was — the matrix an actor gives it folded in, since a prototype's own
+                // is the origin — facing the way it did or the way it is asked to, and STANDING where it is
+                // asked to: the middle of the bottom of its geometry lands on the point, since a district
+                // mesh's origin can be anywhere in or around it.
+                Matrix4x4 sourceWorld = frame.WorldTransform * theirPlacements.For(frame);
+                Matrix4x4 world = Assets.Frames.FrameTransplant.StandAt(frame, sourceWorld, at,
+                    yawDegrees is { } turn ? turn * MathF.PI / 180f : null);
 
                 carried = Assets.Frames.FrameTransplant.TryTransplant(scene, theirs, frame, newName,
                     Assets.Frames.FrameTransplant.Standing.Scenery, world, shared, parent, out reason);

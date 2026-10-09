@@ -677,6 +677,8 @@ internal static class ObjectTransplantProbes
             Check("a flat thing has no convex hull, and gets a box instead",
                 Assets.Collisions.ConvexHull.Build([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)]) == null
                 && Assets.Collisions.ConvexHull.Box([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)]) is { Triangles.Length: 36 });
+
+            CheckHeading(Check, sb);
         }
         catch (Exception ex)
         {
@@ -779,6 +781,116 @@ internal static class ObjectTransplantProbes
 
     // Every point is behind (or on) every face — the hull holds them — and the faces point away from the middle.
     // The tolerance covers the grid the hull snaps its points to.
+    // ── The heading an import is asked for: it turns the object about the vertical axis and leaves its tilt ──
+    // Checked on the rotations themselves, and then on a chair of Francesca's flat, whose mesh is not upright
+    // in its own space: the frame's matrix stands it up, and a heading that replaced the whole rotation laid
+    // it on its side.
+    private static void CheckHeading(Action<string, bool, string> check, StringBuilder sb)
+    {
+        static Quaternion About(Vector3 axis, float angle) => Quaternion.CreateFromAxisAngle(axis, angle);
+
+        Quaternion upright = About(Vector3.UnitZ, 0.7f);
+        (Quaternion noTilt, float itsHeading) = FrameTransplant.SplitHeading(upright);
+        check("an upright object's rotation is all heading, and an asked heading is all the rotation it gets",
+            ProbeAssert.QApprox(noTilt, Quaternion.Identity) && MathF.Abs(itsHeading - 0.7f) < 1e-3f
+            && ProbeAssert.QApprox(FrameTransplant.WithHeading(upright, -1.2f), About(Vector3.UnitZ, -1.2f)),
+            $"tilt {noTilt}, heading {itsHeading:F3}");
+
+        Quaternion quarter = About(Vector3.UnitX, MathF.PI / 2f);
+        Quaternion stoodUp = Quaternion.Concatenate(quarter, About(Vector3.UnitZ, 2.1f));
+        (Quaternion tilt, float heading) = FrameTransplant.SplitHeading(stoodUp);
+        check("a quarter turn that stands an object up and the heading after it are told apart again",
+            ProbeAssert.QApprox(tilt, quarter) && MathF.Abs(heading - 2.1f) < 1e-3f, $"tilt {tilt}, heading {heading:F3}");
+        check("…and another heading keeps the quarter turn",
+            ProbeAssert.QApprox(FrameTransplant.WithHeading(stoodUp, 0.4f), Quaternion.Concatenate(quarter, About(Vector3.UnitZ, 0.4f))), "");
+
+        Quaternion onItsHead = About(Vector3.UnitX, MathF.PI);
+        check("an object standing on its head has no heading to tell: it is turned as it is",
+            ProbeAssert.QApprox(FrameTransplant.WithHeading(onItsHead, 0.3f), Quaternion.Concatenate(onItsHead, About(Vector3.UnitZ, 0.3f))), "");
+
+        var flat = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "shops", "franhome.sds"));
+        if (!flat.Exists)
+        {
+            sb.AppendLine("    (no shops\\franhome.sds — the chair steps were skipped)");
+            return;
+        }
+        ExtractedSds source = ExtractedSds.Load(SdsMeshLoader.EnsureExtracted(flat));
+        FrameResource theirs = source.FrameResource!;
+        ActorPlacements placements = ActorPlacements.Load(source.Manifest, theirs);
+        FrameObjectSingleMesh? chair = theirs.FrameObjects.Values.OfType<FrameObjectSingleMesh>()
+            .FirstOrDefault(m => m.Name.String == "mesh" && m.Parent?.Name.String == "LFH_zidle");
+        if (chair == null || !Matrix4x4.Invert(chair.WorldTransform, out Matrix4x4 toOwn))
+        {
+            sb.AppendLine("    (no mesh under LFH_zidle in shops\\franhome.sds — the chair steps were skipped)");
+            return;
+        }
+
+        // The chair's vertices in its own space, and where a matrix puts them.
+        Vector3[] own = [.. FrameTransplant.TrianglesOf(chair).SelectMany(m => m.Positions).Select(p => Vector3.Transform(p, toOwn))];
+        (Vector3 Min, Vector3 Max) Box(Matrix4x4 world)
+        {
+            Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+            foreach (Vector3 p in own)
+            {
+                Vector3 w = Vector3.Transform(p, world);
+                min = Vector3.Min(min, w);
+                max = Vector3.Max(max, w);
+            }
+            return (min, max);
+        }
+        static string Size(Vector3 v) => $"{v.X:F2} x {v.Y:F2} x {v.Z:F2}";
+
+        Matrix4x4 sourceWorld = chair.WorldTransform * placements.For(chair);
+        (Vector3 ownMin, Vector3 ownMax) = Box(Matrix4x4.Identity);
+        Vector3 ownSize = ownMax - ownMin;
+        (Vector3 thereMin, Vector3 thereMax) = Box(sourceWorld);
+        float height = thereMax.Z - thereMin.Z;
+        check("a chair of Francesca's flat is not upright in its own space, and stands in its archive",
+            ownSize.Y > ownSize.Z * 1.5f && ownSize.Y > ownSize.X * 1.5f && MathF.Abs(height - ownSize.Y) < 0.02f,
+            $"its own box {Size(ownSize)}, in the archive {Size(thereMax - thereMin)}");
+
+        var at = new Vector3(40f, -15f, 6f);
+        bool stands = true, sameHeights = true, onPoint = true;
+        string sizes = "";
+        foreach (float degrees in new[] { 0f, 90f, 213f, -45f })
+        {
+            Matrix4x4 world = FrameTransplant.StandAt(chair, sourceWorld, at, degrees * MathF.PI / 180f);
+            (Vector3 min, Vector3 max) = Box(world);
+            stands &= MathF.Abs(max.Z - min.Z - height) < 0.01f;
+            // The third column is what gives a point its height: the same column, the same tilt.
+            sameHeights &= MathF.Abs(world.M13 - sourceWorld.M13) < 1e-3f && MathF.Abs(world.M23 - sourceWorld.M23) < 1e-3f
+                && MathF.Abs(world.M33 - sourceWorld.M33) < 1e-3f;
+            onPoint &= MathF.Abs(min.Z - at.Z) < 0.005f && min.X < at.X && at.X < max.X && min.Y < at.Y && at.Y < max.Y;
+            sizes += $"{degrees:F0}°: {Size(max - min)}; ";
+        }
+        check("asked for a heading it comes in standing, not on its side", stands, sizes);
+        check("every point of it is as high above the floor as in its archive: the tilt is the original's", sameHeights, "");
+        check("and the bottom of it as it stands is on the point it was put at", onPoint, "");
+
+        Matrix4x4 unturned = FrameTransplant.StandAt(chair, sourceWorld, at, 0f);
+        Matrix4x4 turned = FrameTransplant.StandAt(chair, sourceWorld, at, 1f);
+        (Vector3 unturnedMin, Vector3 unturnedMax) = Box(unturned);
+        bool parts = Domain.TransformMath.TryDecompose(unturned, out _, out Quaternion before, out _)
+            & Domain.TransformMath.TryDecompose(turned, out _, out Quaternion after, out _);
+        check("one heading against another is that turn about the vertical axis and nothing else",
+            parts && ProbeAssert.QApprox(after, Quaternion.Concatenate(before, About(Vector3.UnitZ, 1f))), "");
+        check("with no turn of its own the middle of its bottom is over the point",
+            MathF.Abs(((unturnedMin.X + unturnedMax.X) / 2f) - at.X) < 0.005f && MathF.Abs(((unturnedMin.Y + unturnedMax.Y) / 2f) - at.Y) < 0.005f,
+            $"x {unturnedMin.X:F3}..{unturnedMax.X:F3}, y {unturnedMin.Y:F3}..{unturnedMax.Y:F3} around ({at.X}, {at.Y})");
+
+        Domain.TransformMath.TryDecompose(sourceWorld, out _, out Quaternion there, out _);
+        Matrix4x4 same = FrameTransplant.StandAt(chair, sourceWorld, at, FrameTransplant.SplitHeading(there).Heading);
+        Matrix4x4 kept = FrameTransplant.StandAt(chair, sourceWorld, at, null);
+        static bool SameTurn(Matrix4x4 a, Matrix4x4 b) =>
+            MathF.Abs(a.M11 - b.M11) < 1e-3f && MathF.Abs(a.M12 - b.M12) < 1e-3f && MathF.Abs(a.M13 - b.M13) < 1e-3f
+            && MathF.Abs(a.M21 - b.M21) < 1e-3f && MathF.Abs(a.M22 - b.M22) < 1e-3f && MathF.Abs(a.M23 - b.M23) < 1e-3f
+            && MathF.Abs(a.M31 - b.M31) < 1e-3f && MathF.Abs(a.M32 - b.M32) < 1e-3f && MathF.Abs(a.M33 - b.M33) < 1e-3f;
+        check("asked for the heading it has in its archive it is turned exactly as it is there", SameTurn(same, sourceWorld), "");
+        check("with no heading asked it keeps its whole rotation, and its bottom is on the point all the same",
+            SameTurn(kept, sourceWorld) && MathF.Abs(Box(kept).Min.Z - at.Z) < 0.005f,
+            $"bottom at z {Box(kept).Min.Z:F3}, asked {at.Z}");
+    }
+
     private static bool Encloses((Vector3[] Vertices, int[] Triangles) hull, IReadOnlyList<Vector3> points, float tolerance = 1e-4f)
     {
         Vector3 min = new(float.MaxValue), max = new(float.MinValue);

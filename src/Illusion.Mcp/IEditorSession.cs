@@ -99,8 +99,8 @@ public interface IEditorSession
     /// Null on success.
     /// </summary>
     /// <param name="sourceArchive">The source .sds: a full path, or one relative to the game's sds folder.</param>
-    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's rotation; null keeps
-    /// the rotation the original has.</param>
+    /// <param name="yawDegrees">Heading about the vertical axis, replacing the original's heading and keeping
+    /// its tilt; null keeps the heading the original has as well.</param>
     /// <param name="collision">For scenery: auto (its own hulls, else its convex hull), convex, box, mesh or none.</param>
     /// <param name="parent">A frame of the receiving archive to hang a piece of scenery under; null stands it
     /// in the scene by itself.</param>

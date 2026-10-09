@@ -1027,6 +1027,13 @@ internal static class ProbeRunner
             case "--probe-shop-places":
                 ShopPlaceProbes.Run();
                 return true;
+            // What an interior opens showing: the scenes of the shipped interiors are not sorted as proxy or
+            // snow by the name-table flags of their holders (a district's are), and the room is drawn on the
+            // stage. Optional args = interiors under pc\sds without the extension.
+            // Output: %TEMP%\illusion_interior_scenes.txt
+            case "--probe-interior-scenes":
+                InteriorSceneProbes.Run(args.Skip(1).ToArray());
+                return true;
             case "--probe-world-lights":
                 WorldLightProbes.Run(args.Skip(1).ToArray());
                 return true;

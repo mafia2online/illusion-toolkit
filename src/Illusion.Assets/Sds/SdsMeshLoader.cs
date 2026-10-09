@@ -142,7 +142,7 @@ public static class SdsMeshLoader
         Collisions.CarPhysicsVolumes.AlignStubsToPrefab(folder, fr);
 
         var document = new SceneDocumentAdapter(fr, sdsFile, placements);
-        var roots = BuildRoots(fr, document, others, meshes, null, lod);
+        var roots = BuildRoots(fr, document, others, meshes, null, lod, IsCityArchive(sdsFile));
         return (roots, meshes, document);
     }
 
@@ -160,7 +160,8 @@ public static class SdsMeshLoader
 
         var document = new SceneDocumentAdapter(fr, crashSds, actors);
         CrashPlacements? placements = LoadPlacements(crashSds, extracted, fr);
-        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds(), lod);
+        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds(), lod,
+            IsCityArchive(crashSds));
         return (roots, meshes, document, placements);
     }
 
@@ -206,11 +207,30 @@ public static class SdsMeshLoader
         }
     }
 
+    /// <summary>
+    /// Whether an archive is one of the city's own — a district, <c>city_univers</c>, the crash layer: the
+    /// archives of the folders <c>sds\city</c>, <c>sds\city_univers</c> and <c>sds\city_crash</c>. Only those
+    /// have proxy and snow scenes to tell apart (see <see cref="CategorizeScene"/>).
+    /// <para>
+    /// The name-table flags that mark a proxy in a district mean something else everywhere else. An interior
+    /// under <c>sds\shops</c> stands its rooms under holders the game moves to the shop's place
+    /// (<c>GUNSHOP_translocator_00</c>, <c>AREA_POvrsek_meeting</c>), and those holders carry the very bits a
+    /// district's far backdrops do — 0x1C01 on El Greco's, 0x1501 on the gun shop's, 0x3 ("snow") on the
+    /// planetarium dome's. Read as in a district, 38 of the shipped interiors opened with the scene of their
+    /// rooms classed as proxy or snow and so hidden by the map's filters: the walls, floor and ceiling of
+    /// every one of them (904 of the 1067 meshes of Derek's office, all 157 of the second Crazy Horse), with
+    /// only the loose props left standing in the air.
+    /// </para>
+    /// </summary>
+    internal static bool IsCityArchive(FileInfo sds) =>
+        sds.Directory?.Name.StartsWith("city", StringComparison.OrdinalIgnoreCase) == true;
+
     // Builds tree roots from FrameResource. instanceMap (if provided) marks prototype meshes as instanced.
+    // cityArchive: whether the scenes are sorted into proxy / snow / normal at all (see IsCityArchive).
     private static List<SdsFrameNode> BuildRoots(FrameResource fr, SceneDocumentAdapter document,
         IReadOnlyCollection<string> others,
         List<MeshData> meshes, IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap,
-        int lod)
+        int lod, bool cityArchive)
     {
         var roots = new List<SdsFrameNode>();
 
@@ -241,7 +261,7 @@ public static class SdsMeshLoader
                     if (claimed.Add(obj)) sn.Children.Add(BuildNode(obj, document, childrenOf, meshes, instanceMap, claimed, lod));
                 if (sn.Children.Count > 0)
                 {
-                    sn.Category = CategorizeScene(sn, others);
+                    if (cityArchive) sn.Category = CategorizeScene(sn, others);
                     roots.Add(sn);
                 }
             }
@@ -384,7 +404,8 @@ public static class SdsMeshLoader
     }
 
     // Scene category for streaming filters, from the majority season class of its mesh leaves (FrameNameTable
-    // flags, cascaded to unflagged children — see ClassifyNode):
+    // flags, cascaded to unflagged children — see ClassifyNode). Asked of the city's archives only: anywhere
+    // else every scene is Normal (see IsCityArchive).
     //  Proxy — most meshes are proxies (cityNN / neighbor-district / LOD backdrops);
     //  Snow  — most meshes are winter geometry (flag_1|flag_2);
     //  otherwise Normal.
