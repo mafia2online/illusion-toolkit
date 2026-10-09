@@ -16,6 +16,7 @@
     <!-- The names of the AREA volumes the game ships with (LoadZones.IsShipped): what is not on the list was
          added by somebody. -->
     <EmbeddedResource Include="World\ShippedLoadZones.txt" />
+    <EmbeddedResource Include="World\ShippedInteriors.txt" />
     <EmbeddedResource Include="Materials\ShippedMaterials.bin" />
   </ItemGroup>
 

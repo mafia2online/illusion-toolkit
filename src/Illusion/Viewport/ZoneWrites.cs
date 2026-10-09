@@ -104,6 +104,31 @@ internal static class ZoneWrites
             : null;
     }
 
+    /// <summary>Why an archive's working copy cannot be written from outside the editors now, or null: one of
+    /// them holds it as a document, or is still loading it, and would write its own scene over the change.</summary>
+    public static string? HeldByAnEditor(FileInfo archive)
+    {
+        string name = Path.GetFileNameWithoutExtension(archive.Name);
+        if (Viewports().Any(host => host.Streamer.IsLoading(archive))) return $"{name} is still being loaded into an editor - try again when it is in";
+        return OpenArchives.HoldersOf(archive).Count > 0 ? $"{name} is open in an editor - close it there first" : null;
+    }
+
+    /// <summary>
+    /// After an archive's working copy was written from outside the editors: the map editor queues it for a
+    /// Build, and for city_univers reads its Loading zones layer again.
+    /// </summary>
+    public static void Written(FileInfo archive)
+    {
+        bool main = string.Equals(archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase);
+        foreach (D3DImageHost host in Viewports())
+        {
+            if (!host.IsMapViewport) continue;
+            host.MarkArchiveModified(archive);
+            if (main) host.Catalogs.ReloadZones();
+            host.RaiseDirtyChanged();
+        }
+    }
+
     /// <summary>
     /// After <paramref name="zones"/> was saved with <paramref name="zone"/> changed: every editor holding the
     /// archive gets the zone as it now is, and every viewport queues the archive for a Build and reads its

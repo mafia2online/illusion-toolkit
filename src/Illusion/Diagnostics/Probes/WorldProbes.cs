@@ -170,7 +170,8 @@ internal static class WorldProbes
     }
 
     // StreamMap catalog: scenes/lines, the richest line and actual load of its asset.
-    internal static void RunStreamMapProbe()
+    // Arguments: parts of scene names - each matching scene is listed line by line with what it loads.
+    internal static void RunStreamMapProbe(string[]? dump = null)
     {
         string outFile = Path.Combine(Path.GetTempPath(), "illusion_streammap.txt");
         var sb = new StringBuilder();
@@ -194,6 +195,26 @@ internal static class WorldProbes
             sb.AppendLine("\nTop scenes by number of lines:");
             foreach (StreamScene s in cat.Scenes.OrderByDescending(s => s.Lines.Count).Take(5))
                 sb.AppendLine($"  {s.Name}: {s.Lines.Count} lines");
+
+            foreach (string part in dump ?? [])
+            {
+                foreach (StreamScene s in cat.Scenes.Where(s => s.Name.Contains(part, StringComparison.OrdinalIgnoreCase)))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"SCENE '{s.Name}': {s.Lines.Count} lines");
+                    foreach (StreamSceneLine line in s.Lines)
+                    {
+                        sb.AppendLine($"  line '{line.Name}' (lineID={line.LineID})");
+                        foreach (StreamAsset a in line.Assets) sb.AppendLine($"      {a.Type,-18} {a.Path}{(File.Exists(a.DiskPath) ? "" : "  (no such file)")}");
+                    }
+                }
+            }
+            if (dump is { Length: > 0 })
+            {
+                sb.AppendLine();
+                sb.AppendLine("All scenes: " + string.Join(", ", cat.Scenes.Select(s => $"{s.Name} ({s.Lines.Count})")));
+                return;
+            }
 
             StreamSceneLine? rich = cat.RichestLine;
             sb.AppendLine($"\nRichest line: '{rich?.SceneName}' / '{rich?.Name}' (lineID={rich?.LineID}) — {rich?.RenderableCount} renderable assets");
