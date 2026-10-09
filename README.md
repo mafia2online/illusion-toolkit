@@ -297,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 92 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 107 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -306,7 +306,7 @@ map editor itself.
 | **Archives** | `list_sds_files`, `open_sds_file`, `get_sds_header`, `list_resources`, `get_resource_info`, `search_resources`, `extract_resource`, `get_sds_stats`, `close_sds_file` |
 | **Decoding** | `decode_resource` (extract + decode in one call), `decode_actors`, `decode_frame_resource`, `decode_itemdesc`, `decode_collisions` |
 | **Scripts** | `decompile_script_resource`, `decompile_lua` - the game's compiled Lua back to source |
-| **Materials** | `open_mtl_file`, `list_mtl_files`, `get_material_info`, `search_materials`, `archive_materials` |
+| **Materials** | `open_mtl_file`, `list_mtl_files`, `get_material_info`, `search_materials`, `archive_materials`, `material_variant`, `archive_texture`, `material_delete` |
 | **Textures** | `list_sds_textures`, `inspect_sds_texture`, `inspect_dds_file`, `inspect_dds_bytes` |
 | **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
@@ -316,7 +316,7 @@ map editor itself.
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Interiors** | `shop_places`, `shop_place_add`, `shop_place_delete`, `shop_create`, `shop_delete` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
-| **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
+| **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build`, `car_materials`, `car_material_like`, `car_lights`, `car_light_set`, `car_light_remove`, `car_bone_add`, `car_beacon`, `car_collisions`, `car_collision_add`, `car_collision_remove`, `car_winter`, `car_check` |
 | **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create`, `zone_delete` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
@@ -384,6 +384,25 @@ first wrote them (the oldest backup). No other table edit travels. It refuses a 
 under its own name throughout and a car using a material no library has, and says so when the
 buffers still bear the source car's names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
 the working copy itself. `--probe-car-clone` and `--probe-car-m2o` cover them on scratch copies.
+
+**A car of its own.** The rest of the car tools turn a clone into a different car. They work on
+the car's working copy, are refused while the resource editor holds the car with unsaved edits or
+in a Blender session, and leave the archive on the build list.
+`material_variant` copies a material under a new name with pictures of its own and keeps the
+source's shader; `archive_texture` puts a picture into an archive; `material_delete` takes an
+added material out. A copy of the paint is drawn unpainted until the prefab lists it:
+`car_materials` shows the rows the game colours, dirties, burns and deforms by, and
+`car_material_like` gives a material the rows of another.
+`car_lights`, `car_light_set` and `car_light_remove` edit the light list, each entry tied to a
+bone; `car_bone_add` adds a bone to the body's rig and `car_beacon` stands the police cars' roof
+beacon as two bones and a light entry.
+`car_collisions` lists what each part is hit by, `car_collision_add` gives a part one more box,
+sphere, capsule or cylinder (the stock hulls stay, they cannot be cooked again) and
+`car_collision_remove` takes one off.
+`car_winter` rebuilds the `_z` twin from the summer car by what a reference car's own pair shows:
+material slots, textures, effects. `car_check` reports what only the game would show: weights off
+the byte lattice, unskinned and far vertices, thin and flat-UV triangles and, against a reference
+car, hidden channels out of range. `--probe-car-workshop` runs the writers on a scratch copy.
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
 only one that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a
