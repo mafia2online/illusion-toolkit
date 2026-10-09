@@ -1,54 +1,60 @@
-using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Illusion.Assets.Sds;
 using Illusion.Assets.Text;
+using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.EntityData;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Hashing;
+using Illusion.Formats.Materials;
+using Illusion.Formats.Materials.Versions;
 using Illusion.Formats.Prefab;
 using Illusion.Formats.ResourceFormats;
 
 namespace Illusion.Assets.Cars;
 
 /// <summary>
-/// A car as a resource a Mafia II Online server can ship: a folder with the resource's <c>package.json</c>, the
-/// car's archive (and its winter twin) and <c>vehicles.json</c>, which says what the archives hold. An archive
-/// sits in the folder under the path the game loads it from — <c>sds/cars/&lt;name&gt;.sds</c> — the way the map
-/// export lays out its patches, and its entry names that target (<c>/sds/cars/&lt;name&gt;.sds</c>) beside the file.
+/// A car as a resource a Mafia II Online server streams: a folder with the resource's <c>package.json</c> and the
+/// car's archive (with its winter twin) under <c>stream/sds/cars/&lt;name&gt;.sds</c>. That is all a server owner
+/// ships: the server registers every archive in that folder by its file name, a stock car's name replacing that
+/// car, and checks each one before any player downloads it.
 ///
 /// <para>
-/// Only what can travel goes in. The single-player registration — the row in <c>vehicles.tbl</c>, the paint
-/// combinations, the title in the text table — sits in archives every player already has and the multiplayer
-/// replaces with its own, so it is written into <c>vehicles.json</c> as data instead: the model name the
-/// archive is keyed by, the title, the car it was made from, and the table rows as the game holds them.
+/// One file per car means everything the car needs is inside its archive. Textures already are. Materials are
+/// not: the meshes name them by hash and the game resolves the hash against <c>edit\materials\default.mtl</c>,
+/// which no server can change on a player's machine. So a material the car uses that the game did not ship with
+/// — one the toolkit created for it — is embedded: written as an MTL library of just those materials, carried in
+/// the archive as a <c>MemFile</c> named <c>&lt;name&gt;.mtl</c>, and added by the multiplayer through the game's
+/// own <c>LoadMTL</c> when the car arrives. A server refuses a car that adds textures no material uses, so an
+/// archive exported without its materials does not ship.
 /// </para>
 /// <para>
 /// A car is exported only when its archive is its own: the root frame, the first name-table entry, the prefab
-/// entry and the entity data all filed under the model name. A folder can hold several cars — a second export
-/// into it adds to the list.
+/// entry and the entity data all filed under the model name — the server checks the same. A folder can hold
+/// several cars; a second export into it adds one.
 /// </para>
 /// </summary>
 public static partial class CarM2oExport
 {
-    /// <summary>The list of cars a resource folder holds.</summary>
-    public const string VehiclesFile = "vehicles.json";
-
     /// <summary>The resource's manifest, as the multiplayer reads it.</summary>
     public const string PackageFile = "package.json";
 
-    /// <summary>The version of <see cref="VehiclesFile"/>'s layout.</summary>
-    public const int Format = 1;
+    /// <summary>Where a resource's car archives go: the stream lane, at the path the game loads a car from.</summary>
+    public const string CarsFolder = "stream/sds/cars";
 
-    private const string CarsFolder = "sds/cars";
-    private const int VehicleIdColumn = 0;
+    /// <summary>The MemFile resource version the game's car archives carry.</summary>
+    private const ushort MemFileVersion = 2;
+
+    // The layout before cars were streamed; an export folder still holding it is not written into.
+    private const string LegacyVehiclesFile = "vehicles.json";
+    private const string LegacyCarsFolder = "sds";
+
     private const int VehicleNameColumn = 2;
     private const int VehicleTextColumn = 3;
-    private const int PaintNameColumn = 1;
 
     private static readonly JsonSerializerOptions Indented = new()
     {
@@ -87,7 +93,6 @@ public static partial class CarM2oExport
         }
         var winter = new FileInfo(Path.Combine(sds, "cars", stem + "_z.sds"));
         var tables = new FileInfo(Path.Combine(sds, "tables", "tables.sds"));
-        var ingame = new FileInfo(Path.Combine(sds, "tables", "ingame.sds"));
         var text = new List<(string, string)>();
         foreach (string language in Directory.GetDirectories(MafiaEnvironment.PcFolder, "sds_*"))
         {
@@ -97,6 +102,15 @@ public static partial class CarM2oExport
                 Path.Combine(SdsMeshLoader.EnsureExtracted(textSds), "tables", "TextDatabase.dat")));
         }
 
+        MafiaMaterials.EnsureLoaded();
+        MaterialCollection? materials = MafiaMaterials.Collection;
+        if (materials == null || materials.Libraries.Count == 0)
+        {
+            refusal = "no MTL libraries are loaded (is the game folder configured?)";
+            return null;
+        }
+        MaterialVersion version = materials.Libraries.Values.First().Version;
+
         string? basedOn = CarCloner.SourceOf(MafiaEnvironment.ExtractedDir(archive));
         var basedOnArchive = basedOn == null ? null : new FileInfo(Path.Combine(sds, "cars", basedOn.ToLowerInvariant() + ".sds"));
         resource ??= DefaultResource(stem);
@@ -105,17 +119,48 @@ public static partial class CarM2oExport
             archive,
             winter.Exists ? winter : null,
             tables.Exists ? Path.Combine(SdsMeshLoader.EnsureExtracted(tables), "tables", "vehicles.tbl") : null,
-            ingame.Exists ? Path.Combine(SdsMeshLoader.EnsureExtracted(ingame), "tables", "PaintCombinations.tbl") : null,
             text,
             basedOn,
-            basedOnArchive is { Exists: true } ? basedOnArchive : null);
+            basedOnArchive is { Exists: true } ? basedOnArchive : null,
+            materials.FindByHash,
+            StockMaterials(materials),
+            version);
         return ExportFrom(sources, output, resource, out refusal);
     }
 
     /// <summary>
+    /// The materials the game shipped with: every library in <c>edit\materials</c> as it was before the toolkit
+    /// first wrote it. The toolkit keeps each previous version of a library in a <c>backups</c> folder beside
+    /// it (see <c>GameMaterialCreator</c>), stamped so that names sort by time, so the oldest backup is the
+    /// library as it came; a library with no backup was never written and is as it came.
+    /// </summary>
+    public static IReadOnlySet<ulong> StockMaterials(MaterialCollection materials)
+    {
+        ArgumentNullException.ThrowIfNull(materials);
+        var stock = new HashSet<ulong>();
+        foreach ((string path, MaterialLibrary library) in materials.Libraries)
+        {
+            string folder = Path.Combine(Path.GetDirectoryName(path) ?? ".", "backups");
+            string stem = Path.GetFileNameWithoutExtension(path);
+            string? oldest = Directory.Exists(folder)
+                ? Directory.EnumerateFiles(folder, stem + "_*.mtl").Order(StringComparer.OrdinalIgnoreCase).FirstOrDefault()
+                : null;
+            if (oldest == null)
+            {
+                stock.UnionWith(library.Materials.Keys);
+                continue;
+            }
+            var pristine = new MaterialLibrary(library.Version);
+            pristine.ReadMatFile(oldest);
+            stock.UnionWith(pristine.Materials.Keys);
+        }
+        return stock;
+    }
+
+    /// <summary>
     /// The export itself, from named sources into <paramref name="output"/>. Refuses — writing nothing — a
-    /// resource name the multiplayer would not take, a folder that holds something other than an export, and an
-    /// archive that is not filed under its own name throughout.
+    /// resource name the multiplayer would not take, a folder that holds something other than a car export, an
+    /// archive that is not filed under its own name throughout, and a car using a material no library has.
     /// </summary>
     public static CarM2oExportResult? ExportFrom(CarM2oExportSources sources, string output, string resource, out string? refusal)
     {
@@ -132,30 +177,26 @@ public static partial class CarM2oExport
             refusal = $"no such archive: {sources.Archive.FullName}";
             return null;
         }
-        string vehiclesFile = Path.Combine(output, VehiclesFile);
-        // Both manifests are read BEFORE anything is copied. One that is there and does not read — a typo, a
-        // file cut short — used to be taken for "no list yet" and written over with this one car: every
-        // earlier registration, or the package's own settings, gone, after the archives had already been
-        // replaced. It is a refusal, and the folder is left as it was.
-        if (Unreadable(vehiclesFile, node => node?["vehicles"] is JsonArray listed && listed.All(v =>
-                    v is JsonObject car && car["model"] is JsonValue model && model.TryGetValue<string>(out _)),
-                "a list of vehicles, each with its model name") is { } badList)
-        {
-            refusal = badList;
-            return null;
-        }
-        if (Unreadable(Path.Combine(output, PackageFile), node => node is JsonObject, "a package manifest") is { } badPackage)
+        // The manifest is read BEFORE anything is copied: one that is there and does not read is a refusal and
+        // the folder is left as it was, rather than taken for "no manifest yet" and written over.
+        string packageFile = Path.Combine(output, PackageFile);
+        if (Unreadable(packageFile, node => node is JsonObject, "a package manifest") is { } badPackage)
         {
             refusal = badPackage;
             return null;
         }
-        if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any() && !File.Exists(vehiclesFile))
+        if (File.Exists(Path.Combine(output, LegacyVehiclesFile)) || Directory.Exists(Path.Combine(output, LegacyCarsFolder)))
+        {
+            refusal = $"{output} holds an export in the old layout (sds/cars and vehicles.json), which the multiplayer no longer reads — export into an empty folder";
+            return null;
+        }
+        if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any() && !File.Exists(packageFile))
         {
             refusal = $"{output} holds something that is not a car export — pick an empty folder";
             return null;
         }
 
-        string stem = Path.GetFileNameWithoutExtension(sources.Archive.Name);
+        string stem = Path.GetFileNameWithoutExtension(sources.Archive.Name).ToLowerInvariant();
         var notes = new List<string>();
 
         // The vehicle table names the model as the archive's insides must; an unregistered car is named by its frame.
@@ -172,9 +213,10 @@ public static partial class CarM2oExport
             return null;
         }
         string model = car.Model;
+        Inspection? winter = null;
         if (sources.WinterArchive is { } winterArchive)
         {
-            Inspection winter = Inspect(winterArchive, model, stem);
+            winter = Inspect(winterArchive, model, stem);
             if (winter.Problems.Count > 0)
             {
                 refusal = $"{winterArchive.Name} is not the same car: {string.Join("; ", winter.Problems)}";
@@ -193,124 +235,101 @@ public static partial class CarM2oExport
             }
         }
 
-        var entry = new JsonObject
+        // The materials the car adds, read as the libraries hold them now; one no library has cannot travel.
+        var added = new SortedDictionary<ulong, IMaterial>();
+        if (sources.FindMaterial != null && sources.StockMaterials != null)
         {
-            ["model"] = model,
-            ["sds"] = $"/{CarsFolder}/{sources.Archive.Name.ToLowerInvariant()}",
-            ["archive"] = $"{CarsFolder}/{sources.Archive.Name}",
-            ["winterSds"] = sources.WinterArchive != null ? JsonValue.Create($"/{CarsFolder}/{sources.WinterArchive.Name.ToLowerInvariant()}") : null,
-            ["winterArchive"] = sources.WinterArchive != null ? JsonValue.Create($"{CarsFolder}/{sources.WinterArchive.Name}") : null,
-        };
-
-        // The title, in every language that has one.
-        string? title = null;
-        if (row >= 0 && vehicles!.Cell(row, VehicleTextColumn) is int textId)
-        {
-            var titles = new JsonObject();
-            foreach ((string language, string table) in sources.Text)
+            var missing = new List<string>();
+            foreach (ulong hash in car.Materials.Concat(winter?.Materials ?? []).Distinct())
             {
-                if (!File.Exists(table) || GameText.Find(table, textId) is not { } found) continue;
-                titles[language] = found;
-                if (title == null || language.Equals("en", StringComparison.OrdinalIgnoreCase)) title = found;
+                if (sources.StockMaterials.Contains(hash)) continue;
+                if (sources.FindMaterial(hash) is { } material) added[hash] = material;
+                else missing.Add("0x" + hash.ToString("x16"));
             }
-            entry["title"] = title;
-            entry["titles"] = titles;
-        }
-        entry["basedOn"] = sources.BasedOn;
-        entry["hashes"] = new JsonObject
-        {
-            ["model"] = Hex(Fnv64.Hash(model)),
-            ["entityData"] = Hex(Fnv64.Hash(model.ToLowerInvariant())),
-        };
-
-        if (row >= 0)
-        {
-            entry["vehicleTable"] = RowJson(vehicles!, row, (int)vehicles!.Cell(row, VehicleIdColumn));
+            if (missing.Count > 0)
+            {
+                refusal = $"{sources.Archive.Name} uses materials no library has ({string.Join(", ", missing)}) — create them before exporting";
+                return null;
+            }
         }
         else
         {
-            notes.Add($"vehicles.tbl lists no car named {stem} — the export carries no table row");
+            notes.Add("no material libraries were given — any material the car adds is not embedded, and a server refuses a car whose new textures no material uses");
         }
-        if (sources.PaintTable != null && File.Exists(sources.PaintTable))
+
+        string? title = null;
+        if (row >= 0 && vehicles!.Cell(row, VehicleTextColumn) is int textId)
         {
-            GameTable paint = GameTable.Load(sources.PaintTable);
-            int paintRow = paint.FindRow(PaintNameColumn, model);
-            if (paintRow >= 0) entry["paintCombinations"] = RowJson(paint, paintRow, id: null);
+            foreach ((string language, string table) in sources.Text)
+            {
+                if (!File.Exists(table) || GameText.Find(table, textId) is not { } found) continue;
+                if (title == null || language.Equals("en", StringComparison.OrdinalIgnoreCase)) title = found;
+            }
         }
 
         // Everything is known; now the folder.
-        string cars = Path.Combine(output, "sds", "cars");
+        string cars = Path.Combine(output, CarsFolder.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(cars);
         var written = new List<string>();
-        var files = new JsonArray();
-        foreach (FileInfo? source in new[] { sources.Archive, sources.WinterArchive })
+        foreach ((FileInfo? source, Inspection? inspected) in new[] { (sources.Archive, car), (sources.WinterArchive, winter) })
         {
-            if (source == null) continue;
-            string target = Path.Combine(cars, source.Name);
-            File.Copy(source.FullName, target, overwrite: true);
-            written.Add(target);
-            files.Add(new JsonObject
+            if (source == null || inspected == null) continue;
+            string target = Path.Combine(cars, source.Name.ToLowerInvariant());
+            var needed = inspected.Materials.Where(added.ContainsKey).Select(h => added[h]).ToList();
+            if (needed.Count == 0)
             {
-                ["path"] = $"{CarsFolder}/{source.Name}",
-                ["size"] = new FileInfo(target).Length,
-                ["sha256"] = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(target))),
-            });
+                File.Copy(source.FullName, target, overwrite: true);
+            }
+            else
+            {
+                EmbedMaterials(source, target, stem + ".mtl", needed, sources.MaterialVersion);
+            }
+            written.Add(target);
         }
-        entry["files"] = files;
 
-        JsonArray list = ReadList(vehiclesFile);
-        for (int i = list.Count - 1; i >= 0; i--)
-        {
-            if (string.Equals(list[i]?["model"]?.GetValue<string>(), model, StringComparison.OrdinalIgnoreCase)) list.RemoveAt(i);
-        }
-        list.Add(entry);
-        var document = new JsonObject
-        {
-            ["format"] = Format,
-            ["about"] = "Car models exported by Illusion Toolkit. Each archive is filed under its model name throughout "
-                + "(root frame, name table, prefab entry, entity data, geometry buffers); vehicleTable and "
-                + "paintCombinations are the rows the single-player game registers the model with.",
-            ["vehicles"] = list,
-        };
-        WriteJson(vehiclesFile, document);
-        written.Add(vehiclesFile);
-
-        string packageFile = Path.Combine(output, PackageFile);
         WritePackage(packageFile, resource, model, title);
         written.Add(packageFile);
 
+        int carsInFolder = Directory.EnumerateFiles(cars, "*.sds")
+            .Count(path => !Path.GetFileNameWithoutExtension(path).EndsWith("_z", StringComparison.OrdinalIgnoreCase));
         refusal = null;
-        return new CarM2oExportResult(output, resource, model, title, sources.BasedOn, list.Count, written, notes);
+        return new CarM2oExportResult(output, resource, model, title, sources.BasedOn, carsInFolder,
+            [.. added.Values.Select(m => m.MaterialName.String)], written, notes);
+    }
+
+    // The archive with the materials written into it as a MemFile named `name`, which the multiplayer reads back
+    // and hands to the game's LoadMTL. The rest of the archive is repacked as it was, with the memory each
+    // resource asks for kept from the original.
+    private static void EmbedMaterials(FileInfo source, string target, string name, IReadOnlyList<IMaterial> materials, MaterialVersion version)
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "illusion_m2o_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            SdsMemoryRequirements memory = SdsMemoryRequirements.Extract(SdsArchive.Open(source.FullName), scratch);
+            var library = new MaterialLibrary(version)
+            {
+                Materials = materials.ToDictionary(m => m.GetMaterialHash()),
+            };
+            library.WriteMatFile(Path.Combine(scratch, name));
+            SdsManifest.Load(scratch).AddEntry("MemFile", name, MemFileVersion, [("Unk2_V4", "0")]);
+
+            SdsArchive packed = SdsArchive.Pack(scratch, GameProfile.MafiaII, memory);
+            string temp = target + ".tmp";
+            using (FileStream stream = File.Create(temp))
+            {
+                packed.Save(stream, new SdsWriteOptions());
+            }
+            File.Move(temp, target, overwrite: true);
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+            catch (IOException) { /* scratch left behind */ }
+        }
     }
 
     private static string PackerFigures(string archive) =>
         $"{archive} states a packer's memory figures, less than a shipped car asks for — build it with the car it was made from as the memory reference before shipping";
-
-    private static string Hex(ulong hash) => "0x" + hash.ToString("x16");
-
-    private static JsonObject RowJson(GameTable table, int row, int? id)
-    {
-        var columns = new JsonArray();
-        var values = new JsonArray();
-        for (int c = 0; c < table.ColumnCount; c++)
-        {
-            columns.Add(table.ColumnType(c));
-            values.Add(table.Cell(row, c) switch
-            {
-                int i => JsonValue.Create(i),
-                uint u => JsonValue.Create(u),
-                float f => JsonValue.Create(f),
-                bool b => JsonValue.Create(b),
-                ulong h => JsonValue.Create(Hex(h)),
-                object other => JsonValue.Create(other.ToString()),
-            });
-        }
-        var json = new JsonObject();
-        if (id is { } given) json["id"] = given;
-        json["columns"] = columns;
-        json["values"] = values;
-        return json;
-    }
 
     // Why an existing manifest cannot be built on, or null when it is absent or reads as what it should be.
     private static string? Unreadable(string path, Func<JsonNode?, bool> isWhatItShouldBe, string what)
@@ -329,50 +348,27 @@ public static partial class CarM2oExport
         }
     }
 
-    // The cars a folder already lists. ExportFrom has checked that the file reads; one that stopped reading
-    // since is an error, not an empty list.
-    private static JsonArray ReadList(string vehiclesFile)
-    {
-        if (!File.Exists(vehiclesFile)) return [];
-        if (JsonNode.Parse(File.ReadAllText(vehiclesFile))?["vehicles"] is JsonArray existing)
-        {
-            return [.. existing.Select(v => v?.DeepClone())];
-        }
-        throw new InvalidDataException($"{Path.GetFileName(vehiclesFile)} is not a list of vehicles");
-    }
-
-    // A package.json somebody already wrote keeps what it says; it only has to ship the cars.
+    // A package.json somebody already wrote keeps what it says. A new one needs nothing beyond its name: the
+    // stream folder ships on its own, no file list is needed.
     private static void WritePackage(string packageFile, string resource, string model, string? title)
     {
-        JsonObject? package = null;
-        if (File.Exists(packageFile))
-        {
-            // Checked readable by ExportFrom before anything was written; never replaced for not reading.
-            package = JsonNode.Parse(File.ReadAllText(packageFile)) as JsonObject
-                ?? throw new InvalidDataException($"{Path.GetFileName(packageFile)} is not a package manifest");
-        }
-        package ??= new JsonObject
+        if (File.Exists(packageFile)) return;
+        var package = new JsonObject
         {
             ["name"] = resource,
             ["version"] = "1.0.0",
             ["description"] = $"Vehicle model {model}{(title != null ? $" ({title})" : "")}",
         };
-        if (package["mafiahub"] is not JsonObject hub) package["mafiahub"] = hub = new JsonObject { ["priority"] = 0 };
-        if (hub["files"] is not JsonArray shipped) hub["files"] = shipped = [];
-        foreach (string pattern in new[] { "sds/**", VehiclesFile })
-        {
-            if (!shipped.Any(f => f?.GetValueKind() == JsonValueKind.String && f.GetValue<string>() == pattern)) shipped.Add(pattern);
-        }
         WriteJson(packageFile, package);
     }
 
     private static void WriteJson(string path, JsonNode node) =>
         AtomicFile.WriteAllBytes(path, new System.Text.UTF8Encoding(false).GetBytes(node.ToJsonString(Indented) + "\n"));
 
-    private sealed record Inspection(string? Model, List<string> Problems, HashSet<ulong> Buffers, bool ShippedMemory);
+    private sealed record Inspection(string? Model, List<string> Problems, HashSet<ulong> Buffers, HashSet<ulong> Materials, bool ShippedMemory);
 
-    // What the archive itself says: whether every key in it is the model's, the names its buffers bear, and
-    // whether it states memory figures like a shipped archive.
+    // What the archive itself says: whether every key in it is the model's, the names its buffers bear, the
+    // materials its meshes use, and whether it states memory figures like a shipped archive.
     private static Inspection Inspect(FileInfo archive, string? model, string stem)
     {
         string scratch = Path.Combine(Path.GetTempPath(), "illusion_m2o_" + Guid.NewGuid().ToString("N"));
@@ -386,10 +382,13 @@ public static partial class CarM2oExport
                 .Select(f => f.Name.String ?? "").ToList() ?? [];
             model ??= frames.FirstOrDefault(n => string.Equals(n, stem, StringComparison.OrdinalIgnoreCase));
             var buffers = new HashSet<ulong>(loaded.VertexBuffers.Buffers.Keys.Concat(loaded.IndexBuffers.Buffers.Keys));
+            var materials = new HashSet<ulong>(loaded.FrameResource?.FrameMaterials.Values
+                .SelectMany(block => block.Materials.SelectMany(lod => lod))
+                .Select(slot => slot.MaterialHash).Where(hash => hash != 0) ?? []); // 0: a slot with no material
             if (model == null)
             {
                 problems.Add($"no frame in it is named {stem}");
-                return new Inspection(null, problems, buffers, shipped);
+                return new Inspection(null, problems, buffers, materials, shipped);
             }
 
             if (!frames.Contains(model)) problems.Add($"no frame in it is named {model}");
@@ -409,7 +408,7 @@ public static partial class CarM2oExport
                     problems.Add($"its entity data is not filed under {model.ToLowerInvariant()}");
                 }
             }
-            return new Inspection(model, problems, buffers, shipped);
+            return new Inspection(model, problems, buffers, materials, shipped);
         }
         finally
         {

@@ -1,5 +1,4 @@
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using Illusion.Assets;
@@ -7,15 +6,15 @@ using Illusion.Assets.Cars;
 using Illusion.Assets.Sds;
 using Illusion.Formats;
 using Illusion.Formats.Archive;
-using Illusion.Formats.Hashing;
-using Illusion.Formats.ResourceFormats;
+using Illusion.Formats.Frames;
+using Illusion.Formats.Materials;
 
 namespace Illusion.Diagnostics.Probes;
 
 /// <summary>
 /// A car exported as a multiplayer resource, from a clone made and packed on scratch copies (nothing of the
-/// game is written): the folder's manifest and car list, the archives it ships, a second car joining the list,
-/// and what an export refuses.
+/// game is written): the folder's manifest, the archives it streams, the materials a car adds travelling inside
+/// its archive, a second car joining the folder, and what an export refuses.
 /// </summary>
 internal static class CarM2oExportProbes
 {
@@ -81,15 +80,21 @@ internal static class CarM2oExportProbes
                 archives.Add(new FileInfo(path));
             }
 
+            MafiaMaterials.EnsureLoaded();
+            MaterialCollection materials = MafiaMaterials.Collection!;
+            IReadOnlySet<ulong> stockMaterials = CarM2oExport.StockMaterials(materials);
             var sources = new CarM2oExportSources(
                 archives[0],
                 archives.Count > 1 ? archives[1] : null,
                 Path.Combine(tables, "tables", "vehicles.tbl"),
-                Path.Combine(ingame, "tables", "PaintCombinations.tbl"),
                 [("en", Path.Combine(text, "TextDatabase.dat"))],
                 CarCloner.SourceOf(cars[0].To),
-                stock);
+                stock,
+                materials.FindByHash,
+                stockMaterials,
+                materials.Libraries.Values.First().Version);
             string output = Path.Combine(scratch, "export");
+            string streamed = Path.Combine(output, CarM2oExport.CarsFolder.Replace('/', Path.DirectorySeparatorChar));
 
             Check("refuses a resource name the multiplayer would not take",
                 CarM2oExport.ExportFrom(sources, output, "Bad Name", out string? badName) == null && badName != null, badName ?? "");
@@ -106,35 +111,24 @@ internal static class CarM2oExportProbes
                 CarM2oExport.ExportFrom(sources with { Archive = misnamed, WinterArchive = null }, output, "car-test", out string? alien) == null
                 && alien != null && !Directory.Exists(output), alien ?? "");
 
-            // A folder whose manifests are there and do not read: left as it is, not replaced with this one car.
+            string legacy = Path.Combine(scratch, "legacy");
+            Directory.CreateDirectory(Path.Combine(legacy, "sds", "cars"));
+            File.WriteAllText(Path.Combine(legacy, "vehicles.json"), "{ \"vehicles\": [] }");
+            File.WriteAllText(Path.Combine(legacy, CarM2oExport.PackageFile), "{ \"name\": \"mine\" }");
+            Check("refuses a folder in the old layout, and leaves it as it was",
+                CarM2oExport.ExportFrom(sources, legacy, "car-test", out string? old) == null && old != null
+                && Directory.GetFileSystemEntries(legacy).Length == 3, old ?? "exported");
+
             string broken = Path.Combine(scratch, "broken");
             Directory.CreateDirectory(broken);
-            const string BadList = "{ \"vehicles\": [ { \"model\": \"Earlier_Car\" }, ", BadPackage = "{ \"name\": \"mine\", \"custom\": tru";
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), BadList);
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), "{ \"name\": \"mine\" }");
-            Check("refuses a folder whose vehicles.json does not read, and leaves it and everything else as it was",
-                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? unreadList) == null && unreadList != null
-                && File.ReadAllText(Path.Combine(broken, CarM2oExport.VehiclesFile)) == BadList
-                && Directory.GetFileSystemEntries(broken).Length == 2, unreadList ?? "exported");
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), "{ \"vehicles\": [] }");
+            const string BadPackage = "{ \"name\": \"mine\", \"custom\": tru";
             File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), BadPackage);
-            Check("refuses a folder whose package.json does not read, the same way",
+            Check("refuses a folder whose package.json does not read, and leaves it as it was",
                 CarM2oExport.ExportFrom(sources, broken, "car-test", out string? unreadPackage) == null && unreadPackage != null
                 && File.ReadAllText(Path.Combine(broken, CarM2oExport.PackageFile)) == BadPackage
-                && Directory.GetFileSystemEntries(broken).Length == 2, unreadPackage ?? "exported");
+                && Directory.GetFileSystemEntries(broken).Length == 1, unreadPackage ?? "exported");
 
-            const string OddList = "{ \"vehicles\": [ \"not a car\" ] }";
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), OddList);
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.PackageFile), "{ \"name\": \"mine\" }");
-            Check("refuses a vehicles.json whose list holds something that is not a car, before copying anything",
-                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? oddList) == null && oddList != null
-                && File.ReadAllText(Path.Combine(broken, CarM2oExport.VehiclesFile)) == OddList
-                && Directory.GetFileSystemEntries(broken).Length == 2, oddList ?? "exported");
-            File.WriteAllText(Path.Combine(broken, CarM2oExport.VehiclesFile), "{ \"vehicles\": [ { \"model\": 5 } ] }");
-            Check("…and one whose car has no model name",
-                CarM2oExport.ExportFrom(sources, broken, "car-test", out string? noModel) == null && noModel != null
-                && Directory.GetFileSystemEntries(broken).Length == 2, noModel ?? "exported");
-
+            // A clone of a stock car uses only stock materials: its archives ship exactly as they were built.
             CarM2oExportResult? result = CarM2oExport.ExportFrom(sources, output, CarM2oExport.DefaultResource(Name), out refused);
             Check("exports the clone", result != null, refused ?? "");
             if (result == null) return;
@@ -143,48 +137,53 @@ internal static class CarM2oExportProbes
                 result.Model == Name && result.Title == Title && result.BasedOn == "Shubert_38" && result.Vehicles == 1,
                 $"{result.Model} / {result.Title} / {result.BasedOn}");
             Check("no note of shared buffers or packer figures", result.Notes.Count == 0, string.Join(" | ", result.Notes));
+            Check("a car using only stock materials embeds none", result.EmbeddedMaterials.Count == 0, string.Join(", ", result.EmbeddedMaterials));
 
             JsonNode package = JsonNode.Parse(File.ReadAllText(Path.Combine(output, CarM2oExport.PackageFile)))!;
-            var shipped = (package["mafiahub"]?["files"] as JsonArray)?.Select(f => f!.GetValue<string>()).ToList() ?? [];
-            Check("package.json names the resource and ships the cars and their list",
-                package["name"]?.GetValue<string>() == "car-shubert-38-export" && package["version"] != null
-                && shipped.Contains("sds/**") && shipped.Contains(CarM2oExport.VehiclesFile), string.Join(", ", shipped));
-
-            JsonNode document = JsonNode.Parse(File.ReadAllText(Path.Combine(output, CarM2oExport.VehiclesFile)))!;
-            JsonNode? entry = (document["vehicles"] as JsonArray)?.FirstOrDefault();
-            Check("vehicles.json lists the car", document["format"]?.GetValue<int>() == CarM2oExport.Format && entry != null
-                && entry["model"]?.GetValue<string>() == Name && entry["title"]?.GetValue<string>() == Title
-                && entry["titles"]?["en"]?.GetValue<string>() == Title && entry["basedOn"]?.GetValue<string>() == "Shubert_38");
-            if (entry == null) return;
-            Check("with the hashes its archive is keyed by",
-                entry["hashes"]?["model"]?.GetValue<string>() == "0x" + Fnv64.Hash(Name).ToString("x16")
-                && entry["hashes"]?["entityData"]?.GetValue<string>() == "0x" + Fnv64.Hash(Name.ToLowerInvariant()).ToString("x16"));
-            GameTable vehicles = GameTable.Load(Path.Combine(tables, "tables", "vehicles.tbl"));
-            var values = entry["vehicleTable"]?["values"] as JsonArray;
-            Check("with its vehicle-table row, cell for cell",
-                entry["vehicleTable"]?["id"]?.GetValue<int>() == clone.VehicleId && values != null
-                && values.Count == vehicles.ColumnCount && (entry["vehicleTable"]?["columns"] as JsonArray)?.Count == vehicles.ColumnCount
-                && values[0]!.GetValue<int>() == clone.VehicleId && values[2]!.GetValue<string>() == Name,
-                $"{values?.Count} cells");
-            Check("with its paint combinations", (entry["paintCombinations"]?["values"] as JsonArray)?.Count > 0);
-
-            var files = entry["files"] as JsonArray;
-            bool intact = files != null && files.Count == archives.Count;
-            for (int i = 0; intact && i < files!.Count; i++)
-            {
-                string shippedFile = Path.Combine(output, files[i]!["path"]!.GetValue<string>());
-                intact = File.Exists(shippedFile)
-                    && files[i]!["size"]!.GetValue<long>() == archives[i].Length
-                    && files[i]!["sha256"]!.GetValue<string>() == Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(archives[i].FullName)));
-            }
-            Check("the archives are in sds/cars/ as they were built, sized and hashed", intact
-                && entry["archive"]?.GetValue<string>() == "sds/cars/" + archives[0].Name
-                && (archives.Count < 2 || entry["winterArchive"]?.GetValue<string>() == "sds/cars/" + archives[1].Name));
-            Check("each named by the path the game loads it from",
-                entry["sds"]?.GetValue<string>() == "/sds/cars/" + archives[0].Name
-                && (archives.Count < 2 || entry["winterSds"]?.GetValue<string>() == "/sds/cars/" + archives[1].Name));
+            Check("package.json names the resource and lists no files (the stream folder ships on its own)",
+                package["name"]?.GetValue<string>() == "car-shubert-38-export" && package["version"] != null && package["mafiahub"] == null);
+            bool intact = archives.All(a => File.Exists(Path.Combine(streamed, a.Name))
+                && File.ReadAllBytes(Path.Combine(streamed, a.Name)).AsSpan().SequenceEqual(File.ReadAllBytes(a.FullName)));
+            Check("the archives are in stream/sds/cars/, byte for byte as they were built", intact);
             Check("nothing else is in the folder",
-                Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length == archives.Count + 2);
+                Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length == archives.Count + 1
+                && !File.Exists(Path.Combine(output, "vehicles.json")));
+
+            // One of the car's own materials, as if the toolkit had created it: it is not stock, so it travels
+            // inside the archive, and nothing else does.
+            ulong created = CarMaterials(cars[0].To).First(stockMaterials.Contains);
+            var withoutIt = new HashSet<ulong>(stockMaterials);
+            withoutIt.Remove(created);
+            string adds = Path.Combine(scratch, "adds");
+            CarM2oExportResult? embedded = CarM2oExport.ExportFrom(sources with { StockMaterials = withoutIt }, adds, "car-test", out refused);
+            Check("exports a car that adds a material", embedded != null, refused ?? "");
+            if (embedded == null) return;
+            Check("the result names the embedded material",
+                embedded.EmbeddedMaterials.SequenceEqual([materials.FindByHash(created)!.MaterialName.String]), string.Join(", ", embedded.EmbeddedMaterials));
+            string addsStreamed = Path.Combine(adds, CarM2oExport.CarsFolder.Replace('/', Path.DirectorySeparatorChar));
+            for (int i = 0; i < archives.Count; i++)
+            {
+                FileInfo archive = archives[i];
+                IReadOnlyList<ulong> carried = EmbeddedMaterials(Path.Combine(addsStreamed, archive.Name), Path.Combine(scratch, "read_" + archive.Name), out string memFile);
+                if (CarMaterials(cars[i].To).Contains(created))
+                {
+                    Check($"{archive.Name}: the material is a MemFile '{memFile}' holding exactly it",
+                        memFile == Name.ToLowerInvariant() + ".mtl" && carried.SequenceEqual([created]), string.Join(", ", carried.Select(h => "0x" + h.ToString("x16"))));
+                }
+                else
+                {
+                    // The winter meshes need not use every summer material; an archive that does not use it carries none.
+                    Check($"{archive.Name}: does not use the material and carries no MemFile", memFile == "0 MemFiles", memFile);
+                }
+                Check($"{archive.Name}: the rest of the archive is as it was built",
+                    SameEntriesBesidesMemFile(archive.FullName, Path.Combine(addsStreamed, archive.Name)));
+            }
+
+            // A material the car uses that no library has cannot travel: refused, nothing written.
+            string unknown = Path.Combine(scratch, "unknown");
+            Check("refuses a car using a material no library has, writing nothing",
+                CarM2oExport.ExportFrom(sources with { StockMaterials = withoutIt, FindMaterial = _ => null }, unknown, "car-test", out string? noMaterial) == null
+                && noMaterial != null && !Directory.Exists(unknown), noMaterial ?? "exported");
 
             // A clone that kept the source's buffer names, and an archive packed with no requirements, are said so.
             string shared = Copy(cars[0].From, Path.Combine(scratch, "shared"));
@@ -193,7 +192,7 @@ internal static class CarM2oExportProbes
             CarM2oExportResult? plain = CarM2oExport.ExportFrom(
                 sources with { Archive = new FileInfo(sharedArchive), WinterArchive = null, BasedOn = "Shubert_38" },
                 output, "car-test", out refused);
-            Check("a second car joins the list", plain is { Vehicles: 2, Model: "Shubert_38" }, refused ?? "");
+            Check("a second car joins the folder", plain is { Vehicles: 2, Model: "Shubert_38" }, refused ?? "");
             Check("an archive packed without requirements is noted",
                 plain != null && plain.Notes.Any(n => n.Contains("memory", StringComparison.Ordinal)), string.Join(" | ", plain?.Notes ?? []));
             Check("buffers shared with the source car are noted",
@@ -202,7 +201,7 @@ internal static class CarM2oExportProbes
                 JsonNode.Parse(File.ReadAllText(Path.Combine(output, CarM2oExport.PackageFile)))!["name"]?.GetValue<string>() == "car-shubert-38-export");
 
             CarM2oExportResult? again = CarM2oExport.ExportFrom(sources, output, "car-test", out refused);
-            Check("exporting a car again replaces its entry", again is { Vehicles: 2 }, refused ?? "");
+            Check("exporting a car again replaces its archive", again is { Vehicles: 2 }, refused ?? "");
         }
         catch (Exception ex)
         {
@@ -216,6 +215,33 @@ internal static class CarM2oExportProbes
             sb.Insert(0, $"CAR M2O EXPORT PROBE: {pass} passed, {fail} failed\n\n");
             File.WriteAllText(outFile, sb.ToString());
         }
+    }
+
+    // The material hashes a working copy's meshes use.
+    private static IEnumerable<ulong> CarMaterials(string extracted) =>
+        ExtractedSds.Load(extracted).FrameResource!.FrameMaterials.Values
+            .SelectMany(block => block.Materials.SelectMany(lod => lod)).Select(slot => slot.MaterialHash).Where(hash => hash != 0).Distinct();
+
+    // The materials an archive carries in its MemFile library, read back the way the multiplayer does.
+    private static IReadOnlyList<ulong> EmbeddedMaterials(string archive, string scratch, out string memFile)
+    {
+        SdsArchive.Open(archive).Extract(scratch);
+        IReadOnlyList<string> files = SdsManifest.Load(scratch).GetFiles("MemFile");
+        memFile = files.Count == 1 ? Path.GetFileName(files[0]) : $"{files.Count} MemFiles";
+        if (files.Count != 1) return [];
+        var library = new MaterialLibrary(MaterialVersion.V_57);
+        library.ReadMatFile(files[0]);
+        return [.. library.Materials.Keys];
+    }
+
+    // Every resource of the shipped archive but the added MemFile is the one the built archive had.
+    private static bool SameEntriesBesidesMemFile(string built, string shipped)
+    {
+        SdsArchive before = SdsArchive.Open(built), after = SdsArchive.Open(shipped);
+        string TypeOf(SdsArchive archive, ResourceEntry entry) => archive.ResourceTypes.First(t => t.Id == entry.TypeId).Name;
+        var kept = after.Entries.Where(e => TypeOf(after, e) != "MemFile").ToList();
+        return kept.Count == before.Entries.Count && kept.Zip(before.Entries).All(pair =>
+            TypeOf(after, pair.First) == TypeOf(before, pair.Second) && pair.First.Data!.AsSpan().SequenceEqual(pair.Second.Data));
     }
 
     private static void Pack(string folder, string path, SdsMemoryRequirements? memory)

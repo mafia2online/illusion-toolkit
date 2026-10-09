@@ -246,12 +246,12 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_export_m2o")]
-    [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships sds/** and vehicles.json), sds/cars/<name>.sds with its winter _z twin, and vehicles.json — the path the game loads each archive from, model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
+    [Description("Export a built car as a Mafia II Online resource folder: package.json and stream/sds/cars/<name>.sds with its winter _z twin — one archive per car, which the server registers by file name (a stock car's name replaces that car). Materials the car uses that the game did not ship with (ones the toolkit created) are embedded in its archive as a MemFile <name>.mtl, which the multiplayer adds through the game's LoadMTL; a server refuses a car whose new textures no material uses. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout, or a material no library has. A second export into the same folder adds a car. Writes only the output folder — nothing of the game or of the multiplayer.")]
     public static async Task<string> CarExportM2o(
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("The car, by archive or model name, e.g. 'shubert_38_custom'.")] string car,
-        [Description("Full path of the folder to write. Default: <game>\\_illusion_export\\m2o\\<resource>. Must be empty or an earlier export.")] string? output = null,
+        [Description("Full path of the folder to write. Default: <game>\\_illusion_export\\m2o\\<resource>. Must be empty or an earlier export in this layout.")] string? output = null,
         [Description("The resource's name (lower-case letters, digits, '-', '_', '.'). Default: 'car-' + the car's name with '-' for '_'.")] string? resource = null)
     {
         try

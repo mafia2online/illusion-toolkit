@@ -1074,7 +1074,7 @@ internal sealed class AppEditorSession : IEditorSession
                 return refusal;
             }
             result = new M2oExportInfo(exported.Folder, exported.Resource, exported.Model, exported.Title, exported.BasedOn,
-                exported.Vehicles, exported.Files, exported.Notes);
+                exported.Vehicles, exported.EmbeddedMaterials, exported.Files, exported.Notes);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
