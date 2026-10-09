@@ -168,6 +168,17 @@ internal sealed class DistrictStreamer
     /// having its meshes attached. What a caller that asked for an area waits on.</summary>
     public bool IsBusy => _building || _loadTask != null || _loadQueue.Count > 0;
 
+    /// <summary>
+    /// Whether an archive is queued for loading, being read or being put into the tree right now. Its scene is
+    /// then read from disk - or about to be - and is not registered as held yet: a change written to the
+    /// archive in that window would not be in the scene that arrives.
+    /// </summary>
+    internal bool IsLoading(FileInfo archive)
+    {
+        bool Same(FileInfo? file) => file != null && string.Equals(file.FullName, archive.FullName, StringComparison.OrdinalIgnoreCase);
+        return ((_building || _loadTask != null) && (Same(_loadCtx.file) || Same(_buildCtx.file))) || _loadQueue.Any(q => Same(q.File));
+    }
+
     private Queue<(SceneNode Leaf, GpuMesh Mesh)> _buildQueue = null!; // prepared meshes awaiting attach
     private (string label, string? district, string folder, int gen, FileInfo file) _buildCtx;
     private List<GpuMesh> _buildMeshes = null!;
@@ -1542,6 +1553,9 @@ internal sealed class DistrictStreamer
         }
         if (load.Archive is { } archive) OpenArchives.Release(archive, _host);
         _loadedDistricts.Remove(name);
+        // Last, with the rows out of the tree: what Blender holds of this district no longer stands for
+        // anything in the scene.
+        _host.BridgeSession.ForgetUnloaded();
     }
 
     // Shared reset+enqueue: clears the current scene and queues a new set of .sds for incremental loading.
@@ -1584,6 +1598,9 @@ internal sealed class DistrictStreamer
         _host.Tree.Clear();
         _loadedDistricts.Clear();
         OpenArchives.ReleaseAll(_host); // nothing of ours is loaded any more
+        // A Blender edit session does not outlive the scene it was opened on. Left holding the rows of the
+        // scene that has just gone, it computed the next push against them and applied it to nothing.
+        _host.BridgeSession.ForgetUnloaded();
     }
 
     /// <summary>

@@ -54,6 +54,18 @@
                           Click="RebuildHitBoxes_Click"
                           ToolTip="Recompute the selected model's per-piece hit boxes from its geometry, so new geometry can be shot" />
             </MenuItem>
+            <!-- What used to be reachable only through the MCP server: each item opens a window over the same
+                 job the matching tool does, so the menu and an agent cannot drift apart. -->
+            <MenuItem Header="Tools" SubmenuOpened="ToolsMenu_SubmenuOpened">
+                <MenuItem Header="Hide triangles…" Click="HideTriangles_Click"
+                          ToolTip="Cut an opening in the selected mesh - a doorway, a pane of glass - without rebuilding it" />
+                <MenuItem x:Name="MirrorWinterItem" Header="Mirror to winter…" Click="MirrorWinter_Click" />
+                <Separator />
+                <MenuItem Header="Loading zones…" Click="LoadZones_Click"
+                          ToolTip="Which zones make the game load a district at a point, and moving a zone's face" />
+                <MenuItem Header="Stream map…" Click="StreamMap_Click"
+                          ToolTip="Find and replace in StreamMapa.bin - archive paths, line and group names" />
+            </MenuItem>
         </Menu>
 
         <!-- Status bar: camera position (per axis) + speed. Sizes are set on the fields themselves
@@ -153,7 +165,7 @@
                                                               Opacity="0.5" />
                                         </Border.Effect>
                                         <StackPanel x:Name="LayerRows">
-                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district">
+                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district. With this on a click picks the zone that spot is in (again for the next one there); Move then moves it and Scale pulls its faces">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />

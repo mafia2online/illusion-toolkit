@@ -271,13 +271,39 @@ internal static class FramePropertyCatalog
         c.AddType("Sector", HashNameDesc("Sector.SectorName", "Sector name", () => s.SectorName,
             name => s.SectorName.Set(name)));
         c.AddType("Sector", Vec3Desc("Sector.BoundsMin", "Bounds min",
-            () => s.Bounds.Min, v => { var b = s.Bounds; b.Min = v; s.Bounds = b; }));
+            () => s.Bounds.Min, v => { var b = s.Bounds; Vector3 was = b.Min; b.Min = v; s.Bounds = b; SectorPlanesFollow(s, v - was, Vector3.Zero); }));
         c.AddType("Sector", Vec3Desc("Sector.BoundsMax", "Bounds max",
-            () => s.Bounds.Max, v => { var b = s.Bounds; b.Max = v; s.Bounds = b; }));
+            () => s.Bounds.Max, v => { var b = s.Bounds; Vector3 was = b.Max; b.Max = v; s.Bounds = b; SectorPlanesFollow(s, Vector3.Zero, v - was); }));
         AddPlanes("Sector.Planes", s.Planes, c, "Sector");
         c.AddTypeUnknown(IntDesc("Sector.Unk08", "Unk08", () => s.Unk08, v => s.Unk08 = v));
         c.AddTypeUnknown(Vec3Desc("Sector.Unk13", "Unk13", () => s.Unk13, v => s.Unk13 = v));
         c.AddTypeUnknown(Vec3Desc("Sector.Unk14", "Unk14", () => s.Unk14, v => s.Unk14 = v));
+    }
+
+    // A sector says its volume twice: the box, and the planes that bound it (inside is n.p + d >= 0). The game
+    // asks the planes - a box moved on its own left the room's light where it was. For a sector that IS a box
+    // (every plane square to an axis) each plane goes with the face of the box it stands at, keeping the small
+    // margin the game's own sectors have between the two. A sector cut to another shape keeps its planes: there
+    // the box is only their envelope.
+    private static void SectorPlanesFollow(FrameObjectSector s, Vector3 minMoved, Vector3 maxMoved)
+    {
+        Vector4[] planes = s.Planes;
+        if (planes is not { Length: > 0 }) return;
+        var moved = new Vector4[planes.Length];
+        for (int i = 0; i < planes.Length; i++)
+        {
+            Vector4 plane = planes[i];
+            var n = new Vector3(plane.X, plane.Y, plane.Z);
+            int axis = MathF.Abs(n.X) > 0.999f ? 0 : MathF.Abs(n.Y) > 0.999f ? 1 : MathF.Abs(n.Z) > 0.999f ? 2 : -1;
+            if (axis < 0) return;                       // not a box: nothing is changed
+            float along = axis == 0 ? n.X : axis == 1 ? n.Y : n.Z;
+            // a plane looking down its axis bounds the box from above (d = max + margin), one looking up from below (d = margin - min)
+            float shift = along < 0f
+                ? (axis == 0 ? maxMoved.X : axis == 1 ? maxMoved.Y : maxMoved.Z)
+                : -(axis == 0 ? minMoved.X : axis == 1 ? minMoved.Y : minMoved.Z);
+            moved[i] = new Vector4(plane.X, plane.Y, plane.Z, plane.W + shift);
+        }
+        s.Planes = moved;
     }
 
     private static void AddTarget(FrameObjectTarget t, GroupCollector c)

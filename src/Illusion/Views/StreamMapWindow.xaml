@@ -1,0 +1,110 @@
+<Window x:Class="Illusion.Views.StreamMapWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Stream Map"
+        Width="760" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Tools → Stream map…: find and replace across the text of a StreamMapa.bin - the archive paths its
+         loaders name, their instance names, the line names the game's scripts switch on, the group names.
+         That is how a mod points the game at an archive of its own. The list below the fields is the
+         preview: every string the replacement would touch, before anything is written. Visual language
+         comes from the shared EditorStyles dictionary, like CrashObjectWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock Style="{StaticResource DimLabel}" Text="File" Margin="0,0,0,4" />
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="PathBox" Grid.Column="0" Padding="6,4" TextChanged="Path_Changed" />
+                <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Height="28" Padding="12,0"
+                        Margin="8,0,0,0" Content="Browse…" Click="Browse_Click" />
+            </Grid>
+            <TextBlock x:Name="FileText" Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,14" />
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Style="{StaticResource DimLabel}" Text="Find" Margin="0,0,0,4" />
+                    <TextBox x:Name="FindBox" Padding="6,4" TextChanged="Query_Changed"
+                             ToolTip="Matched exactly, capitals and all" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource DimLabel}" Text="Replace with" Margin="0,0,0,4" />
+                    <TextBox x:Name="ReplaceBox" Padding="6,4" TextChanged="Query_Changed"
+                             ToolTip="May not make a string longer than it was: the edit is made in place" />
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                <CheckBox x:Name="PathCheck" IsChecked="True" Content="Archive paths" Margin="0,0,18,0"
+                          Checked="Query_Changed" Unchecked="Query_Changed" />
+                <CheckBox x:Name="EntityCheck" IsChecked="True" Content="Instance names" Margin="0,0,18,0"
+                          Checked="Query_Changed" Unchecked="Query_Changed" />
+                <CheckBox x:Name="LineCheck" IsChecked="True" Content="Line names" Margin="0,0,18,0"
+                          Checked="Query_Changed" Unchecked="Query_Changed" />
+                <CheckBox x:Name="GroupCheck" IsChecked="True" Content="Group names"
+                          Checked="Query_Changed" Unchecked="Query_Changed" />
+            </StackPanel>
+
+            <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <Grid>
+                    <ListBox x:Name="EditList" Height="250" BorderThickness="0" Background="Transparent"
+                             ItemContainerStyle="{StaticResource PickerItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ToolTip="{Binding Tip}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Kind}" FontSize="11"
+                                               Foreground="{StaticResource TextDim}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Before}" FontSize="12"
+                                               Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="2" Text="{Binding After}" FontSize="12"
+                                               Foreground="White" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="EmptyLabel" Style="{StaticResource DimLabel}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Text="Type what to find." />
+                </Grid>
+            </Border>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="CountText" DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="470"
+                           TextWrapping="Wrap" VerticalAlignment="Center"
+                           Text="The file is copied beside itself as a backup before it is written." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
+                            Content="Close" Click="Close_Click" />
+                    <Button x:Name="ReplaceBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            Content="Replace" IsEnabled="False" Click="Replace_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

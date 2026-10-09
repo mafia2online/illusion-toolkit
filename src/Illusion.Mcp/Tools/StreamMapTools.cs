@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using Illusion.Formats.StreamMap;
 using ModelContextProtocol.Server;
 
@@ -154,17 +153,9 @@ public sealed class StreamMapTools
             bool written = false;
             if (!dryRun && patch.Patched is not null && applied > 0)
             {
-                // The backup goes down before the file does, and only when there is something to
-                // write — a no-op edit should not churn a backup the user may still need.
-                //
-                // It must also never overwrite an existing one. The name is derived from the target,
-                // so it is the same on every edit: a second pass over the same StreamMap would have
-                // replaced the pristine backup with the ALREADY-PATCHED file, leaving two copies of
-                // modified data and no way back to the original. The first backup is the valuable
-                // one, so it is kept and later passes get a numbered sibling instead.
-                backup = NextBackupPath(filePath);
-                File.WriteAllBytes(backup, original);
-                File.WriteAllBytes(filePath, patch.Patched);
+                // Only when there is something to write — a no-op edit should not churn a backup the user
+                // may still need. The write keeps the first backup and numbers the later ones.
+                backup = StreamMapEditor.WriteWithBackup(filePath, original, patch.Patched);
                 written = true;
             }
 
@@ -196,28 +187,6 @@ public sealed class StreamMapTools
         {
             return ToolResult.Fail(ex);
         }
-    }
-
-    /// <summary>
-    /// A backup path that does not already exist: <c>&lt;name&gt;_old.bin</c> for the first edit,
-    /// then <c>_old.2.bin</c>, <c>_old.3.bin</c> and so on. Never returns a path that would clobber
-    /// an earlier backup — the whole point of the file is to still hold the original after the
-    /// second edit.
-    /// </summary>
-    private static string NextBackupPath(string filePath)
-    {
-        string directory = Path.GetDirectoryName(filePath) ?? ".";
-        string stem = Path.GetFileNameWithoutExtension(filePath) + "_old";
-        string extension = Path.GetExtension(filePath);
-
-        string candidate = Path.Combine(directory, stem + extension);
-        for (int n = 2; File.Exists(candidate); n++)
-        {
-            candidate = Path.Combine(
-                directory,
-                stem + "." + n.ToString(CultureInfo.InvariantCulture) + extension);
-        }
-        return candidate;
     }
 
     /// <summary>Parses the comma-separated field selector. An unknown name is refused rather than

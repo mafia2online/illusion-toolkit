@@ -94,6 +94,11 @@ public partial class ContentBrowser : UserControl
     /// decides what that means (in Library mode: load it onto the stage).</summary>
     public event Action<LibraryEntry>? EntryActivated;
 
+    /// <summary>Asked before an archive is activated - staged by the host AND stepped into here. False leaves
+    /// the pane where it is: the two halves go together, and an archive the host will not stage is not one to
+    /// show the inside of. Null means yes.</summary>
+    public Func<LibraryEntry, bool>? MayActivate { get; set; }
+
     /// <summary>A resource INSIDE the open archive was double-clicked. The host decides what that means —
     /// a texture goes on the stage as a picture; most types have nothing to show yet.</summary>
     public event Action<SdsResource>? ResourceActivated;
@@ -691,6 +696,7 @@ public partial class ContentBrowser : UserControl
             case LibraryEntry entry:
                 // Both halves of opening a resource: the host puts it on the stage, and the pane steps
                 // inside it. One asks what it looks like, the other what it is made of.
+                if (MayActivate?.Invoke(entry) == false) break;
                 EntryActivated?.Invoke(entry);
                 OpenArchive(entry);
                 break;

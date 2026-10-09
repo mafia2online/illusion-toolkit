@@ -75,6 +75,7 @@ public partial class ResourceEditorWindow : Window
         UpdateBridgeUi();
 
         Browser.EntryActivated += StageEntry;
+        Browser.MayActivate = MayStage;
         Browser.ResourceActivated += ShowResource;
         Browser.CollapsedChanged += UpdateBrowserRow;
         Browser.ArchiveEdited += OnArchiveEdited;
@@ -184,9 +185,38 @@ public partial class ResourceEditorWindow : Window
     /// memory can no longer be saved from it. What is saved but not yet packed stays on the build list: that
     /// list is about folders on disk, and staging something else does not make them any less unpacked.
     /// </summary>
+    // Asked by the browser BEFORE it both stages an archive and steps into it. With a Blender session open
+    // another archive is not staged - and then the browser must not step into it either: its tiles would show
+    // the staged car's parts and tuning under the other archive's name.
+    private bool MayStage(LibraryEntry entry)
+    {
+        if (Stage.BridgeEditedCount == 0
+            || string.Equals(_staged?.File.FullName, entry.File.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        PostNotice($"{entry.Name} was not opened: {Stage.BridgeEditedCount} object(s) of {_staged?.Name} are open "
+            + "in Blender, and opening another archive would end that session. Leave it first (Esc).", true);
+        return false;
+    }
+
     private void StageEntry(LibraryEntry entry)
     {
         CommitFocusedField();
+
+        // A double click on a card both stages the archive and steps into it, and staging reloads the scene —
+        // from under a Blender edit session, if one is open: its objects would be left standing for rows that
+        // are gone. The archive already on the stage stays as it is (stepping into it is all that was asked);
+        // another one waits until the session has been ended, as it does when the tools ask for it.
+        if (Stage.BridgeEditedCount > 0)
+        {
+            if (!string.Equals(_staged?.File.FullName, entry.File.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                PostNotice($"{entry.Name} was not opened: {Stage.BridgeEditedCount} object(s) of {_staged?.Name} are open "
+                    + "in Blender, and opening another archive would end that session. Leave it first (Esc).", true);
+            }
+            return;
+        }
 
         // One extracted working copy per archive, shared by every window that opens it. Two editors on the
         // same one are two pictures of the same folder, and whichever saves last wins silently. Say so before
@@ -417,9 +447,12 @@ public partial class ResourceEditorWindow : Window
         {
             if (Stage.BridgeEditedCount > 0) { Stage.EndBridgeEditSession(); return true; }
             if (Stage.SelectedNodes.Count > 0) { Stage.OpenInBlender(); return true; }
+            // Nothing being edited and nothing selected, but Blender still holds objects whose rows left the
+            // scene: the toggle lets them go. (With a selection it sends that instead, which replaces them.)
+            if (Stage.BridgeSessionToEnd) { Stage.EndBridgeEditSession(); return true; }
             return false;   // nothing selected and no session: Tab still means focus traversal
         }
-        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Stage.BridgeEditedCount > 0)
+        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Stage.BridgeSessionToEnd)
         {
             Stage.EndBridgeEditSession();
             return true;
@@ -434,6 +467,7 @@ public partial class ResourceEditorWindow : Window
         ToolShelf.RevertBlenderToggle(Stage.BridgeEditedCount > 0);
         if (Stage.BridgeEditedCount > 0) Stage.EndBridgeEditSession();
         else if (Stage.SelectedNodes.Count > 0) Stage.OpenInBlender();
+        else if (Stage.BridgeSessionToEnd) Stage.EndBridgeEditSession();
     }
 
     private void UpdateBridgeUi()
@@ -497,38 +531,11 @@ public partial class ResourceEditorWindow : Window
         finally { Mouse.OverrideCursor = null; }
     }
 
+    // The Build window comes first, as in the map editor: what differs from the game, per archive, with ticks.
     private void Build_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-        if (Stage.PendingBuildArchives().Count == 0)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Info,
-                Text = "No edits to build — change something on the stage first.",
-            });
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            Viewport.D3DImageHost.BuildReport report = Stage.BuildEdits(createBackup: true);
-            Mouse.OverrideCursor = null;
-            ShowBuildResult(report);
-        }
-        catch (Exception ex)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Error,
-                Heading = "Build failed",
-                Text = ex.Message,
-            });
-        }
-        finally { Mouse.OverrideCursor = null; }
+        if (BuildWindow.Run(this, Stage) is { } report) ShowBuildResult(report);
     }
 
     private void PostNotice(string message, bool isError)
@@ -573,6 +580,16 @@ public partial class ResourceEditorWindow : Window
 
     private void ShowRestoreDialog(FileInfo? preselect)
     {
+        if (Stage.BridgeEditedCount > 0)
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Restore Backup",
+                Icon = DialogIcon.Info,
+                Text = "Leave the Blender edit session first (Esc) — a restore reloads the scene under it.",
+            });
+            return;
+        }
         if (Stage.FrameDocumentNodes().Count == 0)
         {
             AppDialog.Show(this, new DialogOptions

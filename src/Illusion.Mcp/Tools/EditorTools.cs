@@ -225,6 +225,110 @@ public sealed class EditorTools
         }
     }
 
+    [McpServerTool(Name = "mesh_hide_triangles")]
+    [Description("Cut an opening into a mesh WITHOUT rebuilding it: the triangles of the named mesh whose three corners all lie inside a world-space box are hidden on every level of detail (their indices are pointed at one vertex). No vertex is touched, so a stock facade keeps the channels Blender never sees (shadow-map UVs) — use this, not a Blender push, to open a painted door or garage shutter of a stock building. By default it only REPORTS what the box would take (count per LOD and the first triangles with their material and corners); pass apply=true to hide them as one undoable edit. Saved by editor_save, packed by editor_build. A mesh that shares its geometry with other objects is refused unless 'shared' says what to do about them.")]
+    public static async Task<string> MeshHideTriangles(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The mesh, by name or path suffix (scene_find has the names).")] string name,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only triangles whose material name contains this. Omit for any material.")] string? material = null,
+        [Description("Hide the triangles. Default false: report only.")] bool apply = false,
+        [Description("How many of the found triangles to list (0-500). Default 40.")] int sample = 40,
+        [Description("What to do when other objects draw the same geometry (the districts reuse it heavily): omit to refuse, 'own' gives this mesh a copy of the geometry of its own first and cuts it alone, 'all' hides the triangles on every object that draws it.")] string? shared = null)
+    {
+        try
+        {
+            HiddenTrianglesInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.HideTriangles(name, boxMin, boxMax, material, apply, sample, shared, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, hidden = result });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "mesh_materials")]
+    [Description("The material slots of a mesh - which material each part of it is drawn with, and how many triangles that part has. With 'slot' and 'material', that slot is first re-pointed at another material (what the Materials tab's 'assign to slot' does): one undoable edit that touches no geometry and no UV, so the new texture is laid out the way the old one was - look at the result. Further levels of detail follow wherever they used the slot's old material. The material is named exactly as search_materials spells it. A district's winter archive is edited separately. The hull's surface type (what footsteps sound like, where grass tufts grow) is the collision's own and does not change with this.")]
+    public static async Task<string> MeshMaterials(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The mesh: its name, or its path when the name is not unique (scene_find gives both).")] string name,
+        [Description("Slot to re-point. Omit, with 'material', to only list the slots.")] int? slot = null,
+        [Description("Material to point the slot at, by exact name.")] string? material = null)
+    {
+        try
+        {
+            IReadOnlyList<MeshSlotInfo> slots = [];
+            string? refused = await ui.RunAsync(() => editor.MeshMaterials(name, slot, material, out slots));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, changed = slots.Any(s => s.Changed), slots });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "collision_unused_hulls")]
+    [Description("Count the collision hulls no placement references — dead weight a delete, a re-cook or a resize leaves behind in the .col (deleting a placement never removes its hull, so undo can put the file back). For every collision file of the open scene: its placements, its hulls and how many of those are unused. By default it only REPORTS; pass apply=true to remove them, all files as one undoable edit. Placements are never touched, so nothing changes in the game except the archive's size. Saved by editor_save, packed by editor_build; run editor_mirror_winter afterwards so the winter district loses them too.")]
+    public static async Task<string> CollisionUnusedHulls(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Remove the unused hulls. Default false: count only.")] bool apply = false)
+    {
+        try
+        {
+            IReadOnlyList<UnusedHullsInfo> layers = [];
+            string? refused = await ui.RunAsync(() => editor.UnusedHulls(apply, out layers));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new { success = true, unused = layers.Sum(l => l.Unused), removed = apply, layers });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "crash_placements")]
+    [Description("The city_crash props — trees, bushes, lamps, bins, mailboxes — standing inside a world-space box: each one's prop name, placement id, position and whether the other season holds the same placement. scene_find only shows the prop TYPES of that layer ('lampLuxus — 31'); this is how to see where the copies stand. The layer must be in the scene (view_set crash=true). By default it only LISTS; pass delete=true to remove every placement the box (and the name filter) takes, as one undoable edit — a placement linked to the other season is removed there too. city_crash is ONE archive for the whole city: keep the box tight. Saved by editor_save, packed by editor_build.")]
+    public static async Task<string> CrashPlacements(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("Lower corner of the box, world space [x, y, z].")] float[] boxMin,
+        [Description("Upper corner of the box, world space [x, y, z].")] float[] boxMax,
+        [Description("Only props whose name contains this. Omit for every prop.")] string? nameContains = null,
+        [Description("Delete the placements found. Default false: list only.")] bool delete = false,
+        [Description("How many placements to list (the count is always complete; a delete lists everything it removed). Default 200.")] int limit = 200,
+        [Description("The most placements one delete may remove. With more than this in the box the call is refused and nothing is deleted. Default 100.")] int maxDelete = 100)
+    {
+        try
+        {
+            IReadOnlyList<CrashPlacementInfo> placements = [];
+            int total = 0;
+            string? refused = await ui.RunAsync(() =>
+                editor.CrashPlacements(boxMin, boxMax, nameContains, delete, limit, maxDelete, out placements, out total));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new
+                {
+                    success = true,
+                    count = total,
+                    deleted = delete ? total : 0,
+                    // Gone from the OTHER season as well: only the linked ones. An unlinked placement that
+                    // has a twin keeps it.
+                    deletedInOtherSeasonToo = delete ? placements.Count(p => p.BothSeasons && p.SeasonLinked) : 0,
+                    placements,
+                });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
     [McpServerTool(Name = "car_substitute")]
     [Description("Build one car under ANOTHER car's name: pc\\sds\\cars\\<target>.sds is replaced by the source car's model, with the root frame, name table, prefab entry, entity data and buffers keyed by the target's model name. No table is touched — the game lists the target as before and finds the source's shape and tuning in its archive. For trying a car where nothing can be registered (a multiplayer that spawns from a fixed list of names). A timestamped backup of each replaced archive is kept in cars\\backups; the winter _z twin is replaced only where both cars have one. This OVERWRITES game files and the target's working copy: the game must not be running.")]
     public static async Task<string> CarSubstitute(
@@ -332,7 +436,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "scene_find")]
-    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Crash-layer copies (kind CrashInstance: trees, lamps, bins) are searched from the placement table whether or not their rows are expanded in the tree; a copy matches a name by its own label or by its prop's name, and a box by its prop's triangles at the copy's placement. Use it also to learn exact names before scene_select.")]
+    [Description("Find objects in the loaded scene by a fragment of their name, by kind, and/or by a world-space box. Returns name, kind, tree path, position and bounds. With a box, a mesh is returned only when its TRIANGLES reach into the box (not merely its bounds), with TrianglesInBox and the extent of those triangles clipped to the box — the way to check that a volume is free before building in it. Objects without a mesh match a box by their position. Crash-layer copies (kind CrashInstance: trees, lamps, bins) are searched from the placement table whether or not their rows are expanded in the tree; a copy matches a name by its own label or by its prop's name, and a box by its prop's triangles at the copy's placement. Use it also to learn exact names before scene_select. A collision placement (kind 'CollisionInstance', named 'instance N') is found by its HULL: its bounds, vertex and triangle counts are the hull's, and a box is tested against the hull's triangles.")]
     public static async Task<string> Find(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -742,7 +846,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "actor_import")]
-    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). Only actors that place no object of their own scene travel this way: lights, sounds — for one that places an object (a door, a prop) use object_import. Undoable. Find candidates with decode_actors on the source .act file.")]
+    [Description("Copy an actor out of ANOTHER archive's actor pack into the loaded area, with its own copy of its behaviour row — how a district with no lights is given one from a stock interior (a LightEntity). With the resource editor as the target (editor_target) the copy goes into the archive open there instead — how an interior under shops\\ gets its lights. Only actors that place no object of their own scene travel this way: lights, sounds — for one that places an object (a door, a prop) use object_import. Undoable. Find candidates with decode_actors on the source .act file.")]
     public static async Task<string> ImportActor(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -765,7 +869,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "object_import")]
-    [Description("Copy an object out of ANOTHER archive into the loaded area: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
+    [Description("Copy an object out of ANOTHER archive into the loaded area — or, with the resource editor as the target (editor_target), into the archive open there, which is how an interior under shops\\ is furnished: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
     public static async Task<string> ImportObject(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -773,18 +877,19 @@ public sealed class EditorTools
         [Description("Entity name of an actor in the source archive, or the name of a frame object in its scene.")] string name,
         [Description("Name for the copy; must be new in the loaded area (it names both the object and, for an actor, the actor).")] string newName,
         [Description("World position [x, y, z] to put it at: for an actor the point it places its object at (stock props stand on it); for scenery the point the middle of its base lands on.")] float[] position,
-        [Description("Heading in degrees about the vertical axis, replacing the original's rotation. Omit to keep the rotation the original has.")] float? yawDegrees = null,
+        [Description("Heading in degrees about the vertical axis. It replaces the heading the original has in its source archive and keeps its tilt, so what stands upright there stands upright here whichever way its mesh lies in its own space (a chair modelled on its back and stood up by its frame's matrix stays on its legs). 0 is the object as it stands there with its own turn about the vertical taken out — for one that is upright in its own space, no rotation at all. For scenery the middle of the bottom of the object as it stands lands on 'position'. Omit to keep the heading the original has as well.")] float? yawDegrees = null,
         [Description("Collision for scenery: 'auto' (default — the hulls that stand inside its box in the source archive, taken as its own, else its convex hull; for a shelf or a room that includes the hulls of what stood on or in it), 'convex' (a few dozen triangles shrink-wrapping it), 'box', 'mesh' (every render triangle) or 'none'. An actor's object always brings its own.")] string? collision = null,
-        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1)
+        [Description("Which of the things named so in the source, counting from 1 — names repeat (87 bottles called 'lahev' in one bar). Actors of that name come first, then frame objects, the ones that draw before helpers. The result says how many there are (NamedSo). Default 1.")] int occurrence = 1,
+        [Description("Scenery only: a frame of the receiving archive to hang the copy under (name or path suffix) instead of standing it in the scene by itself. An interior's pieces are children of its holder — the '…_translocator_00' frame, which carries them to every place the interior stands at — so furniture for an interior takes the holder here. The copy still lands on 'position' in the archive's own world, and it is not put on the spawn list. Omit for a district.")] string? parent = null)
     {
         try
         {
             if (position is not { Length: 3 }) return ToolResult.Invalid("position takes three numbers");
             ObjectImportOutcome? outcome = null;
             string? refused = await ui.RunAsync(
-                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, out outcome));
+                () => editor.ImportObject(sourceArchive, name, newName, position, yawDegrees, collision, occurrence, parent, out outcome));
             if (refused != null) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, imported = outcome, status = await ui.RunAsync(editor.Status) });
+            return ToolResult.Json(new { success = true, imported = outcome, status = await StatusOf(editor, ui) });
         }
         catch (Exception ex)
         {
@@ -853,6 +958,267 @@ public sealed class EditorTools
         {
             if (await ui.RunAsync(editor.Redo) is { } refused) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zones_at")]
+    [Description("Which LOAD ZONES hold a world point, and which districts the game is asked to keep loaded there. The city is tiled with AREA volumes (in city_univers.sds); while the camera is inside one, the districts its entry in cityareas.bin names stay loaded. A point that lies in no volume asks for nothing - a player teleported there stands in a district that does not stream in. Each zone is tested by its real volume (its planes), not only its box. 'near' also lists the zones that miss the point by up to that many metres, with the distance - which shows the edges of a gap.")]
+    public static async Task<string> ZonesAt(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("World position [x, y, z].")] float[] point,
+        [Description("Also list zones that miss the point by up to this many metres. Default 0: only the zones that hold it.")] float near = 0,
+        [Description("Which copy of city_univers.sds to read: 'base' (default) or a DLC's folder name, e.g. 'cnt_joes_adventures'. A DLC can ship a copy of its own - a different scene with fewer zones; free ride (a multiplayer client that mounts Joe's Adventures included) was measured to use the BASE copy. The result lists the copies there are.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<LoadZoneInfo> zones = [];
+            IReadOnlyList<string> districts = [];
+            IReadOnlyList<string> copies = [];
+            string? refused = await ui.RunAsync(() => editor.ZonesAt(point, near, copy, out zones, out districts, out copies));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new
+                {
+                    success = true,
+                    copy = string.IsNullOrWhiteSpace(copy) ? "base" : copy,
+                    copies,
+                    districtsAskedFor = districts,
+                    inNoZone = !zones.Any(z => z.Inside),
+                    zones,
+                });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zones_map")]
+    [Description("A plan of where a district is asked for by the load zones, as rows of text, north up and x running left to right: '#' a zone holding the point names the district, '+' zones hold the point but none names it, '.' no zone holds the point. Use it to see a gap in the zones before sending players somewhere the stock game never let them stand, and to check a zone_move_face.")]
+    public static async Task<string> ZonesMap(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("District archive name, e.g. 'greenfield'.")] string district,
+        [Description("One corner of the plan [x, y].")] float[] from,
+        [Description("The opposite corner [x, y].")] float[] to,
+        [Description("Step between samples, metres. Default 20.")] float step = 20,
+        [Description("Height the samples are taken at. Default 0.")] float z = 0,
+        [Description("Which copy of city_univers.sds: 'base' (default) or a DLC's folder name. See zones_at.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<string> rows = [];
+            string? refused = await ui.RunAsync(() => editor.ZonesMap(district, from, to, step, z, copy, out rows));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, district, step, z, rows });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_move_face")]
+    [Description("Move one face of a load zone to a world coordinate, to close a gap in the zones or pull a zone back: the plane that bounds the volume on that side and its box are changed together. Only for a volume that stands square to the map and a face square to the axis. By default it only REPORTS what would change; apply=true writes the scene of city_univers.sds to its working copy - then editor_build or archive_build packs that archive (with a backup) and the game sees it. With the map editor open a move in the base copy is one step of its history (editor_undo takes it back); a move in a DLC's copy, or in every copy at once, is not. city_univers.sds is shared by the whole city and by both seasons, so every client of a multiplayer server needs the same file. What loads a district where a player appears is a zone naming TWO districts (zones_at lists them); a zone naming one did not load it by itself when measured in the game. The base copy is the one edited unless 'copy' says otherwise.")]
+    public static async Task<string> ZoneMoveFace(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The zone's name, as zones_at lists it, e.g. 'AREA0019_GREENFIELD'.")] string zone,
+        [Description("Which face: '+x', '-x', '+y', '-y', '+z' or '-z' (the face on that side of the volume).")] string face,
+        [Description("Where that face is to stand, on its axis, in world coordinates.")] float to,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false,
+        [Description("Which copy of city_univers.sds: 'base' (default), a DLC's folder name, or 'all' for every copy that has the zone.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<LoadZoneMoveInfo> results = [];
+            string? refused = await ui.RunAsync(() => editor.ZoneMoveFace(zone, face, to, apply, copy, out results));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, moved = results });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_create")]
+    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). With the map editor open the zone is one step of its history (editor_undo takes it out); zone_delete takes it out later. Refused while an editor holds city_univers (Whole map). Measured in the game: the NAME decides whether the zone loads its districts for a player who appears inside it - two words after the number ('AREA900_DOCK_SOUTH') and it does, one word ('AREA900_DOCK') and it does not, whatever districts it names; the result says which it is ('loadsOnArrival').")]
+    public static async Task<string> ZoneCreate(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The new zone's name, e.g. 'AREA900_SANDISLAND_TUNEL' - two words after the number, or the game will not load the districts for a player who appears inside. No object of the scene may have it.")] string name,
+        [Description("An existing zone to make it like, as zones_at lists it - one that stands square to the map.")] string like,
+        [Description("One corner of the box, world [x, y, z].")] float[] boxMin,
+        [Description("The opposite corner, world [x, y, z].")] float[] boxMax,
+        [Description("The districts it keeps loaded: one or two archive names, e.g. ['sandisland', 'tunel'].")] string[] districts,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? made = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneCreate(name, like, boxMin, boxMax, districts, apply, out made));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made, loadsOnArrival = made?.LoadsOnArrival });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_delete")]
+    [Description("Take a load zone that was ADDED (zone_create, or the editor's New loading zone button - zones_at marks such a zone 'Added') out of city_univers.sds again: its volume, its place in the frame name table and its line in cityareas.bin. A zone the game ships with is refused. By default it only REPORTS; apply=true writes the working copy - then archive_build packs city_univers.sds. With the map editor open it is one step of its history (editor_undo puts the zone back). Refused while an editor holds city_univers (Whole map).")]
+    public static async Task<string> ZoneDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The zone's name, as zones_at lists it.")] string name,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? gone = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneDelete(name, apply, out gone));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = gone });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_places")]
+    [Description("The INTERIORS the game stands in the open city - gun shops, clothes shops, diners, bars, garages, flats - and the places they stand at. Such an interior is an archive under shops\\ that the game loads when the player comes near; one archive can stand at several places (the gun shop at eleven). Without a name: every interior of cityshops.bin with its archive, its actor file and its places as the table has them (marker name, map position). With 'shop': that interior's archive is read too, so each place comes with where its marker stands, how it is turned, the pair of volumes of city_univers that load it there ('LoadZone') and let it go ('UnloadZone'), and whether it was added here ('Added'). A place is added with shop_place_add.")]
+    public static async Task<string> ShopPlaces(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("An interior's name as the table has it ('Gunshop') or its archive's ('gunshop'). Omit for the list of all.")] string? shop = null)
+    {
+        try
+        {
+            IReadOnlyList<ShopInfo> shops = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaces(shop, out shops));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, count = shops.Count, shops });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_place_add")]
+    [Description("Stand an interior of shops\\ at ONE MORE PLACE of the city - the way the game itself stands one gun shop at eleven. Three things are written together: a marker frame in the interior's archive at 'point', a pair of box volumes round it in city_univers.sds (inside the smaller the interior is loaded, outside the wider it is let go), and the rows of cityshops.bin. 'point' is where the interior's OWN ORIGIN goes - see with shop_places how an existing marker stands against its room (the gun shop's is 2.08 m above its floor, in the middle of the room). By default it only REPORTS; apply=true writes the working copies - then archive_build BOTH archives named in the answer. Refused while either archive is open in an editor. Seen in the game (a multiplayer client): a twelfth gun shop added this way loads and its shop menu opens; an interior has no outside, so it is see-through from the street unless it stands inside a building. 'turn' follows the game's own markers, which are turned; a turned place added here has not been looked at in the game yet. Take a place out again with shop_place_delete.")]
+    public static async Task<string> ShopPlaceAdd(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The interior, as shop_places lists it: 'Gunshop', 'Odevy', 'vitohouseb12'...")] string shop,
+        [Description("Where the interior's own origin goes, world [x, y, z].")] float[] point,
+        [Description("Turn about the vertical, degrees, counter-clockwise seen from above. Default 0: as the interior was built.")] float turn = 0,
+        [Description("Half the side of the box inside which the interior is loaded, metres. Default 35.")] float loadHalf = 35,
+        [Description("Half the side of the wider box outside which it is let go. Default 60.")] float unloadHalf = 60,
+        [Description("Half the height of both boxes. Default 23.")] float halfHeight = 23,
+        [Description("Write the change to the working copies. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaceAdd(shop, point, turn, loadHalf, unloadHalf, halfHeight, apply, out place, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_place_delete")]
+    [Description("Take a place of an interior that was ADDED (shop_place_add - shop_places marks it 'Added') out again: its marker in the interior's archive, its pair of volumes in city_univers.sds and its rows in cityshops.bin. A place the game ships with is refused. By default it only REPORTS; apply=true writes the working copies - then archive_build BOTH archives named in the answer. Refused while either archive is open in an editor.")]
+    public static async Task<string> ShopPlaceDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The place's marker, as shop_places lists it, e.g. 'GUNSHOP_translocator_14'.")] string marker,
+        [Description("Write the change to the working copies. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopPlaceDelete(marker, apply, out place, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_create")]
+    [Description("Make an INTERIOR OF YOUR OWN the way the game keeps its shops and flats: a copy of one of the table's interiors under a new name, standing at 'point'. The copy is an archive of its own - shops\\<name>.sds, made from the working copy of 'like', with its marker frames named after the new interior - and gets a row of its own in cityshops.bin, a marker for its first place and a pair of box volumes round it in city_univers.sds. What stands inside is then changed like any other archive (open it, delete, import, push from Blender); more places are added with shop_place_add. Pick a small interior to copy - 'elgreco' is one room with one sector. By default it only REPORTS; apply=true writes the working copies and packs the NEW archive (no file of the game is overwritten) - then archive_build city_univers.sds, named in the answer. Refused while city_univers is open in an editor. Take it out of the table again with shop_delete.")]
+    public static async Task<string> ShopCreate(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The new interior's name: 3 to 31 lower-case letters, digits and '_', starting with a letter. It is its archive's name too.")] string name,
+        [Description("The interior to copy, as shop_places lists it, e.g. 'elgreco'.")] string like,
+        [Description("Where the interior's own origin goes, world [x, y, z] - where the copied interior's marker stood against its room.")] float[] point,
+        [Description("Turn about the vertical, degrees, counter-clockwise seen from above. Default 0.")] float turn = 0,
+        [Description("Half the side of the box inside which the interior is loaded, metres. Default 35.")] float loadHalf = 35,
+        [Description("Half the side of the wider box outside which it is let go. Default 60.")] float unloadHalf = 60,
+        [Description("Half the height of both boxes. Default 23.")] float halfHeight = 23,
+        [Description("Write the change. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopPlaceInfo? place = null;
+            IReadOnlyList<string> archives = [];
+            IReadOnlyList<string> notes = [];
+            string? refused = await ui.RunAsync(() => editor.ShopCreate(name, like, point, turn, loadHalf, unloadHalf, halfHeight, apply, out place, out archives, out notes));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, place, archivesToBuild = archives, notes });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "shop_delete")]
+    [Description("Take an interior that was ADDED (shop_create) out of cityshops.bin again: its row, its area rows and their volumes in city_univers.sds - after which the game never asks for it. Its archive under shops\\ and its working copy are left where they are. An interior the game ships with is refused. By default it only REPORTS; apply=true writes the working copy - then archive_build city_univers.sds. Refused while city_univers is open in an editor.")]
+    public static async Task<string> ShopDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The interior, as shop_places lists it.")] string name,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            ShopInfo? shop = null;
+            IReadOnlyList<string> archives = [];
+            string? refused = await ui.RunAsync(() => editor.ShopDelete(name, apply, out shop, out archives));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, shop, archivesToBuild = archives });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "archive_materials")]
+    [Description("What an archive needs REGISTERED to draw as it was made: the materials its meshes are drawn with, each in full, and which of them the game does not have. A mesh names its materials by hash; the definitions are not in the archive but in the game's material libraries (edit\\materials\\*.mtl) - so an archive handed to someone else (a multiplayer server, another modder) is missing every material that was added or changed here. The archive FILE is read as it stands in pc\\sds (build it first) and the libraries from disk. Each material comes with its 'origin' against the game as it ships - 'added', 'changed' (the game's own, defined differently here), 'shipped', or 'unknown' when there is no list for this edition (the list covers Mafia II, library version 57; not the Definitive Edition) - and with name, hash, flags, shader id and hash, the library's nameless fields, every sampler (texture, whether that texture is INSIDE the archive, sampler states) and every parameter. By default the document holds only the materials that have to travel with the archive; all=true lists every one. 'missing' are hashes the archive names and no library has - those parts draw with no material. 64-bit hashes are hex text, safe for a JavaScript reader. saveTo also writes the document to a file to send along. Nothing of the game is written.")]
+    public static async Task<string> ArchiveMaterials(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The archive: a full path to an .sds, or a path under pc\\sds such as 'cars/shubert_38_custom.sds' or 'city/southport'.")] string archive,
+        [Description("List every material the archive uses, the game's own too. Default false: only added and changed ones.")] bool all = false,
+        [Description("Full path of a .json file to also write the document to. Default: none.")] string? saveTo = null,
+        [Description("Full path of an .mtl file to also write the added and changed materials to, as a material library of their own - the file a multiplayer host loads beside the game's libraries (Mafia II Online: stream/materials/<name>.mtl, names of a-z 0-9 _ only and not default*). An archive that adds nothing writes no file (LibraryMaterials 0). Never inside the game's edit\\materials. Default: none.")] string? libraryTo = null)
+    {
+        try
+        {
+            ArchiveMaterialsInfo? result = null;
+            string? refused = await ui.RunAsync(() => editor.ArchiveMaterials(archive, all, saveTo, libraryTo, out result));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, result });
         }
         catch (Exception ex)
         {

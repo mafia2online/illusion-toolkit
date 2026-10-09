@@ -45,7 +45,9 @@ internal sealed class BridgeSessionController : IDisposable
     private readonly D3DImageHost _host;
     private readonly Dictionary<string, SceneNode> _exported = new();
 
-    private readonly HashSet<ISceneDocument> _topologyWarned = new();
+    // By archive, not by document: the advice is about the archive, and a document held here would be kept
+    // alive, with every buffer it owns, long after its scene had been reloaded.
+    private readonly HashSet<string> _topologyWarned = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Objects whose mesh this session has rebuilt, by payload id — so the map Blender still holds between
@@ -53,6 +55,20 @@ internal sealed class BridgeSessionController : IDisposable
     /// is exported to Blender again, which is when the two are back in step.
     /// </summary>
     private readonly HashSet<string> _rebuiltThisSession = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Objects Blender still holds whose row is no longer in the scene — a stage reloaded, a district streamed
+    /// out, an archive rolled back to a backup, or the object itself taken out by an undo. Nothing in the scene
+    /// stands for them, so a push of one is refused, and refused BY NAME: left to the map alone it would only
+    /// be "not part of this bridge scene", which says neither what happened nor what to do about it. Each is
+    /// kept WITH its row: one that comes back (a redo puts the same row in again) is in the session again.
+    /// Emptied when a selection is sent to Blender again and when the session ends. UI thread, like the map.
+    /// </summary>
+    private readonly Dictionary<string, SceneNode> _unloaded = new(StringComparer.Ordinal);
+
+    private const string UnloadedReason = "it is not in the scene any more — the scene was reloaded or unloaded "
+        + "after it was sent to Blender, or the object was taken out by an undo — so nothing was changed. Bring "
+        + "it back (redo), or send it to Blender again (Tab), then push";
     private BridgeClient? _client;
     private Process? _blender;
     private int _loadCounter;
@@ -77,6 +93,11 @@ internal sealed class BridgeSessionController : IDisposable
     /// <summary>How many objects are currently open in Blender (drives the title indicator).</summary>
     public int ExportedCount => _exported.Count;
 
+    /// <summary>Objects Blender still holds for rows that left the scene (see <see cref="ForgetUnloaded"/>).
+    /// With nothing left being edited they are still a session to END — that is what clears them out of
+    /// Blender — though not one anything can be edited in.</summary>
+    public int UnloadedCount => _unloaded.Count;
+
     /// <summary>Whether the node is part of the set currently open in Blender. While a session is
     /// active, only these nodes are selectable — the edit mode is modal, like Blender's own.
     /// UI thread (the map is mutated on the dispatcher).</summary>
@@ -91,10 +112,11 @@ internal sealed class BridgeSessionController : IDisposable
         bool hadSession = false;
         _host.Dispatcher.Invoke(() =>
         {
-            hadSession = _exported.Count > 0;
+            // Objects whose scene went away are still in Blender, and ending the session is what takes them
+            // out of it — so they count as a session to end, though nothing here is being edited any more.
+            hadSession = _exported.Count > 0 || _unloaded.Count > 0;
             if (!hadSession) return;
-            _exported.Clear();
-            RefreshEditFocus();
+            DropSession();
         });
         if (hadSession)
         {
@@ -118,6 +140,80 @@ internal sealed class BridgeSessionController : IDisposable
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Part of the scene has just been unloaded: the rows this session holds for it are no longer the scene's.
+    ///
+    /// <para>
+    /// They have to leave the session here, and not be found out by the next push. An unloaded frame is still
+    /// in memory and still holds the very mesh Blender was sent, so a push computes against it without a
+    /// complaint — "649 vertices changed" — and then has no row to land on. Seen on a car: the archive was
+    /// opened again in the resource editor while its body was in Blender, the push that followed reported
+    /// "1 object(s) applied", and the scene, the dirty flag and the buffers were exactly as before.
+    /// </para>
+    /// <para>
+    /// Blender is NOT told to drop the objects. What the modeller has done to them since the last push exists
+    /// nowhere else, and it is theirs to copy aside before the selection is sent again.
+    /// </para>
+    /// UI thread — called by whatever unloads, once the rows are out of the tree.
+    /// </summary>
+    internal void ForgetUnloaded()
+    {
+        // First the way back: a row an undo took out and a redo put in again is the very row Blender was sent.
+        List<string> back = [.. _unloaded.Where(e => _host.Tree.IsInScene(e.Value)).Select(e => e.Key)];
+        foreach (string id in back)
+        {
+            _exported[id] = _unloaded[id];
+            _unloaded.Remove(id);
+        }
+
+        List<string> gone = [.. _exported.Where(e => !_host.Tree.IsInScene(e.Value)).Select(e => e.Key)];
+        foreach (string id in gone)
+        {
+            _unloaded[id] = _exported[id];
+            _exported.Remove(id);
+        }
+        if (back.Count == 0 && gone.Count == 0) return;
+        RefreshEditFocus();
+        if (gone.Count == 0) return;
+        Notice?.Invoke($"{gone.Count} object(s) open in Blender are no longer in the scene — it was reloaded or "
+            + "unloaded under the edit session, or they were taken out by an undo"
+            + (_exported.Count == 0 ? "; nothing of the session is left to edit" : "") + ". A push of them is "
+            + "refused and changes nothing. Bring them back (redo), or send the objects to Blender again (Tab): "
+            + "that replaces what Blender holds with the mesh as it is here, so copy anything not yet pushed "
+            + "aside in Blender first.", true);
+    }
+
+    // UI thread: the session is over on this side — nothing is being edited, and nothing is owed a refusal.
+    private void DropSession()
+    {
+        _exported.Clear();
+        _unloaded.Clear();
+        RefreshEditFocus();
+    }
+
+    /// <summary>
+    /// This side's half of a Tab press, with Blender left out: the rows are exported exactly as
+    /// <see cref="RunOpen"/> exports them and become the session, and what Blender would have been sent is
+    /// handed back instead. For the probes, which make the edit themselves and hand it to
+    /// <see cref="ApplyPush"/> — what the session remembers across an open, a push, an end and another open is
+    /// all on this side, and that is what they measure. UI thread.
+    /// </summary>
+    internal List<MeshObjectPayload> OpenDetached(IReadOnlyList<SceneNode> rows)
+    {
+        var sent = new List<MeshObjectPayload>();
+        _exported.Clear();
+        _unloaded.Clear();
+        foreach (SceneNode row in rows)
+        {
+            if (row.Source is not IFrameNode frame || FindDocument(row) is not { } document) continue;
+            if (ExportMesh(new ExportRequest(row, frame, document), out _) is not { } payload) continue;
+            _exported[payload.Id] = row;
+            sent.Add(payload);
+        }
+        RefreshEditFocus();
+        return sent;
     }
 
     // UI thread: every mesh outside the exported set renders ghosted while a bridge scene is open —
@@ -288,7 +384,7 @@ internal sealed class BridgeSessionController : IDisposable
         // The rig's id is the model's id with a "|rig" tail — the model is what carries the bones.
         SceneNode? node = _host.Dispatcher.Invoke(() =>
             _exported.Values.FirstOrDefault(n =>
-                n.Source is IFrameNode f && FindDocument(n) is { } d
+                _host.Tree.IsInScene(n) && n.Source is IFrameNode f && FindDocument(n) is { } d
                 && BridgeMeshExporter.TryExportSkeleton(f, d)?.Id == rig.Id));
         if (node?.Source is not IFrameNode frame)
         {
@@ -356,19 +452,12 @@ internal sealed class BridgeSessionController : IDisposable
                     continue;
                 }
 
-                // The level is the ROW's: selecting "LOD 1" under a car body sends that geometry, and the
-                // push comes back into it. A frame's own row (a single-level mesh) is level 0.
-                MeshObjectPayload? payload = BridgeMeshExporter.TryExport(
-                    request.Node, request.Document, out string? reason, request.Leaf.Lod);
+                MeshObjectPayload? payload = ExportMesh(request, out string? reason);
                 if (payload == null)
                 {
                     skips.Add(request.Leaf.Name + " — " + reason);
                     continue;
                 }
-
-                // Blender is being handed the mesh as it stands now, so whatever it held before is replaced
-                // and the two are back in step — this object's map can be trusted again.
-                _rebuiltThisSession.Remove(payload.Id);
 
                 // A skinned mesh going out WITHOUT its skin. Silence here is what let a broken archive spread:
                 // Blender shows vertex groups either way, and there is no way to tell from inside it whether
@@ -416,8 +505,12 @@ internal sealed class BridgeSessionController : IDisposable
             _host.Dispatcher.Invoke(() =>
             {
                 _exported.Clear(); // each Tab press is a fresh scene generation
+                _unloaded.Clear(); // …and Blender holds nothing of the one before
                 foreach ((string id, SceneNode leaf) in exported)
                     if (readyIds.Contains(id)) _exported[id] = leaf;
+                // Blender can take a minute to come up, and the scene may have been reloaded meanwhile: a row
+                // that is gone by now is not one to open the session on.
+                ForgetUnloaded();
                 RefreshEditFocus();
             });
             if (!ReferenceEquals(_client, client))
@@ -441,6 +534,18 @@ internal sealed class BridgeSessionController : IDisposable
         {
             _busy = false;
         }
+    }
+
+    // One mesh as Blender is given it. The level is the ROW's: selecting "LOD 1" under a car body sends that
+    // geometry, and the push comes back into it. A frame's own row (a single-level mesh) is level 0.
+    private MeshObjectPayload? ExportMesh(ExportRequest request, out string? reason)
+    {
+        MeshObjectPayload? payload = BridgeMeshExporter.TryExport(
+            request.Node, request.Document, out reason, request.Leaf.Lod);
+        // Blender is being handed the mesh as it stands now, so whatever it held before is replaced and the
+        // two are back in step — this object's map can be trusted again.
+        if (payload != null) _rebuiltThisSession.Remove(payload.Id);
+        return payload;
     }
 
     private enum ConnectOutcome
@@ -576,20 +681,20 @@ internal sealed class BridgeSessionController : IDisposable
                 lock (_pushChainLock)
                 {
                     _pushChain = _pushChain.ContinueWith(
-                        _ => ApplyPush(push), CancellationToken.None,
+                        _ => { ApplyPush(push); }, CancellationToken.None,
                         TaskContinuationOptions.None, TaskScheduler.Default);
                 }
                 break;
 
             case SceneLostMessage lost:
-                _host.Dispatcher.Invoke(() => { _exported.Clear(); RefreshEditFocus(); });
+                _host.Dispatcher.Invoke(DropSession);
                 Notice?.Invoke($"Blender dropped the bridge scene ({lost.Reason}). Press Tab to send the selection again.", false);
                 break;
 
             case ByeMessage:
                 CloseClient();
                 SetState(BridgeState.Idle);
-                _host.Dispatcher.Invoke(() => { _exported.Clear(); RefreshEditFocus(); });
+                _host.Dispatcher.Invoke(DropSession);
                 break;
         }
     }
@@ -630,7 +735,10 @@ internal sealed class BridgeSessionController : IDisposable
 
     // Background: parse the pushed container, compute each mesh's count-preserving application, and
     // marshal the scene mutation + undo entry to the UI thread. One push_ack sums up the outcome.
-    private void ApplyPush(PushMessage push)
+    //
+    // The ack it answers Blender with is handed back as well: what was applied and what was refused, object by
+    // object, is the one account of a push that does not have to be read out of a sentence.
+    internal PushAckMessage ApplyPush(PushMessage push)
     {
         var ack = new PushAckMessage();
         _pushGate.Wait();
@@ -645,16 +753,33 @@ internal sealed class BridgeSessionController : IDisposable
             ExchangeContainer container = ExchangeReader.Read(push.File);
             bool staleSession = container.Session != SessionId;
 
-            Dictionary<string, SceneNode> exported =
-                _host.Dispatcher.Invoke(() => new Dictionary<string, SceneNode>(_exported));
+            // The session as it stands NOW — an unload that did not say so is caught here, before anything is
+            // worked out against a row that is no longer the scene's.
+            Dictionary<string, SceneNode> exported = [];
+            HashSet<string> unloaded = [];
+            _host.Dispatcher.Invoke(() =>
+            {
+                ForgetUnloaded();
+                foreach ((string id, SceneNode node) in _exported) exported[id] = node;
+                unloaded.UnionWith(_unloaded.Keys);
+            });
 
-            int touchedTotal = 0;
+            int touchedTotal = 0, rebuilt = 0;
             int collisionSeen = 0, collisionMoved = 0;
             var notesEarly = new List<string>();
-            var skinNotSent = new List<string>();
-            var sharedMeshNotes = new List<string>();
-            var editedBuffers = new List<(string Name, ulong Hash, string Archive)>();
+            // Said only of what lands: each is kept with its row, and a row that leaves before the apply takes
+            // its notes with it.
+            var skinNotSent = new List<(SceneNode Node, string Name)>();
+            var sharedMeshNotes = new List<(SceneNode Node, string Note)>();
+            var editedBuffers = new List<(SceneNode Node, string Name, ulong Hash, string Archive)>();
             var geometry = new List<GeometryEditController.GeometryItem>();
+            // Results already worked out in this push, per frame. Both levels of a mesh are one frame: they
+            // share its quantization lattice, its bounds and — on a model — its pools, and a result is
+            // computed against the frame as it stands. Two computed side by side against the SAME state each
+            // carry "the other level as it was", so applying the second put the first level's edit back
+            // where it came from. The second is therefore computed with the first in place.
+            var perFrame = new Dictionary<FrameObjectSingleMesh, List<BridgeMeshApplier.ApplyResult>>();
+            var levelsMoved = new List<(string Name, FrameObjectSingleMesh Frame)>();
             var transforms = new List<GeometryEditController.TransformItem>();
             var reshapes = new List<ReshapedHull>();
             var newHulls = new List<NewHull>();
@@ -672,6 +797,11 @@ internal sealed class BridgeSessionController : IDisposable
                 if (staleSession)
                 {
                     ack.Skipped.Add(new PushSkip { Id = obj.Id, Reason = "stale session — reopen the objects in Blender" });
+                    continue;
+                }
+                if (unloaded.Contains(obj.Id))
+                {
+                    ack.Skipped.Add(new PushSkip { Id = obj.Id, Reason = UnloadedReason });
                     continue;
                 }
 
@@ -755,9 +885,14 @@ internal sealed class BridgeSessionController : IDisposable
                         continue;
                     }
 
-                    // Back into the level the row stands for — the same one it was exported from.
+                    // Back into the level the row stands for — the same one it was exported from. What this
+                    // push has already decided for the same frame goes in first and comes out again after:
+                    // the batch below applies the results in this order, and undoes them in reverse.
+                    FrameObjectSingleMesh? levelFrame = fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh ofRow } ? ofRow : null;
+                    List<BridgeMeshApplier.ApplyResult> earlier =
+                        levelFrame != null && perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? held) ? held : [];
                     BridgeMeshApplier.ApplyResult? result =
-                        BridgeMeshApplier.TryApply(fn, payload, out string? reason, node.Lod);
+                        BridgeMeshApplier.TryApplyAfter(earlier, fn, payload, out string? reason, node.Lod);
                     if (result == null)
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
@@ -768,24 +903,19 @@ internal sealed class BridgeSessionController : IDisposable
                     // reports "nothing changed" and says nothing — and new geometry silently keeps the skin
                     // of whatever vertex was nearest, which is how a part modelled on the bonnet ends up
                     // riding a door.
-                    if (result.SkinNotSent) skinNotSent.Add(payload.Name);
+                    if (result.SkinNotSent) skinNotSent.Add((node, payload.Name));
 
                     // From here on this object's mesh no longer has the numbering Blender was given.
                     if (result.TopologyRebuilt) _rebuiltThisSession.Add(payload.Id);
 
-                    if (result.TopologyRebuilt && FindDocument(node) is { } doc
-                        && _host.Dispatcher.Invoke(() => _topologyWarned.Add(doc)))
-                    {
-                        notesEarly.Add("topology rebuilt — lower LODs and collision keep the OLD shape "
-                            + "(the object may pop or collide as before at distance). Press Tab again to "
-                            + "re-pull before the next edit: the scene in Blender still maps onto the mesh "
-                            + "as it was, and every push from here on has to rebuild.");
-                    }
-
                     if (!result.Unchanged)
                     {
                         geometry.Add(new GeometryEditController.GeometryItem(node, result));
-                        touchedTotal += result.TouchedVertices;
+                        if (levelFrame != null)
+                        {
+                            if (!perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? sofar)) perFrame[levelFrame] = sofar = [];
+                            sofar.Add(result);
+                        }
 
                         // A frame references its mesh rather than owning it, and the shipped districts reuse
                         // geometry blocks heavily. Reshaping one is reshaping every frame on that block — the
@@ -797,7 +927,7 @@ internal sealed class BridgeSessionController : IDisposable
                                 && sceneDoc.GeometrySharers(single).Count is > 0 and int sharers)
                             {
                                 sharedMeshNotes.Add(
-                                    $"{node.Name}: {sharers} other frame(s) draw this same mesh and changed with it");
+                                    (node, $"{node.Name}: {sharers} other frame(s) draw this same mesh and changed with it"));
                             }
                             // The same bytes live under the same name in every archive that shows this mesh, and
                             // only this one is being rewritten — surveyed after the ack, since it walks the
@@ -807,7 +937,7 @@ internal sealed class BridgeSessionController : IDisposable
                             {
                                 // The buffer of the level that was edited — each level has its own, and naming
                                 // LOD0's here would survey a buffer this push never touched.
-                                editedBuffers.Add((node.Name, block.LOD[result.Lod].VertexBufferRef.Hash,
+                                editedBuffers.Add((node, node.Name, block.LOD[result.Lod].VertexBufferRef.Hash,
                                     owner.SourceArchive.Name));
                             }
                         }
@@ -815,11 +945,23 @@ internal sealed class BridgeSessionController : IDisposable
 
                     // Object moved in Blender's Object Mode → re-localize against the CURRENT
                     // parent and ride the same undoable batch.
+                    //
+                    // The FRAME is what stands somewhere, and its first level speaks for it. A coarser level
+                    // is a second Blender object of the same frame: left where it was while the first one
+                    // moved, it still carries the old matrix, and taken at its word it moved the frame back
+                    // on the very next push — and forth again on the one after.
                     if (!MatrixNear(payload.World, fn.WorldTransform))
                     {
-                        transforms.Add(new GeometryEditController.TransformItem(
-                            node, fn.LocalTransform,
-                            TransformMath.ComputeLocalTransform(payload.World, fn.ParentWorldTransform)));
+                        if (node.Lod == 0)
+                        {
+                            transforms.Add(new GeometryEditController.TransformItem(
+                                node, fn.LocalTransform,
+                                TransformMath.ComputeLocalTransform(payload.World, fn.ParentWorldTransform)));
+                        }
+                        else if (levelFrame != null)
+                        {
+                            levelsMoved.Add((payload.Name, levelFrame));
+                        }
                     }
 
                     ack.Applied.Add(payload.Id);
@@ -864,6 +1006,18 @@ internal sealed class BridgeSessionController : IDisposable
                             Id = id,
                             Reason = "a skinned model is deleted in the toolkit, not by disappearing from "
                                 + "Blender — its rig and everything attached to its bones would go with it",
+                        });
+                        continue;
+                    }
+                    // A coarser LEVEL is not an object. Its row stands for the same frame as the first
+                    // level's, so deleting "it" deleted the whole mesh, near level and all.
+                    if (node.Lod > 0)
+                    {
+                        ack.Skipped.Add(new PushSkip
+                        {
+                            Id = id,
+                            Reason = "a level of detail cannot be deleted on its own — the mesh keeps the level "
+                                + "it had; delete the object itself (its first level) to remove it",
                         });
                         continue;
                     }
@@ -931,8 +1085,43 @@ internal sealed class BridgeSessionController : IDisposable
                 foreach (FileInfo archive in authored.TouchedArchives.Values) _host.Persistence.MarkArchiveModified(archive);
                 _host.MaterialEditing.ReloadTextureFiles(authored.Rewritten.Select(r => r.Texture));
 
+                // What was worked out above lands only on rows that are still in the scene. One can leave between
+                // the two — the push computes on its own thread while the window stays live — and one that has
+                // comes back OFF the applied list and is reported. Dropped quietly here, it left the push saying
+                // "applied" over a scene it had not touched.
+                foreach (SceneNode left in geometry.Select(g => g.Node).Concat(transforms.Select(t => t.Node))
+                             .Where(n => !_host.Tree.IsInScene(n)).Distinct().ToList())
+                {
+                    TakeBack(ack, exported, left, UnloadedReason);
+                }
                 geometry.RemoveAll(g => !_host.Tree.IsInScene(g.Node));
                 transforms.RemoveAll(t => !_host.Tree.IsInScene(t.Node));
+                skinNotSent.RemoveAll(s => !_host.Tree.IsInScene(s.Node));
+                sharedMeshNotes.RemoveAll(s => !_host.Tree.IsInScene(s.Node));
+                editedBuffers.RemoveAll(b => !_host.Tree.IsInScene(b.Node));
+
+                // Counted and said of what lands, for the same reason.
+                touchedTotal = geometry.Sum(g => g.Result.TouchedVertices);
+                bool firstRebuild = false;
+                foreach (GeometryEditController.GeometryItem item in geometry)
+                {
+                    if (!item.Result.TopologyRebuilt) continue;
+                    rebuilt++;
+                    if (FindDocument(item.Node) is { } doc && _topologyWarned.Add(doc.SourceArchive.FullName)) firstRebuild = true;
+                }
+                // Said on EVERY rebuild, in full the first time an archive sees one: a push that rebuilt and did
+                // not say so read as one that had only moved vertices.
+                if (firstRebuild)
+                {
+                    notesEarly.Add("topology rebuilt — lower LODs and collision keep the OLD shape "
+                        + "(the object may pop or collide as before at distance). Press Tab again to "
+                        + "re-pull before the next edit: the scene in Blender still maps onto the mesh "
+                        + "as it was, and every push from here on has to rebuild.");
+                }
+                else if (rebuilt > 0)
+                {
+                    notesEarly.Add("topology rebuilt — press Tab again to re-pull before the next edit.");
+                }
                 List<SceneNode> liveDeletes = deleteNodes.Where(_host.Tree.IsInScene).ToList();
                 INodeEdit? delete = liveDeletes.Count > 0 ? _host.Editing.BuildDeleteEdit(liveDeletes) : null;
                 if (delete != null) deletedApplied = liveDeletes.Count;
@@ -969,7 +1158,11 @@ internal sealed class BridgeSessionController : IDisposable
                 foreach (ReshapedHull hull in reshapes)
                 {
                     if (!_host.Tree.IsInScene(hull.Node) || hull.Node.Parent is not { } layer
-                        || layer.Source is not CollisionDocumentAdapter doc) continue;
+                        || layer.Source is not CollisionDocumentAdapter doc)
+                    {
+                        TakeBack(ack, exported, hull.Node, UnloadedReason);
+                        continue;
+                    }
                     ulong oldHash = hull.Placement.Instance.Hash;
                     int sharing = doc.Collision.Instances.Count(i => i.Hash == oldHash) - 1;
                     if (sharing > 0)
@@ -987,7 +1180,11 @@ internal sealed class BridgeSessionController : IDisposable
                     SceneNode? layer = _exported.Values
                         .Select(n => n.Parent)
                         .FirstOrDefault(p => p?.Source is CollisionDocumentAdapter && _host.Tree.IsInScene(p));
-                    if (layer?.Source is not CollisionDocumentAdapter doc) continue;
+                    if (layer?.Source is not CollisionDocumentAdapter doc)
+                    {
+                        TakeBack(ack, created.Id, "the .col it was to join is no longer in the scene");
+                        continue;
+                    }
 
                     var placement = new CollisionInstance
                     {
@@ -999,7 +1196,11 @@ internal sealed class BridgeSessionController : IDisposable
                     };
                     IReadOnlyList<IEditAction>? edits = _host.CollisionEditing.BuildCreateHull(
                         doc, layer, created.Minted.Added, placement, $"col_{created.Minted.Hash:X8}_new");
-                    if (edits == null) continue;
+                    if (edits == null)
+                    {
+                        TakeBack(ack, created.Id, "the new hull could not be placed in its .col");
+                        continue;
+                    }
                     collisionEdits.AddRange(edits);
                     createdHulls++;
                 }
@@ -1043,9 +1244,17 @@ internal sealed class BridgeSessionController : IDisposable
             });
 
             var notes = new List<string>(notesEarly);
+            // A coarser level moved by itself: said, since nothing happened. (Moved together with the first
+            // level it simply follows the frame, and there is nothing to say.)
+            foreach ((string name, FrameObjectSingleMesh frame) in levelsMoved)
+            {
+                if (transforms.Any(t => t.Node.Source is FrameNodeAdapter { Frame: FrameObjectSingleMesh moved } && ReferenceEquals(moved, frame))) continue;
+                notes.Add($"{name}: a coarser level was moved on its own — a mesh is placed by its first level, "
+                    + "so the object stayed where it is. Move the LOD 0 object to move it.");
+            }
             if (skinNotSent.Count > 0)
             {
-                notes.Add($"{string.Join(", ", skinNotSent.Take(3))}: no vertex weights came back — every "
+                notes.Add($"{string.Join(", ", skinNotSent.Select(s => s.Name).Take(3))}: no vertex weights came back — every "
                     + "vertex group was ignored, and geometry with no group keeps the skin of the nearest "
                     + "old vertex. Blender only sends them when the mesh is PARENTED to the rig (or carries "
                     + "its Armature modifier) and each group is named exactly after a bone.");
@@ -1064,7 +1273,7 @@ internal sealed class BridgeSessionController : IDisposable
             // placements — and a reshape only ever moves THIS placement onto the new hull. Saying so is the
             // difference between "the other forty-nine did not take" and "the other forty-nine are untouched".
             foreach (string shared in sharedHullNotes) notes.Add(shared);
-            foreach (string shared in sharedMeshNotes) notes.Add(shared);
+            foreach ((SceneNode _, string shared) in sharedMeshNotes) notes.Add(shared);
             // A crash prop has one shape and tens of thousands of copies, spread over the whole city by the
             // .tra table. Reshaping it reshapes every one of them, in the season whose archive is open.
             foreach ((string name, int copies) in crashCopyNotes)
@@ -1094,7 +1303,7 @@ internal sealed class BridgeSessionController : IDisposable
                 + (touchedTotal > 0 ? $", {touchedTotal} vertices changed" : "")
                 + "." + (notes.Count > 0 ? "\n" + string.Join("\n", notes) : ""), refused);
 
-            WarnAboutOtherArchives(editedBuffers);
+            WarnAboutOtherArchives([.. editedBuffers.Select(b => (b.Name, b.Hash, b.Archive))]);
         }
         catch (Exception ex)
         {
@@ -1123,6 +1332,22 @@ internal sealed class BridgeSessionController : IDisposable
             if (authored != null) ack.Materials.AddRange(authored.Resolved);
             try { _client?.Send(ack); }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
+        }
+        return ack;
+    }
+
+    // An object counted as applied while its result was being worked out, which then had nowhere to land.
+    private static void TakeBack(PushAckMessage ack, string id, string reason)
+    {
+        ack.Applied.Remove(id);
+        ack.Skipped.Add(new PushSkip { Id = id, Reason = reason });
+    }
+
+    private static void TakeBack(PushAckMessage ack, Dictionary<string, SceneNode> exported, SceneNode node, string reason)
+    {
+        foreach ((string id, SceneNode held) in exported)
+        {
+            if (ReferenceEquals(held, node)) TakeBack(ack, id, reason);
         }
     }
 
@@ -1398,7 +1623,7 @@ internal sealed class BridgeSessionController : IDisposable
         if (_client == null) return; // already closed deliberately
         CloseClient();
         SetState(BridgeState.Idle);
-        _host.Dispatcher.Invoke(() => { _exported.Clear(); RefreshEditFocus(); });
+        _host.Dispatcher.Invoke(DropSession);
         Notice?.Invoke(cause == null
             ? "Blender closed the bridge connection."
             : "Blender disconnected: " + cause.Message, false);

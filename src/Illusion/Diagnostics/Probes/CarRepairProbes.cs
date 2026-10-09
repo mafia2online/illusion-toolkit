@@ -181,6 +181,118 @@ internal static class CarRepairProbes
         finally { File.WriteAllText(outFile, sb.ToString()); }
     }
 
+    /// <summary>
+    /// Every channel of one level of a car, as text: one line per vertex (position, normal, the three UV sets,
+    /// Color0, the damage group, the skin by bone name) and one per triangle (its corners and the material slot it is drawn in). Reads
+    /// only. It exists because Blender is shown the first UV set alone, so what a push left in the other two on
+    /// the vertices it invented cannot be looked at from there.
+    /// Output: %TEMP%\illusion_car_vertices_&lt;car&gt;_lod&lt;n&gt;.txt
+    /// </summary>
+    internal static void RunVerticesProbe(string car, int lod)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), $"illusion_car_vertices_{car}_lod{lod}.txt");
+        var sb = new StringBuilder();
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            var target = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", car + ".sds"));
+            if (!target.Exists) { sb.AppendLine("no such archive: " + target.FullName); return; }
+            SdsMeshLoader.EnsureExtracted(target);
+            FrameObjectModel model = ModelOf(target);
+            DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, lod);
+            if (mesh == null) { sb.AppendLine($"no LOD {lod} geometry"); return; }
+            Vertex[] verts = VertexTranslator.DecompressBuffer(
+                mesh.RawVertexData, mesh.NumVerts, mesh.Declaration,
+                mesh.DecompressionOffset, mesh.DecompressionFactor);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            // The skin, by bone NAME: the ids in the buffer index a pool of the face group that draws the vertex.
+            byte[]? bones = SdsMeshLoader.GlobalBoneIds(model, mesh.Lod);
+            string[] names;
+            try { names = [.. (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "?")]; }
+            catch (Exception) { names = []; }
+            string Skin(int v)
+            {
+                if (bones == null || mesh.BoneWeights == null) return "-";
+                var parts = new List<string>();
+                for (int k = 0; k < 4; k++)
+                {
+                    float weight = mesh.BoneWeights[(v * 4) + k];
+                    if (weight <= 0f) continue;
+                    int id = bones[(v * 4) + k];
+                    parts.Add(string.Create(inv, $"{(id < names.Length ? names[id] : "#" + id)}:{weight:F3}"));
+                }
+                return parts.Count == 0 ? "-" : string.Join("|", parts);
+            }
+            sb.AppendLine(inv, $"# {car} lod {mesh.Lod}: {verts.Length} vertices, {mesh.Indices.Length / 3} triangles, declaration {mesh.Declaration}");
+            for (int v = 0; v < verts.Length; v++)
+            {
+                Vertex x = verts[v];
+                sb.AppendLine(inv, $"v {x.Position.X:F4} {x.Position.Y:F4} {x.Position.Z:F4} {x.Normal.X:F3} {x.Normal.Y:F3} {x.Normal.Z:F3} "
+                    + $"{(float)x.UVs[0].X:F5} {(float)x.UVs[0].Y:F5} {(float)x.UVs[1].X:F5} {(float)x.UVs[1].Y:F5} {(float)x.UVs[2].X:F5} {(float)x.UVs[2].Y:F5} "
+                    + $"{x.Color0[0]} {x.Color0[1]} {x.Color0[2]} {x.Color0[3]} {x.DamageGroup} {Skin(v)}");
+            }
+            MaterialStruct[] slots = model.Material?.Materials is { } all && mesh.Lod < all.Count ? all[mesh.Lod] ?? [] : [];
+            for (int slot = 0; slot < slots.Length; slot++)
+            {
+                sb.AppendLine(inv, $"m {slot} 0x{slots[slot].MaterialHash:X16} {slots[slot].NumFaces}");
+                int end = slots[slot].StartIndex + slots[slot].NumFaces * 3;
+                for (int i = slots[slot].StartIndex; i + 2 < end && i + 2 < mesh.Indices.Length; i += 3)
+                {
+                    sb.AppendLine(inv, $"t {mesh.Indices[i]} {mesh.Indices[i + 1]} {mesh.Indices[i + 2]} {slot}");
+                }
+            }
+        }
+        catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
+        finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    /// <summary>
+    /// How the vertex codec turns a float bone weight into the byte the file holds: 255 vertices of a car are
+    /// given the weights (b + f) / 255 and what is left of 1, packed and read back. Reads only - nothing is
+    /// written to the game. Output: %TEMP%\illusion_weight_lattice.txt
+    /// </summary>
+    internal static void RunWeightLatticeProbe(string car)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_weight_lattice.txt");
+        var sb = new StringBuilder();
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            var target = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", car + ".sds"));
+            if (!target.Exists) { sb.AppendLine("no such archive: " + target.FullName); return; }
+            SdsMeshLoader.EnsureExtracted(target);
+            DecodedMesh? mesh = SdsMeshLoader.DecodeLod(ModelOf(target), 0);
+            if (mesh == null || mesh.NumVerts < 256) { sb.AppendLine("no LOD 0 of 256 vertices"); return; }
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            foreach (float part in new[] { 0f, 0.25f, 0.49f, 0.51f, 0.75f, 0.99f })
+            {
+                Vertex[] verts = VertexTranslator.DecompressBuffer(
+                    mesh.RawVertexData, mesh.NumVerts, mesh.Declaration, mesh.DecompressionOffset, mesh.DecompressionFactor);
+                for (int b = 0; b < 255; b++)
+                {
+                    verts[b].BoneWeights = [(b + part) / 255f, 1f - ((b + part) / 255f), 0f, 0f];
+                }
+                byte[] packed = VertexCompressor.CompressBuffer(
+                    mesh.RawVertexData, verts, mesh.Declaration, mesh.DecompressionOffset, mesh.DecompressionFactor);
+                Vertex[] back = VertexTranslator.DecompressBuffer(
+                    packed, mesh.NumVerts, mesh.Declaration, mesh.DecompressionOffset, mesh.DecompressionFactor);
+                int same = 0, up = 0, down = 0, short1 = 0;
+                for (int b = 0; b < 255; b++)
+                {
+                    int first = (int)MathF.Round(back[b].BoneWeights[0] * 255f);
+                    int second = (int)MathF.Round(back[b].BoneWeights[1] * 255f);
+                    if (first == b) same++;
+                    else if (first == b + 1) up++;
+                    else down++;
+                    if (first + second != 255) short1++;
+                }
+                sb.AppendLine(inv, $"weight (b + {part:F2}) / 255: stored as b on {same}, as b + 1 on {up}, otherwise on {down}; the pair does not add up to 255 on {short1}");
+            }
+        }
+        catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
+        finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
     private static void Paint(Vertex vertex, byte r, byte g, byte b)
     {
         vertex.Color0[0] = r;

@@ -144,7 +144,7 @@ public class IMaterialSampler
     public IMaterialSampler(IMaterialSampler OtherSampler)
     {
         ID = OtherSampler.ID;
-        SamplerStates = OtherSampler.SamplerStates;
+        SamplerStates = [.. OtherSampler.SamplerStates ?? []];
     }
 
     public virtual MaterialVersion GetVersion()

@@ -264,19 +264,40 @@ internal sealed class MaterialEditController
     public bool AssignSlotMaterial(SceneNode node, int slotIndex, ulong newHash)
     {
         if (node.Source is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return false;
+        if (SlotAssignObstacle(node) != null) return false;
         ulong? before = editor.GetSlotMaterial(slotIndex);
         if (before == null) return false;
         if (before == newHash) return true;
+        IReadOnlyList<ulong[]> tableBefore = editor.GetSlotTable();
         if (!editor.SetSlotMaterial(slotIndex, newHash)) return false;
-        _host.Editing.History.Push(new SlotEdit(this, node, slotIndex, before.Value, newHash));
+        _host.Editing.History.Push(new SlotEdit(this, node, slotIndex, before.Value, newHash, tableBefore, editor.GetSlotTable()));
         AfterSlotChanged(node, slotIndex, newHash);
         return true;
     }
 
-    private void ApplySlot(SceneNode node, int slotIndex, ulong hash)
+    // The whole table goes back, every level of it: the re-point mirrored itself into further levels by the
+    // slot's old hash, and the same rule run the other way turns a level that had two materials into one.
+    /// <summary>
+    /// Why a slot of this node's mesh cannot be re-pointed, or null. A slot is a row of the mesh's material
+    /// block, and a block can serve several objects: all of them would change in the file and in the game,
+    /// while the viewport redraws - and the caller is told about - one.
+    /// </summary>
+    public string? SlotAssignObstacle(SceneNode node)
+    {
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter
+            || adapter.Document.MaterialSharers(mesh) is not { Count: > 0 } sharers)
+        {
+            return null;
+        }
+        return $"'{node.Name}' draws with a material block {sharers.Count} other object(s) use too ("
+            + string.Join(", ", sharers.Take(5).Select(s => s.Name.ToString())) + (sharers.Count > 5 ? ", …" : "")
+            + ") — re-pointing the slot would change them all";
+    }
+
+    private void ApplySlot(SceneNode node, int slotIndex, ulong hash, IReadOnlyList<ulong[]> table)
     {
         if (node.Source is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return;
-        if (editor.SetSlotMaterial(slotIndex, hash)) AfterSlotChanged(node, slotIndex, hash);
+        if (editor.SetSlotTable(table) || editor.SetSlotMaterial(slotIndex, hash)) AfterSlotChanged(node, slotIndex, hash);
     }
 
     // ── Shared after-effects ──
@@ -545,18 +566,23 @@ internal sealed class MaterialEditController
         private readonly int _slotIndex;
         private readonly ulong _before;
         private readonly ulong _after;
+        private readonly IReadOnlyList<ulong[]> _tableBefore;
+        private readonly IReadOnlyList<ulong[]> _tableAfter;
 
-        public SlotEdit(MaterialEditController owner, SceneNode node, int slotIndex, ulong before, ulong after)
+        public SlotEdit(MaterialEditController owner, SceneNode node, int slotIndex, ulong before, ulong after,
+            IReadOnlyList<ulong[]> tableBefore, IReadOnlyList<ulong[]> tableAfter)
         {
             _owner = owner;
             _node = node;
             _slotIndex = slotIndex;
             _before = before;
             _after = after;
+            _tableBefore = tableBefore;
+            _tableAfter = tableAfter;
         }
 
         public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
-        public void Undo() => _owner.ApplySlot(_node, _slotIndex, _before);
-        public void Redo() => _owner.ApplySlot(_node, _slotIndex, _after);
+        public void Undo() => _owner.ApplySlot(_node, _slotIndex, _before, _tableBefore);
+        public void Redo() => _owner.ApplySlot(_node, _slotIndex, _after, _tableAfter);
     }
 }

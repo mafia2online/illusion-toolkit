@@ -385,6 +385,44 @@ internal static class MaterialEditorProbes
         check("out-of-range slot is refused", !editor.SetSlotMaterial(9999, other), "");
         editor.SetSlotMaterial(0, original);
         check("slot restored", editor.GetSlotMaterial(0) == original, "");
+
+        // A re-point mirrors itself into further levels by the slot's old material, and that cannot be run
+        // backwards: a level with slots A and B is B and B after "A to B", and "B to A" makes it A and A. So an
+        // undo puts the table back. Tried on a mesh whose further level holds the first level's material and
+        // another one beside it.
+        foreach (FrameObjectSingleMesh mesh in fr.FrameObjects.Values.OfType<FrameObjectSingleMesh>())
+        {
+            if (doc.Node(mesh) is not IMaterialSlotEditor levels) continue;
+            IReadOnlyList<ulong[]> shipped = levels.GetSlotTable();
+            if (shipped.Count < 2 || shipped[0].Length == 0) continue;
+            ulong a = shipped[0][0];
+            // Such a level is made where the district ships none: its first two slots are given the first
+            // level's material and another one. The shipped table goes back at the end.
+            int at = Enumerable.Range(1, shipped.Count - 1).FirstOrDefault(l => shipped[l].Length >= 2, -1);
+            if (at < 0) continue;
+            ulong b = a ^ 0x5555UL;
+            ulong[][] made = [.. shipped.Select(l => (ulong[])l.Clone())];
+            (made[at][0], made[at][1]) = (a, b);
+            if (!levels.SetSlotTable(made)) continue;
+            IReadOnlyList<ulong[]> before = levels.GetSlotTable();
+            ulong[] further = before[at];
+
+            static bool Same(IReadOnlyList<ulong[]> x, IReadOnlyList<ulong[]> y) => x.Count == y.Count && x.Zip(y).All(p => p.First.SequenceEqual(p.Second));
+            levels.SetSlotMaterial(0, b);
+            IReadOnlyList<ulong[]> after = levels.GetSlotTable();
+            levels.SetSlotMaterial(0, a);
+            bool backwardsLoses = !Same(levels.GetSlotTable(), before);
+            check("a re-point run backwards does not give the further level its two materials back", backwardsLoses,
+                $"{mesh.Name}: a further level bound {further.Distinct().Count()} material(s), {levels.GetSlotTable().Skip(1).First(l => l.Length == further.Length).Distinct().Count()} after");
+            check("the table put back does", levels.SetSlotTable(after) && Same(levels.GetSlotTable(), after)
+                && levels.SetSlotTable(before) && Same(levels.GetSlotTable(), before), "");
+            check("a table of another shape is refused and changes nothing", !levels.SetSlotTable([.. before.Skip(1)]) && Same(levels.GetSlotTable(), before), "");
+            check("the shipped table is back", levels.SetSlotTable(shipped) && Same(levels.GetSlotTable(), shipped), "");
+            return;
+        }
+        var shapes = fr.FrameObjects.Values.OfType<FrameObjectSingleMesh>().Select(m => doc.Node(m) is IMaterialSlotEditor e ? e.GetSlotTable() : [])
+            .GroupBy(t => string.Join("/", t.Select(l => l.Length))).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} x{g.Count()}");
+        sb.AppendLine("(no mesh with a further level of two slots - the table check is skipped; slot counts per level: " + string.Join(", ", shapes) + ")");
     }
 
     // The FULL assign path exactly as the user drives it: editor opened from a mesh tile (ShowMaterial
