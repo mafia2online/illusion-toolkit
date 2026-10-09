@@ -853,6 +853,26 @@ internal static class ProbeRunner
                     args.Length >= 4 ? args[3] : "both",
                     args.Contains("write"));
                 return true;
+            // Every channel of one level of a car as text - the UV sets past the first, Color0 and the damage
+            // group are not shown to Blender, so this is where a push's fill of them is looked at. Reads only.
+            // Args: <car> [lod]. Output: %TEMP%\illusion_car_vertices_<car>_lod<n>.txt
+            case "--probe-car-vertices":
+                CarRepairProbes.RunVerticesProbe(
+                    args.Length >= 2 ? args[1] : "shubert_38",
+                    args.Length >= 3 && int.TryParse(args[2], out int dumpLod) ? dumpLod : 0);
+                return true;
+            // The car workshop headless: car_check finds nothing on a car as shipped, and a material variant is
+            // its source in everything but the name and stays its own. Nothing is written.
+            // Optional arg = the car. Output: %TEMP%\illusion_car_workshop.txt
+            case "--probe-car-workshop":
+                CarWorkshopProbes.RunProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // How the vertex codec turns a float bone weight into the stored byte (rounds, or cuts off), and whether
+            // a pair that adds up to 1 still adds up to 255 in the file. Reads only.
+            // Args: [car]. Output: %TEMP%\illusion_weight_lattice.txt
+            case "--probe-weight-lattice":
+                CarRepairProbes.RunWeightLatticeProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // One-factor experiment on a car: change exactly one channel, repack, and let the game answer
             // what it controls. uv0/uv1/color0/colorred/colorwhite/bounds. Writes only with "write".
             // Args: <car> <channel> [write]. Output: %TEMP%\illusion_car_mutate.txt
@@ -1006,6 +1026,11 @@ internal static class ProbeRunner
             // What the PREFAB containers hold, game-wide: which init-data types exist, how many, how big, and
             // which folders carry them — plus one car's container in full. Optional arg = the car.
             // Output: %TEMP%\illusion_prefabs.txt
+            // Which materials a car's PREFAB tells the game to colour, dirty and deform, held against the materials
+            // its meshes name. Args: cars. Output: %TEMP%\illusion_car_paint.txt
+            case "--probe-car-paint":
+                CarPaintProbes.Run(args.Skip(1).ToArray());
+                return true;
             // What a car's PREFAB says about its lights, for several cars side by side (default: the police
             // Smith, the civilian one and the Shubert 38). Output: %TEMP%\illusion_car_lights.txt
             case "--probe-car-lights":
