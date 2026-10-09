@@ -297,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 86 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 92 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -306,7 +306,7 @@ map editor itself.
 | **Archives** | `list_sds_files`, `open_sds_file`, `get_sds_header`, `list_resources`, `get_resource_info`, `search_resources`, `extract_resource`, `get_sds_stats`, `close_sds_file` |
 | **Decoding** | `decode_resource` (extract + decode in one call), `decode_actors`, `decode_frame_resource`, `decode_itemdesc`, `decode_collisions` |
 | **Scripts** | `decompile_script_resource`, `decompile_lua` - the game's compiled Lua back to source |
-| **Materials** | `open_mtl_file`, `list_mtl_files`, `get_material_info`, `search_materials` |
+| **Materials** | `open_mtl_file`, `list_mtl_files`, `get_material_info`, `search_materials`, `archive_materials` |
 | **Textures** | `list_sds_textures`, `inspect_sds_texture`, `inspect_dds_file`, `inspect_dds_bytes` |
 | **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
 | **Stream map** | `parse_stream_map`, `edit_stream_map` |
@@ -314,6 +314,7 @@ map editor itself.
 | **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games`, `ping` |
 | **Editor** | `editor_status`, `editor_list_areas`, `editor_open_area`, `editor_save`, `editor_build`, `editor_mirror_winter`, `editor_undo`, `editor_redo`, `editor_notices` |
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
+| **Interiors** | `shop_places`, `shop_place_add`, `shop_place_delete`, `shop_create`, `shop_delete` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
 | **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create`, `zone_delete` |
@@ -349,6 +350,20 @@ spot: a player who appears inside a zone named `AREA901_FOO_BAR` gets the distri
 district in the table or two - and inside one named `AREA902_FOOXBAR` he does not. With the map
 editor open the new zone is a step of its history; `zone_delete` takes an added zone out again (a
 zone the game ships with is refused). Zones are made in the base game's `city_univers` only.
+
+**Interiors.** The game stands a shop, a diner or a flat at a place through three things: a marker
+frame inside the interior's archive under `shops\`, a pair of box volumes in `city_univers` that
+load it and let it go, and rows of `missions\SHOPS\cityshops.bin`. `shop_places` lists the
+interiors and the places each stands at, `shop_place_add` stands one at another place and
+`shop_place_delete` takes a place out. `shop_create` makes a new interior as a copy of an existing
+one under its own name with its own row, and `shop_delete` removes it. A save is all or nothing.
+`object_import` takes a parent frame and, like `actor_import`, works on the archive open in the
+resource editor, which is how an interior is furnished and lit.
+
+`archive_materials` tells each material an archive is drawn with as the game's own, changed or
+added, with its definition in full and which of its textures the archive holds. The game's own are
+an embedded list of the materials it ships with, so the answer is the same on any install.
+`libraryTo` writes the added and changed ones as a material library of their own.
 
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and
