@@ -32,10 +32,11 @@ namespace Illusion.Viewport;
 /// <see cref="ScenePersistence"/> (save/build tracking). This class wires them to the base control and
 /// exposes the single facade the UI binds to, including the transform-gizmo host (<see cref="ITransformGizmoHost"/>).
 /// </summary>
-public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
+public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGizmoHost
 {
     internal readonly SceneTree Tree;
     internal readonly ViewportCatalogs Catalogs;
+    internal readonly ZoneEditController ZoneEditing;
     internal readonly DistrictStreamer Streamer;
     internal readonly SelectionController Selection;
     internal readonly TransformEditController Editing;
@@ -57,6 +58,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     {
         Tree = new SceneTree();
         Catalogs = new ViewportCatalogs(this);
+        ZoneEditing = new ZoneEditController(this);
         Streamer = new DistrictStreamer(this);
         Selection = new SelectionController(this);
         Editing = new TransformEditController(this);
@@ -242,10 +244,17 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public EditHistory History => Editing.History;
 
     /// <summary>Reverts the last transform edit (gizmo drag or numeric field).</summary>
-    public void Undo() => Unwind(Editing.History.Undo, "Undo");
+    public void Undo() => TryUndo();
 
     /// <summary>Re-applies the last undone transform edit.</summary>
-    public void Redo() => Unwind(Editing.History.Redo, "Redo");
+    public void Redo() => TryRedo();
+
+    /// <summary>Undo, saying why when the step could not be taken (null: it was). The step then stays in the
+    /// history; the reason has been shown as a notice already.</summary>
+    public string? TryUndo() => Unwind(Editing.History.Undo, "Undo");
+
+    /// <inheritdoc cref="TryUndo"/>
+    public string? TryRedo() => Unwind(Editing.History.Redo, "Redo");
 
     /// <summary>
     /// One step of the history, taken while a Blender push cannot be landing.
@@ -257,14 +266,25 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// reason the gate itself gives: this thread is the one the push comes back to.
     /// </para>
     /// </summary>
-    private void Unwind(Action step, string what)
+    private string? Unwind(Action step, string what)
     {
         if (!BridgeSession.TryHoldForEdit())
         {
-            RaiseNotice($"a push from Blender is landing — {what} again in a moment");
-            return;
+            string busy = $"a push from Blender is landing — {what} again in a moment";
+            RaiseNotice(busy);
+            return busy;
         }
-        try { step(); }
+        try
+        {
+            step();
+            return null;
+        }
+        catch (EditRefusedException refused)
+        {
+            // the history kept the step (it leaves its stacks alone when one throws): it can be taken again
+            RaiseNotice(refused.Message, isError: true);
+            return refused.Message;
+        }
         finally { BridgeSession.ReleaseAfterEdit(); }
     }
 
@@ -737,7 +757,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         return Staged(archive)?.BoneWorlds() ?? new Dictionary<ulong, System.Numerics.Matrix4x4>();
     }
 
-    private Assets.Adapters.SceneDocumentAdapter? Staged(System.IO.FileInfo archive)
+    internal Assets.Adapters.SceneDocumentAdapter? Staged(System.IO.FileInfo archive)
     {
         foreach (Assets.Adapters.SceneDocumentAdapter document in CarCollisionEditing.StageDocuments())
         {
@@ -863,6 +883,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="MaterialEditController.AssignSlotMaterial"/>
     public bool AssignSlotMaterial(SceneNode node, int slotIndex, ulong newHash) =>
         MaterialEditing.AssignSlotMaterial(node, slotIndex, newHash);
+
+    /// <inheritdoc cref="MaterialEditController.SlotAssignObstacle"/>
+    public string? SlotAssignObstacle(SceneNode node) => MaterialEditing.SlotAssignObstacle(node);
 
     /// <summary>Whether <paramref name="node"/> is still part of the loaded scene tree — actions pinned
     /// to a node across scene reloads (the material editor's assign target) validate with this.</summary>
@@ -1142,6 +1165,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="ScenePersistence.BuildEdits"/>
     public BuildReport BuildEdits(bool createBackup = true) => Persistence.BuildEdits(createBackup);
 
+    /// <inheritdoc cref="ScenePersistence.BuildArchives"/>
+    public BuildReport BuildArchives(IReadOnlyList<FileInfo> archives, bool createBackup = true) =>
+        Persistence.BuildArchives(archives, createBackup);
+
     /// <inheritdoc cref="DistrictStreamer.ResetForExternalChange"/>
     public void PrepareForArchiveRestore() => Streamer.ResetForExternalChange();
 
@@ -1171,12 +1198,123 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     // multi-selection (a miss is ignored); a plain click replaces the selection (or clears it on a miss).
     protected override void OnViewportLeftClick(Point pos)
     {
+        // A tool that is picking on the scene (Tools → Hide triangles picks triangles) is offered the click
+        // first; what it does not take is an ordinary click.
+        if (SceneClickTaker is { } taker && taker(pos)) return;
+
+        // With the Loading zones layer up a click picks a ZONE and nothing else: the zone is then what the tool
+        // shelf's Move and Scale act on, and an object picked by the same click would be a second thing under
+        // the same gizmo. Objects are picked with the layer off.
+        if (ShowZones && Catalogs.Zones != null)
+        {
+            Select(null);
+            PickZone(pos);
+            return;
+        }
         SceneNode? hit = PickNode(pos);
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             if (hit != null) ToggleSelect(hit);
         }
         else Select(hit);
+    }
+
+    /// <summary>While set, a left click on the scene is offered to it before anything is selected; true means
+    /// the click was its own. One tool at a time: the tool that sets it clears it.</summary>
+    internal Func<Point, bool>? SceneClickTaker { get; set; }
+
+    /// <summary>
+    /// The triangle of a mesh node under a screen pixel, as the eye has it: of the first level of detail, and
+    /// only when nothing of the scene stands in front of it there. Null when the node is not a mesh, the pixel
+    /// misses it, or something covers it - <paramref name="missed"/> then says which, for the user.
+    /// </summary>
+    internal TriangleHider.Picked? PickTriangle(SceneNode node, Point pos, out string? missed)
+    {
+        missed = null;
+        if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter) return null;
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
+        TriangleHider.Picked? hit = TriangleHider.Pick(mesh, ((IFrameNode)adapter).WorldTransform, origin, dir);
+        if (hit == null)
+        {
+            missed = "That spot is not on this mesh.";
+            return null;
+        }
+        // Nearer scenery at this pixel means the triangle is behind it: what cannot be seen is not picked. The
+        // mesh's own rows do not count as scenery - from a distance the editor draws a coarser level of it, whose
+        // surface need not lie where the first level's does, and that level stood "in front" of every triangle.
+        SceneNode? front = PickNode(pos);
+        if (front != null && (ReferenceEquals(front, node) || ReferenceEquals(front.Source, node.Source))) return hit;
+        float nearest = PickMesh(pos, out float meshT) != null ? meshT : float.PositiveInfinity;
+        if (nearest >= hit.Distance - MathF.Max(0.05f, hit.Distance * 0.002f)) return hit;
+        missed = $"{front?.Name ?? "Something"} stands in front of the mesh there.";
+        return null;
+    }
+
+    /// <summary>Marks triangles in the viewport as a tool's pick - their edges, and a stroke to each corner so a
+    /// small one still reads as filled. An empty list takes the marks away.</summary>
+    internal void ShowPickedTriangles(IReadOnlyList<TriangleHider.Triangle> triangles)
+    {
+        if (Rnd == null) return;
+        var lines = new List<Vector3>(triangles.Count * 12);
+        var colours = new List<Vector4>(triangles.Count * 12);
+        var edge = new Vector4(1f, 0.62f, 0.22f, 1f);
+        var inner = new Vector4(1f, 0.62f, 0.22f, 0.45f);
+        foreach (TriangleHider.Triangle t in triangles)
+        {
+            Vector3 centre = (t.A + t.B + t.C) / 3f;
+            foreach ((Vector3 from, Vector3 to, Vector4 colour) in new[]
+                     {
+                         (t.A, t.B, edge), (t.B, t.C, edge), (t.C, t.A, edge), (centre, t.A, inner), (centre, t.B, inner), (centre, t.C, inner),
+                     })
+            {
+                lines.Add(from);
+                lines.Add(to);
+                colours.Add(colour);        // one for each end of the line
+                colours.Add(colour);
+            }
+        }
+        Rnd.SetPickedTriangleLines(lines, colours);
+    }
+
+    /// <summary>Raised by a click on the scene while the Loading zones layer is shown: the world point clicked
+    /// and the zone picked there, or null when no zone's box holds the point.</summary>
+    public event Action<Vector3, string?>? ZonePicked;
+
+    private Point _zoneClick;
+    private Vector3 _zoneClickAt;
+
+    // A zone is not picked by where the ray enters its box: the camera stands inside most of them, and they lie
+    // two and three deep over the whole city. It is picked by the point clicked ON THE SCENE - "which zone is
+    // this spot in" - the smallest box first; a second click on the same spot takes the next one out. A click
+    // on the sky picks none.
+    private void PickZone(Point pos)
+    {
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
+        float t = PickMesh(pos, out float meshT) != null ? meshT : float.PositiveInfinity;
+        if (Streamer.PickCrash(origin, dir, out float crashT) != null) t = MathF.Min(t, crashT);
+        if (!float.IsFinite(t) || t <= 0f)
+        {
+            Catalogs.SelectZone(null);
+            return;
+        }
+
+        Vector3 at = origin + dir * t;
+        IReadOnlyList<AreaZone> here = Catalogs.ZonesHolding(at);
+        // "The same spot again" is the same spot of the WORLD, and the next zone is the one after the zone that
+        // is picked now: the camera can have moved under a still pointer, and the pick can have been made in
+        // the Loading zones window since - a count of clicks at a pixel knew of neither.
+        int current = -1;
+        for (int i = 0; i < here.Count; i++)
+        {
+            if (here[i].Name == Catalogs.SelectedZone) current = i;
+        }
+        bool again = current >= 0 && here.Count > 1 && (pos - _zoneClick).Length < 5.0
+            && Vector3.Distance(at, _zoneClickAt) < MathF.Max(0.5f, t * 0.01f);
+        _zoneClick = pos;
+        _zoneClickAt = at;
+        string? zone = here.Count > 0 ? here[again ? (current + 1) % here.Count : 0].Name : null;
+        Catalogs.SelectZone(zone);
+        ZonePicked?.Invoke(at, zone);
     }
 
     // ── Glyph hover: what the cursor is over, highlighted and named ──
@@ -1329,6 +1467,35 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         if (Streamer.ShutdownDeferred(TearDown)) return; // GPU teardown continues after the stuck loader ends
         base.Dispose(); // Renderer.Dispose releases the attached meshes
     }
+
+    // ── Box gizmo host (IBoxGizmoHost): the picked loading zone under the tool shelf's Move and Scale ──
+
+    public (Vector3 Min, Vector3 Max)? BoxGizmoTarget => ZoneEditing.Target;
+
+    public string? BoxGizmoLabel => ShowZones ? Catalogs.SelectedZoneLabel : null;
+
+    /// <summary>The point of the scene the middle of the view looks at - where a thing made "here" goes - or,
+    /// with nothing under it, a point some way in front of the camera.</summary>
+    internal Vector3 ViewPoint(float ahead = 60f)
+    {
+        var centre = new Point(ActualWidth / 2, ActualHeight / 2);
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(centre);
+        float t = PickMesh(centre, out float meshT) != null ? meshT : float.PositiveInfinity;
+        if (Streamer.PickCrash(origin, dir, out float crashT) != null) t = MathF.Min(t, crashT);
+        return origin + (dir * (float.IsFinite(t) && t > 0f ? t : ahead));
+    }
+
+    public bool BoxGizmoFaceMoves(int axis, int side) => Catalogs.SelectedZoneFaces.Contains((side > 0 ? "+" : "-") + "xyz"[axis]);
+
+    public event Action? BoxGizmoChanged;
+
+    internal void RaiseBoxGizmoChanged() => BoxGizmoChanged?.Invoke();
+
+    public void BoxGizmoBegin() => ZoneEditing.Begin();
+
+    public void BoxGizmoPreview(Vector3 min, Vector3 max) => ZoneEditing.Preview(min, max);
+
+    public void BoxGizmoEnd(bool commit) => ZoneEditing.End(commit);
 
     // ── Transform gizmo host (ITransformGizmoHost) ──
 

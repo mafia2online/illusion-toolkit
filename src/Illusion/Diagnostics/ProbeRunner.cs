@@ -25,7 +25,7 @@ internal static class ProbeRunner
                 return true;
             // StreamMap catalog (timeline of scripts/cutscenes).
             case "--probe-streammap":
-                WorldProbes.RunStreamMapProbe();
+                WorldProbes.RunStreamMapProbe(args.Skip(1).ToArray());
                 return true;
             // Location catalog (Location × Season).
             case "--probe-map":
@@ -38,6 +38,18 @@ internal static class ProbeRunner
             // Streaming zones (box⋈cityareas + lookup by position).
             case "--probe-stream":
                 WorldProbes.RunStreamProbe();
+                return true;
+            // The city's load zones: with no arguments a self-check on the real city (nothing written to the
+            // working copy); with "x y z", "dump <name>", "map <district> x0 y0 x1 y1 step z", "move <zone> <face>
+            // <value>" a look around. Output: %TEMP%\illusion_zones.txt
+            case "--probe-zones":
+                WorldProbes.RunZonesProbe(args.Skip(1).ToArray());
+                return true;
+            // What a Build would put into the game: an untouched working copy shows nothing, a changed and a
+            // removed file are listed, a loose file is not. Arguments: archives under pc\sds (default:
+            // city_univers and one district). Reads the game only. Output: %TEMP%\illusion_build_list.txt
+            case "--probe-build-list":
+                BuildListProbes.Run(args.Skip(1).ToArray());
                 return true;
             // Dump of district scenes + their categories (proxy/snow/normal).
             case "--probe-scenes":
@@ -173,6 +185,21 @@ internal static class ProbeRunner
             case "--probe-prop-catalog":
                 PropCatalogProbes.RunPropCatalogProbe();
                 return true;
+            // What a remap pool is, over every skinned model: the pools against the skeleton's own account
+            // of them. Optional arg = the car to dump. Output: %TEMP%\illusion_remap_pools.txt
+            case "--probe-remap-pools":
+                RemapPoolProbes.RunRemapPoolProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // Where a person's stored geometry and rig stand, against where they are drawn.
+            // Optional arg = archive under pc\sds. Output: %TEMP%\illusion_person_rig.txt
+            case "--probe-person-rig":
+                PersonRigProbes.RunPersonRigProbe(args.Length >= 2 ? args[1] : "traffic/cirand.sds");
+                return true;
+            // The content browser's archive pictures: people (head and shoulders, from both sides) and a car.
+            // Optional args = archives under pc\sds. Output: %TEMP%\illusion_archive_thumbs.txt + pictures.
+            case "--probe-archive-thumbs":
+                ArchiveThumbnailProbes.RunArchiveThumbnailProbe(args.Skip(1).ToArray());
+                return true;
             // A car cloned under a new name, on scratch copies of the working copies.
             // Output: %TEMP%\illusion_car_clone.txt
             // The real clone against the install with a pack made to fail, and everything it wrote taken
@@ -192,6 +219,12 @@ internal static class ProbeRunner
             // Output: %TEMP%\illusion_car_m2o.txt
             case "--probe-car-m2o":
                 CarM2oExportProbes.RunCarM2oExportProbe();
+                return true;
+            // Hiding triangles of a stock mesh without a rebuild, in memory only: what a box or a click finds,
+            // that nothing but the found triangles' indices changes, a mesh given geometry of its own.
+            // Output: %TEMP%\illusion_hide_triangles.txt
+            case "--probe-hide-triangles":
+                HideTrianglesProbes.RunHideTrianglesProbe(args.Length >= 2 ? args[1] : "uppertown");
                 return true;
             // Buffers nothing draws from: none in the archives as shipped, how many in the working copies.
             // Output: %TEMP%\illusion_geometry_sweep.txt
@@ -966,6 +999,59 @@ internal static class ProbeRunner
             // What the PREFAB containers hold, game-wide: which init-data types exist, how many, how big, and
             // which folders carry them — plus one car's container in full. Optional arg = the car.
             // Output: %TEMP%\illusion_prefabs.txt
+            // What a car's PREFAB says about its lights, for several cars side by side (default: the police
+            // Smith, the civilian one and the Shubert 38). Output: %TEMP%\illusion_car_lights.txt
+            case "--probe-car-lights":
+                CarLightProbes.Run(args.Skip(1).ToArray());
+                return true;
+            // What the game's light frames and sectors hold, with the lights split by where they stand (in a
+            // room-sized sector, a district-sized one, none). Optional args = archives under pc\sds without
+            // the extension, e.g. city\italy shops\gunshop. Output: %TEMP%\illusion_world_lights.txt
+            // Frames of one archive by name part: kind, parents, place. Output: %TEMP%\illusion_frames.txt
+            case "--probe-frames":
+                WorldLightProbes.Frames(args.Skip(1).ToArray());
+                return true;
+            // The places of the game's interiors: cityshops.bin through reader and writer, a place added for the gun
+            // shop in memory and taken out again. Nothing is written. Output: %TEMP%\illusion_shop_places.txt
+            // The materials an archive is drawn with and the list of the game's own: told apart, a stock car
+            // needing nothing, the document safe for a JavaScript reader. Optional args = archives under
+            // pc\sds to list as well. Output: %TEMP%\illusion_archive_materials.txt
+            case "--probe-archive-materials":
+                ArchiveMaterialProbes.Run(args.Skip(1).ToArray());
+                return true;
+            // Makes the embedded list of the game's own materials (Illusion.Assets\Materials\ShippedMaterials.bin)
+            // from the libraries of an UNTOUCHED install: out.bin, then the .mtl files in lookup order.
+            case "--make-shipped-materials":
+                ArchiveMaterialProbes.MakeShipped(args.Skip(1).ToArray());
+                return true;
+            case "--probe-shop-places":
+                ShopPlaceProbes.Run();
+                return true;
+            // What an interior opens showing: the scenes of the shipped interiors are not sorted as proxy or
+            // snow by the name-table flags of their holders (a district's are), and the room is drawn on the
+            // stage. Optional args = interiors under pc\sds without the extension.
+            // Output: %TEMP%\illusion_interior_scenes.txt
+            case "--probe-interior-scenes":
+                InteriorSceneProbes.Run(args.Skip(1).ToArray());
+                return true;
+            case "--probe-world-lights":
+                WorldLightProbes.Run(args.Skip(1).ToArray());
+                return true;
+            // Everything a car's rig stores per bone, for one car or two side by side (default: the civilian
+            // Smith against the police one - the same car with two bones added).
+            // Output: %TEMP%\illusion_car_skeleton.txt
+            case "--probe-car-skeleton":
+                CarSkeletonProbes.Run(args.Skip(1).ToArray());
+                return true;
+            case "--experiment-car-bone-add":
+                CarLightProbes.AddBones(args.Skip(1).ToArray());
+                return true;
+            case "--experiment-car-light-add":
+                CarLightProbes.AddLight(args.Skip(1).ToArray());
+                return true;
+            case "--experiment-car-light-kind":
+                CarLightProbes.SetKind(args.Skip(1).ToArray());
+                return true;
             case "--probe-prefabs":
                 PrefabProbes.RunPrefabsProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;

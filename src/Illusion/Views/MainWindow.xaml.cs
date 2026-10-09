@@ -40,6 +40,7 @@ public partial class MainWindow : Window
 
         // Catalog ready → populate the area selector.
         Viewport.CatalogReady += () => Dispatcher.Invoke(PopulateAreas);
+        Viewport.ZonePicked += OnZonePicked;
 
         // Live camera position output to the bottom panel (per-frame, already on the UI thread).
         Viewport.CameraMoved += UpdateCameraReadout;
@@ -169,6 +170,22 @@ public partial class MainWindow : Window
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         ModifierKeys modifiers = Keyboard.Modifiers;
         bool typing = IsTextFieldFocused();
+
+        // A zone under the gizmo: Esc drops the drag and nothing else gets through, wherever the focus is.
+        if (ToolShelf.IsZoneDragging)
+        {
+            HandleViewportKey(key, modifiers, e.IsRepeat);
+            e.Handled = true;
+            return;
+        }
+
+        // The "new zone" flyout has the keyboard while it is open: with one of its lists focused nothing is a
+        // text field, and a letter meant for the list started a tool - or Delete took the selection out.
+        if (ToolShelf.IsFlyoutOpen)
+        {
+            base.OnPreviewKeyDown(e);
+            return;
+        }
 
         if ((!typing && (HandleViewportKey(key, modifiers, e.IsRepeat) || HandleBridgeKey(key, modifiers)))
             || EditorCommands.Handle(key, modifiers, this))
@@ -360,46 +377,14 @@ public partial class MainWindow : Window
         new ImportWindow(Viewport) { Owner = this }.ShowDialog();
     }
 
-    // Build (center toolbar button / File → Build SDS): pack the edited archive(s) back into the game's .sds.
-    // No pre-build confirmation — edits are already saved to the extracted folders and every build keeps a
-    // versioned backup, so it runs straight away and reports the outcome afterwards (ShowBuildResult). Each build
+    // Build (center toolbar button / File → Build SDS): pack archives back into the game's .sds. The Build window
+    // comes first: it lists, per archive, every file of its working copy that differs from the game - a Build
+    // packs the whole working copy, old forgotten edits included - and packs what is ticked. Each build
     // versions the previous archive contents into a timestamped copy under a "backups" folder beside it.
     private void Build_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-
-        if (Viewport.PendingBuildArchives().Count == 0)
-        {
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Info,
-                Text = "No edits to build — move or edit an object first.",
-            });
-            return;
-        }
-
-        D3DImageHost.BuildReport report;
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            report = Viewport.BuildEdits(createBackup: true); // backups are always kept (versioned in a "backups" folder)
-        }
-        catch (Exception ex)
-        {
-            Mouse.OverrideCursor = null;
-            AppDialog.Show(this, new DialogOptions
-            {
-                Title = "Build",
-                Icon = DialogIcon.Error,
-                Heading = "Build failed",
-                Text = ex.Message,
-            });
-            return;
-        }
-        finally { Mouse.OverrideCursor = null; }
-
-        ShowBuildResult(report);
+        if (BuildWindow.Run(this, Viewport) is { } report) ShowBuildResult(report);
     }
 
     // Reports a finished build. A fully-successful build is a "Built N archives" notice the user can silence for
@@ -850,7 +835,11 @@ public partial class MainWindow : Window
 
     private void Zones_Changed(object sender, RoutedEventArgs e)
     {
-        if (Viewport != null) Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        if (Viewport == null) return;
+        Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        ToolShelf.SetZonesLayer(Viewport.ShowZones);
+        // a zone picked while the layer was up is not left picked - and under the gizmo - with nothing drawn
+        if (!Viewport.ShowZones) Viewport.Catalogs.SelectZone(null);
     }
 
     // Shading mode (Blender-style): the checked radio drives the viewport render mode.

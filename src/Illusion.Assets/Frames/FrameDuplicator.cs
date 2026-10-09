@@ -213,6 +213,125 @@ public static class FrameDuplicator
         return added;
     }
 
+    /// <summary>A mesh frame given a geometry block and buffers of its own, with what undo needs to take them
+    /// away again.</summary>
+    public sealed class OwnedGeometry
+    {
+        internal FrameResource Resource = null!;
+        internal SceneDocumentAdapter Adapter = null!;
+        internal FrameObjectSingleMesh Mesh = null!;
+        internal FrameGeometry Before = null!;
+        internal FrameGeometry After = null!;
+        internal List<VertexBuffer> VertexBuffers = new();
+        internal List<IndexBuffer> IndexBuffers = new();
+        internal Dictionary<ulong, IndexBuffer> IndexCopies = new();
+
+        /// <summary>The copy that stands, in the mesh's own block, for an index buffer of the shared one.</summary>
+        public IndexBuffer? CopyOf(IndexBuffer shared) => shared == null ? null : IndexCopies.GetValueOrDefault(shared.Hash);
+
+        /// <summary>Puts the mesh back on the block it shared (undo).</summary>
+        public void Revert()
+        {
+            Mesh.Geometry = Before;
+            Mesh.ReplaceRef(FrameEntryRefTypes.Geometry, Before.RefID);
+            Resource.FrameGeometries.Remove(After.RefID);
+            foreach (VertexBuffer vb in VertexBuffers) Resource.VertexBuffers.Remove(vb.Hash);
+            foreach (IndexBuffer ib in IndexBuffers) Resource.IndexBuffers.Remove(ib.Hash);
+        }
+
+        /// <summary>Puts the mesh on its own block again (redo). Re-registers what a save-time sanitize may
+        /// have pruned while it was away.</summary>
+        public void Apply()
+        {
+            if (!Resource.FrameGeometries.ContainsKey(After.RefID)) Resource.FrameGeometries.Add(After.RefID, After);
+            foreach (VertexBuffer vb in VertexBuffers)
+            {
+                Resource.VertexBuffers.TryAddToPool(vb);
+                Adapter.MarkVertexBufferDirty(vb.Hash);
+            }
+            foreach (IndexBuffer ib in IndexBuffers)
+            {
+                Resource.IndexBuffers.TryAddToPool(ib);
+                Adapter.MarkIndexBufferDirty(ib.Hash);
+            }
+            Mesh.Geometry = After;
+            Mesh.ReplaceRef(FrameEntryRefTypes.Geometry, After.RefID);
+        }
+    }
+
+    /// <summary>
+    /// Gives a mesh frame that draws a geometry block other frames draw too a block of its OWN: a copy of the
+    /// block over copies of its vertex and index buffers - what a duplicate of the object gets, without the
+    /// duplicate. The frame looks exactly as before; a change to its geometry now changes it alone. Applied
+    /// when returned. Null with a reason when it cannot be done (missing buffers, full pools).
+    /// </summary>
+    public static OwnedGeometry? TryOwnGeometry(ISceneDocument document, IFrameNode node, out string? reason)
+    {
+        reason = null;
+        if (document is not SceneDocumentAdapter adapter || node is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh })
+        {
+            reason = "only a mesh has geometry to copy";
+            return null;
+        }
+        FrameResource resource = adapter.Frame;
+        if (mesh.Geometry?.LOD is not { Length: > 0 })
+        {
+            reason = "the mesh has no geometry";
+            return null;
+        }
+
+        string unique = Guid.NewGuid().ToString("N")[..8];
+        string BufferName(ulong sourceHash, string kind) => $"{mesh.Name.String}_{kind}{sourceHash:x8}_{unique}";
+        var owned = new OwnedGeometry { Resource = resource, Adapter = adapter, Mesh = mesh, Before = mesh.Geometry };
+        var vertexCopies = new HashSet<ulong>();
+        bool room = true;
+        foreach (FrameLOD lod in mesh.Geometry.LOD)
+        {
+            VertexBuffer? vb = resource.VertexBuffers.GetBuffer(lod.VertexBufferRef.Hash);
+            IndexBuffer? ib = resource.IndexBuffers.GetBuffer(lod.IndexBufferRef.Hash);
+            if (vb == null || ib == null)
+            {
+                reason = "a level of the mesh has no buffers in this archive";
+                room = false;
+                break;
+            }
+            if (vertexCopies.Add(vb.Hash))
+            {
+                var copy = new VertexBuffer(Fnv64.Hash(BufferName(vb.Hash, "vb"))) { Data = (byte[])vb.Data.Clone() };
+                if (!resource.VertexBuffers.TryAddToPool(copy)) { room = false; break; }
+                owned.VertexBuffers.Add(copy);
+            }
+            if (!owned.IndexCopies.ContainsKey(ib.Hash))
+            {
+                var copy = new IndexBuffer(Fnv64.Hash(BufferName(ib.Hash, "ib")));
+                copy.SetFormat(ib.IndexFormat);
+                copy.SetData((uint[])ib.GetData().Clone());
+                if (!resource.IndexBuffers.TryAddToPool(copy)) { room = false; break; }
+                owned.IndexCopies[ib.Hash] = copy;
+                owned.IndexBuffers.Add(copy);
+            }
+        }
+        if (!room)
+        {
+            foreach (VertexBuffer vb in owned.VertexBuffers) resource.VertexBuffers.Remove(vb.Hash);
+            foreach (IndexBuffer ib in owned.IndexBuffers) resource.IndexBuffers.Remove(ib.Hash);
+            reason ??= "the archive has no buffer pool to copy the geometry into";
+            return null;
+        }
+
+        FrameGeometry geometry = resource.ConstructFrameAssetOfType<FrameGeometry>();
+        geometry.CopyFrom(mesh.Geometry);
+        foreach (FrameLOD lod in geometry.LOD)
+        {
+            ulong vertices = lod.VertexBufferRef.Hash, indices = lod.IndexBufferRef.Hash;
+            lod.VertexBufferRef = new HashName(BufferName(vertices, "vb"));
+            lod.IndexBufferRef = new HashName(BufferName(indices, "ib"));
+        }
+        owned.After = geometry;
+        owned.Apply();
+        return owned;
+    }
+
     // "<name>_copy", then "<name>_copy2", … — the frame name table is keyed by name, so a copy must not
     // collide with any existing object.
     private static string UniqueName(FrameResource resource, string sourceName)
@@ -226,7 +345,7 @@ public static class FrameDuplicator
         }
     }
 
-    private static FrameEntry? ResolveRef(FrameResource resource, FrameObjectBase source, FrameEntryRefTypes slot)
+    internal static FrameEntry? ResolveRef(FrameResource resource, FrameObjectBase source, FrameEntryRefTypes slot)
     {
         if (!source.Refs.TryGetValue(slot, out int id)) return null;
         if (resource.FrameScenes.TryGetValue(id, out FrameHeaderScene? scene)) return scene;
@@ -236,7 +355,7 @@ public static class FrameDuplicator
 
     // Writes both parent slots the way the loader/reparenter do: SetParent maintains the frame-side
     // runtime links; scene folders hold their members in a separate list the setter does not touch.
-    private static void LinkParents(FrameObjectSingleMesh clone, FrameEntry? parent1, FrameEntry? parent2)
+    internal static void LinkParents(FrameObjectBase clone, FrameEntry? parent1, FrameEntry? parent2)
     {
         clone.SetParent(ParentInfo.ParentType.ParentIndex1, parent1);
         clone.SetParent(ParentInfo.ParentType.ParentIndex2, parent2);

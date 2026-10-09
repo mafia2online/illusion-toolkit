@@ -1,0 +1,121 @@
+<Window x:Class="Illusion.Views.BuildWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Build"
+        Width="760" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- File → Build SDS… and the toolbar's Build: what is about to go into the game, before it goes. A Build
+         packs each archive's WHOLE working copy, so the list under an archive is everything in it that differs
+         from the archive the game has now - today's edit and whatever was changed in that folder months ago
+         and forgotten. Archives are ticked to be packed; one left unticked stays on the list for a later
+         Build. Visual language comes from the shared EditorStyles dictionary, like RestoreBackupWindow. -->
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="Warn" Color="#E3A64B" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,12"
+                       Text="A Build packs each archive's whole working copy. Listed under an archive is everything in it that differs from what the game has now - not only what was changed today." />
+
+            <Border x:Name="OldBanner" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource Warn}"
+                    BorderThickness="1" CornerRadius="4" Padding="12,9" Margin="0,0,0,12" Visibility="Collapsed">
+                <TextBlock x:Name="OldText" FontSize="12" Foreground="{StaticResource Warn}" TextWrapping="Wrap" />
+            </Border>
+
+            <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <Grid MinHeight="150">
+                    <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl x:Name="ArchiveList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,0,0,1" Padding="10,8">
+                                        <StackPanel>
+                                            <DockPanel LastChildFill="True">
+                                                <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                                          VerticalAlignment="Center" Margin="0,0,10,0"
+                                                          ToolTip="Pack this archive in this Build" />
+                                                <!-- a Button, not a ToggleButton: GhostIconButton is a Button's style, and a style
+                                                     of the wrong type is not a build error - it throws when the first row is made -->
+                                                <Button DockPanel.Dock="Right" Visibility="{Binding FilesVisibility}"
+                                                        Style="{StaticResource GhostIconButton}" Width="26" Height="26"
+                                                        FontFamily="Segoe MDL2 Assets" FontSize="10" Content="&#xE70D;"
+                                                        VerticalAlignment="Top" ToolTip="Show or hide the files"
+                                                        Click="Toggle_Clicked" />
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontSize="13" Foreground="White"
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                                                    <TextBlock Text="{Binding Summary}" FontSize="11" Margin="0,2,0,0"
+                                                               Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Caution}" FontSize="11" Margin="0,2,0,0"
+                                                               Foreground="{StaticResource Warn}" TextWrapping="Wrap"
+                                                               Visibility="{Binding CautionVisibility}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <ListBox ItemsSource="{Binding Files}" Visibility="{Binding OpenVisibility}"
+                                                     MaxHeight="190" Margin="26,8,0,0" BorderThickness="0" Background="Transparent"
+                                                     ItemContainerStyle="{StaticResource PickerItem}"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="70" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="80" />
+                                                                <ColumnDefinition Width="130" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="{Binding Kind}" FontSize="11"
+                                                                       Foreground="{StaticResource TextDim}" VerticalAlignment="Center" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding Path}" FontSize="12"
+                                                                       Foreground="White" VerticalAlignment="Center"
+                                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                                                            <TextBlock Grid.Column="2" Text="{Binding Size}" FontSize="11"
+                                                                       Foreground="{StaticResource TextDim}" VerticalAlignment="Center"
+                                                                       HorizontalAlignment="Right" Margin="0,0,12,0" />
+                                                            <TextBlock Grid.Column="3" Text="{Binding When}" FontSize="11"
+                                                                       Foreground="{Binding WhenBrush}" VerticalAlignment="Center" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock x:Name="EmptyLabel" Style="{StaticResource DimLabel}" TextWrapping="Wrap" MaxWidth="460"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                               Text="Nothing was edited in this session. To pack a working copy you changed by hand - a script, a table - add its archive."
+                               Visibility="Collapsed" />
+                </Grid>
+            </Border>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <Button DockPanel.Dock="Left" Style="{StaticResource NeutralButton}" Height="32" Padding="14,0"
+                        Content="Add archive…" Click="Add_Click"
+                        ToolTip="Pack an archive that is not on the list: one whose working copy was changed outside the editors" />
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" VerticalAlignment="Center" Margin="14,0,0,0"
+                           Text="Each archive replaced is kept in its 'backups' folder." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" IsCancel="True" Click="Cancel_Click" />
+                    <Button x:Name="BuildBtn" Style="{StaticResource AccentButton}" MinWidth="120" Height="32"
+                            Content="Build" IsEnabled="False" Click="Build_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
