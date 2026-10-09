@@ -8,13 +8,14 @@ using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Materials;
+using Illusion.Formats.ResourceFormats;
 
 namespace Illusion.Diagnostics.Probes;
 
 /// <summary>
 /// A car exported as a multiplayer resource, from a clone made and packed on scratch copies (nothing of the
-/// game is written): the folder's manifest, the archives it streams, the material library of a car that adds
-/// materials, a second car joining the folder, and what an export refuses.
+/// game is written): the folder's manifest, the archives it streams with the clone's own vehicles.tbl row, the
+/// material library of a car that adds materials, a second car joining the folder, and what an export refuses.
 /// </summary>
 internal static class CarM2oExportProbes
 {
@@ -134,7 +135,8 @@ internal static class CarM2oExportProbes
                 && File.ReadAllText(Path.Combine(broken, CarM2oExport.PackageFile)) == BadPackage
                 && Directory.GetFileSystemEntries(broken).Length == 1, unreadPackage ?? "exported");
 
-            // A clone of a stock car uses only stock materials: its archives ship exactly as they were built.
+            // A clone of a stock car uses only stock materials: its archives ship as they were built plus its own
+            // vehicles.tbl row, a table patch keeping the source car's id and title.
             CarM2oExportResult? result = CarM2oExport.ExportFrom(sources, output, CarM2oExport.DefaultResource(Name), out refused);
             Check("exports the clone", result != null, refused ?? "");
             if (result == null) return;
@@ -149,15 +151,18 @@ internal static class CarM2oExportProbes
             JsonNode package = JsonNode.Parse(File.ReadAllText(Path.Combine(output, CarM2oExport.PackageFile)))!;
             Check("package.json names the resource and lists no files (the stream folder ships on its own)",
                 package["name"]?.GetValue<string>() == "car-shubert-38-export" && package["version"] != null && package["mafiahub"] == null);
-            bool intact = archives.All(a => File.Exists(Path.Combine(streamed, a.Name))
-                && File.ReadAllBytes(Path.Combine(streamed, a.Name)).AsSpan().SequenceEqual(File.ReadAllBytes(a.FullName)));
-            Check("the archives are in stream/sds/cars/, byte for byte as they were built", intact);
+            GameTable stockVehicles = GameTable.Load(sources.VehiclesTable!);
+            int sourceRow = stockVehicles.FindRow(2, "Shubert_38");
+            (int Id, int Text) source = ((int)stockVehicles.Cell(sourceRow, 0), (int)stockVehicles.Cell(sourceRow, 3));
+            string rows = string.Join(" | ", archives.Select(a => OwnRow(Path.Combine(streamed, a.Name), a.FullName, scratch)));
+            Check("each archive is the built one plus its vehicles.tbl row: the clone's name, the source car's id and title",
+                archives.All(a => OwnRow(Path.Combine(streamed, a.Name), a.FullName, scratch) == (Name, source.Id, source.Text)), rows);
             Check("nothing else is in the folder",
                 Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length == archives.Count + 1
                 && !File.Exists(Path.Combine(output, "vehicles.json")));
 
             // One of the car's own materials, as if the toolkit had created it: it is not stock, so it goes into
-            // the car's library in stream/materials/, alone, and the archives still ship exactly as built.
+            // the car's library in stream/materials/, alone, and the archives are the same as without it.
             ulong created = CarMaterials(cars[0].To).First(stockMaterials.Contains);
             var withoutIt = new HashSet<ulong>(stockMaterials);
             withoutIt.Remove(created);
@@ -175,8 +180,8 @@ internal static class CarM2oExportProbes
                 && read.Materials[created].MaterialName.String == materials.FindByHash(created)!.MaterialName.String,
                 string.Join(", ", read.Materials.Keys.Select(h => "0x" + h.ToString("x16"))));
             string addsStreamed = Path.Combine(adds, CarM2oExport.CarsFolder.Replace('/', Path.DirectorySeparatorChar));
-            Check("the archives still ship byte for byte as they were built", archives.All(a =>
-                File.ReadAllBytes(Path.Combine(addsStreamed, a.Name)).AsSpan().SequenceEqual(File.ReadAllBytes(a.FullName))));
+            Check("the archives are the same as without it", archives.All(a =>
+                File.ReadAllBytes(Path.Combine(addsStreamed, a.Name)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(streamed, a.Name)))));
             Check("the library is the only thing added",
                 Directory.GetFiles(adds, "*", SearchOption.AllDirectories).Length == archives.Count + 2);
 
@@ -223,6 +228,27 @@ internal static class CarM2oExportProbes
     }
 
     // The material hashes a working copy's meshes use.
+    // The vehicles.tbl row an exported archive carries (name, id, text), or null when the archive is anything but
+    // the built one plus one Table entry holding that row.
+    private static (string Name, int Id, int Text)? OwnRow(string exported, string built, string scratch)
+    {
+        if (!File.Exists(exported)) return null;
+        SdsArchive shipped = SdsArchive.Open(exported), original = SdsArchive.Open(built);
+        uint table = shipped.ResourceTypes.FirstOrDefault(t => t.Name == "Table").Id;
+        var others = shipped.Entries.Where(e => (uint)e.TypeId != table).ToList();
+        if (shipped.Entries.Count != original.Entries.Count + 1 || others.Count != original.Entries.Count
+            || !others.Zip(original.Entries).All(p => p.First.Data!.AsSpan().SequenceEqual(p.Second.Data)))
+        {
+            return null;
+        }
+        string folder = Path.Combine(scratch, "own_row_" + Guid.NewGuid().ToString("N"));
+        shipped.Extract(folder);
+        string[] patches = Directory.GetFiles(Path.Combine(folder, "tables"), "patch_*_vehicles.tbl");
+        if (patches.Length != 1) return null;
+        GameTable row = GameTable.Load(patches[0]);
+        return row.RowCount == 1 ? ((string)row.Cell(0, 2), (int)row.Cell(0, 0), (int)row.Cell(0, 3)) : null;
+    }
+
     private static IEnumerable<ulong> CarMaterials(string extracted) =>
         ExtractedSds.Load(extracted).FrameResource!.FrameMaterials.Values
             .SelectMany(block => block.Materials.SelectMany(lod => lod)).Select(slot => slot.MaterialHash).Where(hash => hash != 0).Distinct();

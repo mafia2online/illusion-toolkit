@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Illusion.Assets.Sds;
 using Illusion.Assets.Text;
+using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.EntityData;
 using Illusion.Formats.Frames;
@@ -54,6 +55,7 @@ public static partial class CarM2oExport
     private const string LegacyVehiclesFile = "vehicles.json";
     private const string LegacyCarsFolder = "sds";
 
+    private const int VehicleIdColumn = 0;
     private const int VehicleNameColumn = 2;
     private const int VehicleTextColumn = 3;
 
@@ -283,6 +285,33 @@ public static partial class CarM2oExport
             }
         }
 
+        // A clone's vehicles.tbl row travels inside its archives as a table patch, which the game appends to the
+        // table while the archive is loaded. It is the way Joe's Adventures adds its car variants, and like them
+        // the row keeps the id of the car it was made from: the game indexes per-car arrays by that id (the
+        // stats module's, for one) and finds the paint row by it, so a variant shares its source car's. The
+        // title's text is the maker's own and cannot travel, so the row names the source car's. A car under a
+        // stock name keeps the stock row.
+        var patches = new List<GameTable>();
+        if (sources.BasedOn != null && row >= 0)
+        {
+            int sourceRow = vehicles!.FindRow(VehicleNameColumn, sources.BasedOn);
+            if (sourceRow >= 0)
+            {
+                GameTable vehicleRow = vehicles.PatchRow(row, "m2o" + stem.Replace("_", ""));
+                vehicleRow.SetCell(0, VehicleIdColumn, vehicles.Cell(sourceRow, VehicleIdColumn));
+                vehicleRow.SetCell(0, VehicleTextColumn, vehicles.Cell(sourceRow, VehicleTextColumn));
+                patches.Add(vehicleRow);
+            }
+            else
+            {
+                notes.Add($"vehicles.tbl has no row for {sources.BasedOn}, the car it was made from — its own row does not travel");
+            }
+        }
+        else if (sources.BasedOn != null)
+        {
+            notes.Add($"vehicles.tbl has no row for {model} — in the multiplayer it takes the game's first row (title, paint, flags)");
+        }
+
         // Everything is known; now the folder.
         string cars = Path.Combine(output, CarsFolder.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(cars);
@@ -291,7 +320,14 @@ public static partial class CarM2oExport
         {
             if (source == null) continue;
             string target = Path.Combine(cars, source.Name.ToLowerInvariant());
-            File.Copy(source.FullName, target, overwrite: true);
+            if (patches.Count > 0)
+            {
+                WithTables(source, target, patches);
+            }
+            else
+            {
+                File.Copy(source.FullName, target, overwrite: true);
+            }
             written.Add(target);
         }
 
@@ -319,6 +355,34 @@ public static partial class CarM2oExport
         refusal = null;
         return new CarM2oExportResult(output, resource, model, title, sources.BasedOn, carsInFolder,
             [.. added.Values.Select(m => m.MaterialName.String)], written, notes);
+    }
+
+    // The archive with these tables added as one Table entry, the rest repacked as it was with the memory each
+    // resource asks for kept from the original.
+    private static void WithTables(FileInfo source, string target, IReadOnlyList<GameTable> tables)
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), "illusion_m2o_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            SdsMemoryRequirements memory = SdsMemoryRequirements.Extract(SdsArchive.Open(source.FullName), scratch);
+            foreach (GameTable table in tables)
+            {
+                string file = Path.Combine(scratch, table.Name.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllBytes(file, table.ToBytes());
+            }
+            SdsManifest.Load(scratch).AddTableEntry([.. tables.Select(t => t.Name)], tables[0].Version);
+
+            SdsArchive packed = SdsArchive.Pack(scratch, GameProfile.MafiaII, memory);
+            using var stream = new MemoryStream();
+            packed.Save(stream, new SdsWriteOptions());
+            AtomicFile.WriteAllBytes(target, stream.ToArray());
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+            catch (IOException) { /* scratch left behind */ }
+        }
     }
 
     private static string PackerFigures(string archive) =>

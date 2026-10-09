@@ -11,8 +11,8 @@ namespace Illusion.Assets.Cars;
 /// <param name="FindMaterial">A material by hash, as the libraries hold it now — where a material the car
 /// adds is read from. Null exports no materials.</param>
 /// <param name="StockMaterials">The materials every player already has: the hashes of the libraries as the
-/// game shipped them. A material the car uses and this set lacks travels inside the car's archive.</param>
-/// <param name="MaterialVersion">The library format the embedded materials are written in.</param>
+/// game shipped them. A material the car uses and this set lacks goes into the car's library.</param>
+/// <param name="MaterialVersion">The library format the car's material library is written in.</param>
 public sealed record CarM2oExportSources(
     FileInfo Archive,
     FileInfo? WinterArchive,
