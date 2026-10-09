@@ -278,12 +278,17 @@ traffic tables, with a title of its own in every installed language. `car_substi
 under ANOTHER car's name instead - that car's archive is replaced (backup kept) and no table is
 touched - which is how a car is tried where nothing can be registered, such as a multiplayer that
 spawns from a fixed list of names. `car_export_m2o` writes a built car out as an M2O resource
-folder: `package.json`, the archives under `sds/cars/` and `vehicles.json`, which names for each car
-the path the game loads it from, the model name its archive is keyed by, its title per language,
-the car it was cloned from, its `vehicles.tbl` and `PaintCombinations.tbl` rows, and the size and
-SHA-256 of each file; only the archives travel, no table edit does. It refuses an archive that is
-not filed under its own name throughout, and says so when the buffers still bear the source car's
-names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
+folder: `package.json`, the archive (with its winter `_z` twin) under `stream/sds/cars/`, and when
+needed a material library under `stream/materials/`. A clone's archives also carry its `vehicles.tbl`
+row as a table patch the game appends while the car is loaded (the way Joe's Adventures adds its cars),
+keeping the id and title of the car it was made from, which the game indexes per-car data by. That is all a server owner ships - the server registers each archive by its file name, a stock car's name
+replacing that car. Materials the car uses that the game did not ship with (ones the toolkit created
+for it) are written to `stream/materials/<name>.mtl`, an MTL library of just those materials, which
+the multiplayer loads in addition to the game's own libraries the way the game loads a mission
+pack's (`LoadMTL`), and releases when the player leaves the server. "Shipped with" means the libraries in `edit\materials` as they were before the toolkit
+first wrote them (the oldest backup). No other table edit travels. It refuses a car named with anything but a-z, 0-9 and _ (all a server streams), an archive that is not filed
+under its own name throughout and a car using a material no library has, and says so when the
+buffers still bear the source car's names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
 the working copy itself. `--probe-car-clone` and `--probe-car-m2o` cover them on scratch copies.
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the
