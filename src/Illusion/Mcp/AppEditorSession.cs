@@ -1146,7 +1146,7 @@ internal sealed class AppEditorSession : IEditorSession
                 return refusal;
             }
             result = new M2oExportInfo(exported.Folder, exported.Resource, exported.Model, exported.Title, exported.BasedOn,
-                exported.Vehicles, exported.Files, exported.Notes);
+                exported.Vehicles, exported.Materials, exported.Files, exported.Notes);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Formats.FileFormatException)
@@ -1393,16 +1393,14 @@ internal sealed class AppEditorSession : IEditorSession
     {
         if (TargetHost is not { } host) return TargetNotOpen;
         if (!host.History.CanUndo) return "nothing to undo";
-        host.Undo();
-        return null;
+        return host.TryUndo();
     }
 
     public string? Redo()
     {
         if (TargetHost is not { } host) return TargetNotOpen;
         if (!host.History.CanRedo) return "nothing to redo";
-        host.Redo();
-        return null;
+        return host.TryRedo();
     }
 
     // ── Scene tree helpers ──
@@ -1474,5 +1472,249 @@ internal sealed class AppEditorSession : IEditorSession
             if (element is T match) yield return match;
             foreach (T deeper in Descendants<T>(element)) yield return deeper;
         }
+    }
+
+    // The city's load zones, read afresh from the working copy of city_univers on every call: they are a few
+    // hundred small objects, and a tool that moves one must not answer from what stood there before.
+    private string? OpenLoadZones(string? copy, out Assets.World.LoadZones? zones)
+    {
+        zones = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        try
+        {
+            IReadOnlyList<FileInfo> copies = Assets.World.LoadZones.Copies();
+            FileInfo? which = string.IsNullOrWhiteSpace(copy)
+                ? copies[0]
+                : copies.FirstOrDefault(c => string.Equals(Assets.World.LoadZones.CopyName(c), copy, StringComparison.OrdinalIgnoreCase));
+            if (which == null)
+            {
+                return $"no copy of city_univers.sds named '{copy}' - there are: " + string.Join(", ", copies.Select(Assets.World.LoadZones.CopyName));
+            }
+            // The districts' names: the open map editor has them already; without one the city folder is read.
+            IReadOnlyCollection<string> districts = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } known
+                ? known
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), districts, which);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not read the load zones of city_univers: " + ex.Message;
+        }
+    }
+
+    private static float[] Xyz(Vector3 v) => [v.X, v.Y, v.Z];
+
+    public string? ZonesAt(float[] point, float near, string? copy, out IReadOnlyList<LoadZoneInfo> zones, out IReadOnlyList<string> districts,
+        out IReadOnlyList<string> copies)
+    {
+        zones = [];
+        districts = [];
+        copies = [];
+        if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
+        if (!float.IsFinite(near) || near < 0) return "near is a distance in metres, 0 or more";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+        copies = [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)];
+
+        var at = new Vector3(point[0], point[1], point[2]);
+        zones = [.. all!.At(at, near).Select(z =>
+        {
+            (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
+            return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max),
+                Assets.World.LoadZones.LoadsOnArrival(z.Name), !Assets.World.LoadZones.IsShipped(z.Name));
+        })];
+        districts = all.DistrictsAt(at);
+        return null;
+    }
+
+    public string? ZonesMap(string district, float[] from, float[] to, float step, float z, string? copy, out IReadOnlyList<string> rows)
+    {
+        rows = [];
+        if (string.IsNullOrWhiteSpace(district)) return "name the district, e.g. greenfield";
+        if (from is not { Length: 2 } || to is not { Length: 2 } || from.Concat(to).Any(v => !float.IsFinite(v)))
+            return "from and to are [x, y], finite numbers";
+        // Below a tenth of a metre a step is no longer a step at the city's coordinates: a float there is
+        // spaced a quarter of a millimetre apart, and a column "one step on" came out as the same column.
+        if (!float.IsFinite(step) || step < 0.1f || !float.IsFinite(z)) return "step is a distance of 0.1 m or more and z a height";
+        float x0 = MathF.Min(from[0], to[0]), x1 = MathF.Max(from[0], to[0]);
+        float y0 = MathF.Min(from[1], to[1]), y1 = MathF.Max(from[1], to[1]);
+        if ((x1 - x0) / step > 200 || (y1 - y0) / step > 200) return "that is more than 200 steps a side - take a larger step or a smaller box";
+        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+
+        // Rows and columns are counted, and each stands at its own multiple of the step: adding the step to a
+        // running float drifts, and with a step too small to change the float it never arrives.
+        int columns = (int)MathF.Floor(((x1 - x0) / step) + 0.001f) + 1, lineCount = (int)MathF.Floor(((y1 - y0) / step) + 0.001f) + 1;
+        var lines = new List<string>(lineCount);
+        for (int line = 0; line < lineCount; line++)
+        {
+            float y = y1 - (line * step);
+            var row = new System.Text.StringBuilder($"{y,8:F0} ");
+            for (int column = 0; column < columns; column++)
+            {
+                float x = x0 + (column * step);
+                var holding = all!.At(new Vector3(x, y, z)).ToList();
+                row.Append(holding.Any(h => all.DistrictsOf(h.Name).Contains(district, StringComparer.OrdinalIgnoreCase)) ? '#'
+                    : holding.Count > 0 ? '+' : '.');
+            }
+            lines.Add(row.ToString());
+        }
+        rows = lines;
+        return null;
+    }
+
+    public string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (boxMin is not { Length: 3 } || boxMax is not { Length: 3 } || boxMin.Concat(boxMax).Any(v => !float.IsFinite(v)))
+            return "boxMin and boxMax are [x, y, z], finite numbers";
+        if (districts is not { Length: 1 or 2 } || districts.Any(string.IsNullOrWhiteSpace)) return "districts is one or two district names";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        // asked of a dry run too: one that says "it can be made" while the write would be refused says nothing
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            var min = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
+            var max = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
+            // worked out in memory first: what the zone would be is the answer of a dry run, and of a write too
+            if (zones.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } refused) return refused;
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                // With the map editor open: written the way its own button writes, so the zone is a step of the
+                // editor's undo history - and the step is on the MAP editor's history (see ZoneMoveFace).
+                if (viewport.ZoneEditing.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } unmade) return unmade;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not add the zone to city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone)
+    {
+        zone = null;
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        if (string.IsNullOrWhiteSpace(name)) return "name is the zone to take out";
+        if (Assets.World.LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
+        var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
+        if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
+        try
+        {
+            IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
+                ? names
+                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                    .Areas.Select(a => a.BaseName)];
+            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+                forNewZones: true);
+            if (!zones.Volumes.TryGetValue(name, out Formats.Frames.ObjectTypes.FrameObjectArea? volume)) return $"no load zone named '{name}'";
+            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(volume);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), false, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            if (zones.Delete(name) is { } refused) return refused;
+            if (!apply) return null;
+            if (Window?.Viewport is { } viewport)
+            {
+                if (viewport.ZoneEditing.Remove(name) is { } kept) return kept;
+                _resourceTarget = false;
+                return null;
+            }
+            zones.Save();
+            ZoneWrites.Landed(zones, name);
+            return null;
+        }
+        catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+        {
+            return "could not take the zone out of city_univers: " + ex.Message;
+        }
+    }
+
+    public string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results)
+    {
+        results = [];
+        if (EnsureEnvironment() is { } notReady) return notReady;
+        List<string> names = string.IsNullOrWhiteSpace(copy) ? ["base"]
+            : string.Equals(copy, "all", StringComparison.OrdinalIgnoreCase)
+                ? [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)]
+                : [copy];
+
+        // Everything is worked out, in memory, for every copy before any of them is written: a face that can
+        // be moved in one copy and not in another must not leave the two telling the game different things.
+        var moved = new List<(Assets.World.LoadZones Zones, Assets.World.LoadZoneFaceMove Move, string Copy)>();
+        var absent = new List<string>();
+        foreach (string name in names)
+        {
+            if (OpenLoadZones(name, out Assets.World.LoadZones? all) is { } failed) return failed;
+            if (!all!.Volumes.ContainsKey(zone ?? ""))
+            {
+                absent.Add(name);
+                continue;
+            }
+            // The scene is written whole, from what is on disk. An editor that holds the archive has a copy of
+            // its own and writes THAT whole on its next save: its copy of the zone must be what the disk has
+            // now, and is brought in step after the write (ZoneWrites).
+            if (apply && ZoneWrites.Blocked(all, zone!) is { } blocked) return $"{name}: {blocked} (editor_save)";
+            if (all.MoveFace(zone!, face, to, out Assets.World.LoadZoneFaceMove? move) is { } refused) return $"{name}: {refused}";
+            moved.Add((all, move!, name));
+        }
+        if (moved.Count == 0) return $"no load zone named '{zone}' in " + string.Join(", ", absent);
+
+        // The base copy alone, with the map editor open: written through the editor's own zone editing, the way
+        // its gizmo and its Loading zones window write - so the move is a step of the editor's undo history.
+        bool viaEditor = apply && moved.Count == 1 && Window?.Viewport is not null
+            && string.Equals(moved[0].Zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase);
+        if (viaEditor)
+        {
+            if (Window!.Viewport.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
+            // The step is on the MAP editor's history. Left pointing at the resource editor, the editor_undo
+            // that follows took back whatever that one did last and called it done.
+            _resourceTarget = false;
+        }
+
+        // Written one copy after another - and all of them, or none: the scene each copy had is kept until the
+        // last one is down, and a copy that fails puts the ones before it back.
+        var written = new List<(string File, byte[] Before)>();
+        if (apply && !viaEditor)
+        {
+            foreach ((Assets.World.LoadZones all, _, string name) in moved)
+            {
+                try
+                {
+                    byte[] before = File.ReadAllBytes(all.SceneFile);
+                    all.Save();
+                    written.Add((all.SceneFile, before));
+                }
+                catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
+                {
+                    var stuck = new List<string>();
+                    foreach ((string file, byte[] before) in written)
+                    {
+                        try { File.WriteAllBytes(file, before); }
+                        catch (Exception back) when (back is IOException or UnauthorizedAccessException) { stuck.Add(file); }
+                    }
+                    return $"could not write the scene of city_univers ({name}): {ex.Message} - nothing was changed"
+                        + (stuck.Count > 0 ? ", EXCEPT that these could not be put back: " + string.Join(", ", stuck) : "");
+                }
+            }
+            foreach ((Assets.World.LoadZones all, _, _) in moved) ZoneWrites.Landed(all, zone!);
+        }
+
+        results = [.. moved.Select(m => new LoadZoneMoveInfo(m.Copy, m.Move.Zone, m.Move.Face, m.Move.From, m.Move.To, Xyz(m.Move.BoxMin),
+            Xyz(m.Move.BoxMax), m.Zones.DistrictsOf(m.Move.Zone), apply, apply ? m.Zones.SceneFile : null, m.Zones.Archive.FullName))];
+        return null;
     }
 }

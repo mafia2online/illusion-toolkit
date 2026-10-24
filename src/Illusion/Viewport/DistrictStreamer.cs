@@ -168,6 +168,17 @@ internal sealed class DistrictStreamer
     /// having its meshes attached. What a caller that asked for an area waits on.</summary>
     public bool IsBusy => _building || _loadTask != null || _loadQueue.Count > 0;
 
+    /// <summary>
+    /// Whether an archive is queued for loading, being read or being put into the tree right now. Its scene is
+    /// then read from disk - or about to be - and is not registered as held yet: a change written to the
+    /// archive in that window would not be in the scene that arrives.
+    /// </summary>
+    internal bool IsLoading(FileInfo archive)
+    {
+        bool Same(FileInfo? file) => file != null && string.Equals(file.FullName, archive.FullName, StringComparison.OrdinalIgnoreCase);
+        return ((_building || _loadTask != null) && (Same(_loadCtx.file) || Same(_buildCtx.file))) || _loadQueue.Any(q => Same(q.File));
+    }
+
     private Queue<(SceneNode Leaf, GpuMesh Mesh)> _buildQueue = null!; // prepared meshes awaiting attach
     private (string label, string? district, string folder, int gen, FileInfo file) _buildCtx;
     private List<GpuMesh> _buildMeshes = null!;

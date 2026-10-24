@@ -184,6 +184,24 @@ public sealed class SdsManifest
         AddEntry(typeName, fileName, version, []);
 
     /// <summary>
+    /// Appends a <c>Table</c> entry holding <paramref name="tables"/> (each a file the folder holds under its table
+    /// name, such as <c>/tables/vehicles.tbl</c>): <c>Type · NumTables · Table… · Version</c>, the shape the
+    /// table handler packs. Nothing is added when any of them is listed already.
+    /// </summary>
+    /// <returns>True when the manifest gained the entry.</returns>
+    public bool AddTableEntry(IReadOnlyList<string> tables, int version)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        if (tables.Count == 0 || tables.Any(HasFile)) return false;
+        var fields = new List<(string Name, string Value)> { ("Type", "Table"), ("NumTables", tables.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
+        fields.AddRange(tables.Select(t => ("Table", t)));
+        fields.Add(("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        AppendEntry(fields);
+        _entries.AddRange(tables.Select(t => ("Table", t)));
+        return true;
+    }
+
+    /// <summary>
     /// The same, for the types whose entry carries more than a file name.
     ///
     /// ORDER IS THE CONTRACT. A packing handler walks the entry's children POSITIONALLY
@@ -205,15 +223,21 @@ public sealed class SdsManifest
         ArgumentNullException.ThrowIfNull(extra);
         if (HasFile(fileName)) return false;
 
+        var fields = new List<(string Name, string Value)> { ("Type", typeName), ("File", fileName) };
+        fields.AddRange(extra);
+        fields.Add(("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        AppendEntry(fields);
+        _entries.Add((typeName, fileName));
+        return true;
+    }
+
+    private void AppendEntry(IReadOnlyList<(string Name, string Value)> fields)
+    {
         string path = Path.Combine(Folder, "SDSContent.xml");
         var document = new System.Xml.XmlDocument { PreserveWhitespace = true };
         document.Load(path);
         System.Xml.XmlNode root = document.DocumentElement
             ?? throw new SdsFormatException($"SDSContent.xml in '{Folder}' has no root element");
-
-        var fields = new List<(string Name, string Value)> { ("Type", typeName), ("File", fileName) };
-        fields.AddRange(extra);
-        fields.Add(("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
         System.Xml.XmlElement entry = document.CreateElement("ResourceEntry");
         foreach ((string name, string value) in fields)
@@ -229,8 +253,5 @@ public sealed class SdsManifest
         string temp = path + ".tmp";
         document.Save(temp);
         File.Move(temp, path, overwrite: true);
-
-        _entries.Add((typeName, fileName));
-        return true;
     }
 }

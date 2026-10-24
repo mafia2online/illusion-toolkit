@@ -40,6 +40,7 @@ public partial class MainWindow : Window
 
         // Catalog ready → populate the area selector.
         Viewport.CatalogReady += () => Dispatcher.Invoke(PopulateAreas);
+        Viewport.ZonePicked += OnZonePicked;
 
         // Live camera position output to the bottom panel (per-frame, already on the UI thread).
         Viewport.CameraMoved += UpdateCameraReadout;
@@ -169,6 +170,22 @@ public partial class MainWindow : Window
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         ModifierKeys modifiers = Keyboard.Modifiers;
         bool typing = IsTextFieldFocused();
+
+        // A zone under the gizmo: Esc drops the drag and nothing else gets through, wherever the focus is.
+        if (ToolShelf.IsZoneDragging)
+        {
+            HandleViewportKey(key, modifiers, e.IsRepeat);
+            e.Handled = true;
+            return;
+        }
+
+        // The "new zone" flyout has the keyboard while it is open: with one of its lists focused nothing is a
+        // text field, and a letter meant for the list started a tool - or Delete took the selection out.
+        if (ToolShelf.IsFlyoutOpen)
+        {
+            base.OnPreviewKeyDown(e);
+            return;
+        }
 
         if ((!typing && (HandleViewportKey(key, modifiers, e.IsRepeat) || HandleBridgeKey(key, modifiers)))
             || EditorCommands.Handle(key, modifiers, this))
@@ -818,7 +835,11 @@ public partial class MainWindow : Window
 
     private void Zones_Changed(object sender, RoutedEventArgs e)
     {
-        if (Viewport != null) Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        if (Viewport == null) return;
+        Viewport.ShowZones = ZonesToggle.IsChecked == true;
+        ToolShelf.SetZonesLayer(Viewport.ShowZones);
+        // a zone picked while the layer was up is not left picked - and under the gizmo - with nothing drawn
+        if (!Viewport.ShowZones) Viewport.Catalogs.SelectZone(null);
     }
 
     // Shading mode (Blender-style): the checked radio drives the viewport render mode.

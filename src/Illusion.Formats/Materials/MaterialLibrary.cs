@@ -44,10 +44,12 @@ public class MaterialLibrary
     public void WriteMatFile(string name)
     {
         _name = name;
-        byte[] bytes = Native.Materials.NativeMtl.SaveLibrary(
-            Native.Materials.NativeMtl.ToWire(_version, _unk2, _materials));
-        File.WriteAllBytes(name, bytes);
+        File.WriteAllBytes(name, ToBytes());
     }
+
+    /// <summary>The library as an .mtl file holds it.</summary>
+    public byte[] ToBytes() =>
+        Native.Materials.NativeMtl.SaveLibrary(Native.Materials.NativeMtl.ToWire(_version, _unk2, _materials));
 
     public IMaterial? LookupMaterialByHash(ulong hash)
     {

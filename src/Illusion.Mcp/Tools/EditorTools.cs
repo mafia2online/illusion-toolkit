@@ -350,12 +350,12 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_export_m2o")]
-    [Description("Export a built car as a Mafia II Online resource folder: package.json (mafiahub.files ships sds/** and vehicles.json), sds/cars/<name>.sds with its winter _z twin, and vehicles.json — the path the game loads each archive from, model name, title per language, the car it was cloned from, the hashes the archive is keyed by, its vehicles.tbl and PaintCombinations rows, size and sha256 of each archive. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout. A second export into the same folder adds to the list. Writes only the output folder — nothing of the game or of the multiplayer. The multiplayer cannot load a vehicle model from a resource yet: the folder is what its developer is asked to support.")]
+    [Description("Export a built car as a Mafia II Online resource folder: package.json and stream/sds/cars/<name>.sds with its winter _z twin — one archive per car, which the server registers by file name (a stock car's name replaces that car). Materials the car uses that the game did not ship with (ones the toolkit created) go into stream/materials/<name>.mtl, a library the multiplayer loads in addition to the game's own the way the game loads a mission pack's (LoadMTL, released when the player leaves); a server refuses a car whose new textures no streamed material uses. Takes pc\\sds\\cars\\<car>.sds as it stands (build first) and refuses an archive that is not filed under its own name throughout, or a material no library has. A second export into the same folder adds a car. Writes only the output folder — nothing of the game or of the multiplayer.")]
     public static async Task<string> CarExportM2o(
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("The car, by archive or model name, e.g. 'shubert_38_custom'.")] string car,
-        [Description("Full path of the folder to write. Default: <game>\\_illusion_export\\m2o\\<resource>. Must be empty or an earlier export.")] string? output = null,
+        [Description("Full path of the folder to write. Default: <game>\\_illusion_export\\m2o\\<resource>. Must be empty or an earlier export in this layout.")] string? output = null,
         [Description("The resource's name (lower-case letters, digits, '-', '_', '.'). Default: 'car-' + the car's name with '-' for '_'.")] string? resource = null)
     {
         try
@@ -957,6 +957,130 @@ public sealed class EditorTools
         {
             if (await ui.RunAsync(editor.Redo) is { } refused) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, status = await StatusOf(editor, ui) });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zones_at")]
+    [Description("Which LOAD ZONES hold a world point, and which districts the game is asked to keep loaded there. The city is tiled with AREA volumes (in city_univers.sds); while the camera is inside one, the districts its entry in cityareas.bin names stay loaded. A point that lies in no volume asks for nothing - a player teleported there stands in a district that does not stream in. Each zone is tested by its real volume (its planes), not only its box. 'near' also lists the zones that miss the point by up to that many metres, with the distance - which shows the edges of a gap.")]
+    public static async Task<string> ZonesAt(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("World position [x, y, z].")] float[] point,
+        [Description("Also list zones that miss the point by up to this many metres. Default 0: only the zones that hold it.")] float near = 0,
+        [Description("Which copy of city_univers.sds to read: 'base' (default) or a DLC's folder name, e.g. 'cnt_joes_adventures'. A DLC can ship a copy of its own - a different scene with fewer zones; free ride (a multiplayer client that mounts Joe's Adventures included) was measured to use the BASE copy. The result lists the copies there are.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<LoadZoneInfo> zones = [];
+            IReadOnlyList<string> districts = [];
+            IReadOnlyList<string> copies = [];
+            string? refused = await ui.RunAsync(() => editor.ZonesAt(point, near, copy, out zones, out districts, out copies));
+            return refused != null
+                ? ToolResult.Invalid(refused)
+                : ToolResult.Json(new
+                {
+                    success = true,
+                    copy = string.IsNullOrWhiteSpace(copy) ? "base" : copy,
+                    copies,
+                    districtsAskedFor = districts,
+                    inNoZone = !zones.Any(z => z.Inside),
+                    zones,
+                });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zones_map")]
+    [Description("A plan of where a district is asked for by the load zones, as rows of text, north up and x running left to right: '#' a zone holding the point names the district, '+' zones hold the point but none names it, '.' no zone holds the point. Use it to see a gap in the zones before sending players somewhere the stock game never let them stand, and to check a zone_move_face.")]
+    public static async Task<string> ZonesMap(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("District archive name, e.g. 'greenfield'.")] string district,
+        [Description("One corner of the plan [x, y].")] float[] from,
+        [Description("The opposite corner [x, y].")] float[] to,
+        [Description("Step between samples, metres. Default 20.")] float step = 20,
+        [Description("Height the samples are taken at. Default 0.")] float z = 0,
+        [Description("Which copy of city_univers.sds: 'base' (default) or a DLC's folder name. See zones_at.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<string> rows = [];
+            string? refused = await ui.RunAsync(() => editor.ZonesMap(district, from, to, step, z, copy, out rows));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, district, step, z, rows });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_move_face")]
+    [Description("Move one face of a load zone to a world coordinate, to close a gap in the zones or pull a zone back: the plane that bounds the volume on that side and its box are changed together. Only for a volume that stands square to the map and a face square to the axis. By default it only REPORTS what would change; apply=true writes the scene of city_univers.sds to its working copy - then editor_build or archive_build packs that archive (with a backup) and the game sees it. With the map editor open a move in the base copy is one step of its history (editor_undo takes it back); a move in a DLC's copy, or in every copy at once, is not. city_univers.sds is shared by the whole city and by both seasons, so every client of a multiplayer server needs the same file. What loads a district where a player appears is a zone naming TWO districts (zones_at lists them); a zone naming one did not load it by itself when measured in the game. The base copy is the one edited unless 'copy' says otherwise.")]
+    public static async Task<string> ZoneMoveFace(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The zone's name, as zones_at lists it, e.g. 'AREA0019_GREENFIELD'.")] string zone,
+        [Description("Which face: '+x', '-x', '+y', '-y', '+z' or '-z' (the face on that side of the volume).")] string face,
+        [Description("Where that face is to stand, on its axis, in world coordinates.")] float to,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false,
+        [Description("Which copy of city_univers.sds: 'base' (default), a DLC's folder name, or 'all' for every copy that has the zone.")] string? copy = null)
+    {
+        try
+        {
+            IReadOnlyList<LoadZoneMoveInfo> results = [];
+            string? refused = await ui.RunAsync(() => editor.ZoneMoveFace(zone, face, to, apply, copy, out results));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, moved = results });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_create")]
+    [Description("Add a NEW load zone to city_univers.sds (the base copy): a box standing square to the map between two world corners that keeps one or two districts loaded while the player is inside it. It is made as a copy of an existing zone ('like' - its flags, parent and name-table membership) with a name, a place and a shape of its own, and gets a line in cityareas.bin. By default it only REPORTS; apply=true writes the scene, the frame name table and cityareas.bin to the working copy - then archive_build packs city_univers.sds (with a backup). With the map editor open the zone is one step of its history (editor_undo takes it out); zone_delete takes it out later. Refused while an editor holds city_univers (Whole map). Measured in the game: the NAME decides whether the zone loads its districts for a player who appears inside it - two words after the number ('AREA900_DOCK_SOUTH') and it does, one word ('AREA900_DOCK') and it does not, whatever districts it names; the result says which it is ('loadsOnArrival').")]
+    public static async Task<string> ZoneCreate(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The new zone's name, e.g. 'AREA900_SANDISLAND_TUNEL' - two words after the number, or the game will not load the districts for a player who appears inside. No object of the scene may have it.")] string name,
+        [Description("An existing zone to make it like, as zones_at lists it - one that stands square to the map.")] string like,
+        [Description("One corner of the box, world [x, y, z].")] float[] boxMin,
+        [Description("The opposite corner, world [x, y, z].")] float[] boxMax,
+        [Description("The districts it keeps loaded: one or two archive names, e.g. ['sandisland', 'tunel'].")] string[] districts,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? made = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneCreate(name, like, boxMin, boxMax, districts, apply, out made));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = made, loadsOnArrival = made?.LoadsOnArrival });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    [McpServerTool(Name = "zone_delete")]
+    [Description("Take a load zone that was ADDED (zone_create, or the editor's New loading zone button - zones_at marks such a zone 'Added') out of city_univers.sds again: its volume, its place in the frame name table and its line in cityareas.bin. A zone the game ships with is refused. By default it only REPORTS; apply=true writes the working copy - then archive_build packs city_univers.sds. With the map editor open it is one step of its history (editor_undo puts the zone back). Refused while an editor holds city_univers (Whole map).")]
+    public static async Task<string> ZoneDelete(
+        IEditorSession editor,
+        IUiThreadMarshal ui,
+        [Description("The zone's name, as zones_at lists it.")] string name,
+        [Description("Write the change to the working copy. Default false: report only.")] bool apply = false)
+    {
+        try
+        {
+            LoadZoneInfo? gone = null;
+            string? refused = await ui.RunAsync(() => editor.ZoneDelete(name, apply, out gone));
+            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, applied = apply, zone = gone });
         }
         catch (Exception ex)
         {

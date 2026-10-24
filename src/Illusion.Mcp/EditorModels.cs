@@ -72,10 +72,10 @@ public sealed record CrashPlacementInfo(string Prop, int Id, float[] Position, b
 public sealed record CarSubstituteInfo(string Model, IReadOnlyList<PackedArchive> Packed, IReadOnlyList<string> Notes);
 
 /// <summary>A car exported as a multiplayer resource: the folder and the resource's name, the model, its title
-/// and the car it was cloned from, how many cars the folder lists now, the files written and what the one
-/// shipping it should know.</summary>
+/// and the car it was cloned from, how many cars the folder holds now, the materials written into its library,
+/// the files written and what the one shipping it should know.</summary>
 public sealed record M2oExportInfo(string Folder, string Resource, string Model, string? Title, string? BasedOn,
-    int Vehicles, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
+    int Vehicles, IReadOnlyList<string> Materials, IReadOnlyList<string> Files, IReadOnlyList<string> Notes);
 
 /// <summary>One entity-data table of a car — a car ships several (the stock one and its tuned variants); the
 /// label names its mass and power, which is what tells them apart.</summary>
@@ -147,3 +147,17 @@ public sealed record ObjectImportOutcome(
 
 /// <summary>Where the viewport camera is. Yaw and pitch are in radians, as the camera keeps them.</summary>
 public sealed record CameraInfo(float[] Position, float Yaw, float Pitch, float OrbitDistance);
+
+/// <summary>One load zone at a point: the districts it keeps loaded, whether the point is inside its volume
+/// (and how far outside when not), its box in world space, whether it is of the kind that loads its districts
+/// for a player who appears inside it - which its name decides (two words after the number) - and whether it
+/// was added to the zones the game ships with.</summary>
+public sealed record LoadZoneInfo(string Name, IReadOnlyList<string> Districts, bool Inside, float OutsideBy, float[] BoxMin, float[] BoxMax,
+    bool LoadsOnArrival = false, bool Added = false);
+
+/// <summary>A face of a load zone moved - or, when not applied, what moving it would do: from where to where on
+/// its axis (world), the zone's box afterwards, the districts it asks for, and the working-copy file written.</summary>
+/// <paramref name="Copy"/> is which copy of city_univers.sds this is about: "base" or a DLC's folder name.
+public sealed record LoadZoneMoveInfo(
+    string Copy, string Zone, string Face, float From, float To, float[] BoxMin, float[] BoxMax, IReadOnlyList<string> Districts, bool Applied,
+    string? File, string Archive);

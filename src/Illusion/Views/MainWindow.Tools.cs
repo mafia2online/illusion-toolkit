@@ -10,6 +10,7 @@ namespace Illusion.Views;
 public partial class MainWindow
 {
     private HideTrianglesWindow? _hideTriangles;
+    private LoadZonesWindow? _loadZones;
     private StreamMapWindow? _streamMap;
 
     // The mirror item says in its tooltip why it cannot run, instead of failing on the click.
@@ -35,12 +36,12 @@ public partial class MainWindow
     }
 
     // One window of a kind per editor: asking for it again brings the open one forward.
-    private static T ShowTool<T>(T? open, Func<T> create, Action<T?> keep) where T : Window
+    private static T ShowTool<T>(T? open, Func<T> create, Action<T?> keep, bool activate = true) where T : Window
     {
         if (open != null)
         {
             if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
-            open.Activate();
+            if (activate) open.Activate();
             return open;
         }
         T window = create();
@@ -52,6 +53,18 @@ public partial class MainWindow
 
     private void HideTriangles_Click(object sender, RoutedEventArgs e) =>
         ShowTool(_hideTriangles, () => new HideTrianglesWindow(Viewport) { Owner = this }, w => _hideTriangles = w);
+
+    private void LoadZones_Click(object sender, RoutedEventArgs e) =>
+        ShowTool(_loadZones, () => new LoadZonesWindow(Viewport) { Owner = this }, w => _loadZones = w);
+
+    // A click on the scene with the Loading zones layer up picked a zone (D3DImageHost.PickZone). The zone is
+    // edited where it stands, with the tool shelf's Move and Scale; the Loading zones window does not come up
+    // for it - but one that is already open follows the pick, for whoever wants the numbers.
+    private void OnZonePicked(System.Numerics.Vector3 at, string? zone)
+    {
+        _loadZones?.ShowPoint(at, zone);
+        if (zone != null) PostNotice($"{zone} picked - Move moves it, Scale pulls a face; click the same spot for the next zone there.", false);
+    }
 
     private void StreamMap_Click(object sender, RoutedEventArgs e) =>
         ShowTool(_streamMap, () => new StreamMapWindow { Owner = this }, w => _streamMap = w);

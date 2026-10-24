@@ -259,6 +259,31 @@ over the same job the matching tool runs, so a result does not depend on who ask
 - **Mirror to winter…** (map editor) - carries the loaded district's edits into its winter archive.
   The item is greyed out, and says why, when the district has no winter variant or the winter one is
   what is loaded.
+- **Loading zones…** (map editor) - lists the zones of `city_univers` that hold a point (the
+  camera's, or one typed in), says which districts a player who appears there gets, and moves one
+  face of a zone. A district streams in where a zone named with two words after its number
+  (`AREA341_GREENFIELD_KINGSTONE`) holds the player; one named with a single word
+  (`AREA0019_GREENFIELD`) does not load it by itself. A moved face is written at once, redrawn in the Loading
+  zones layer, queued for Build, and is one step of the editor's Undo.
+  The zones are also edited in the viewport, with no window: with the **Loading zones** layer on, a
+  click picks the zone that spot is in (the same spot again takes the next one there) and the tool
+  shelf works on it - **Move** puts three arrows at the zone's centre and moves it whole, **Scale**
+  puts an arrow at the centre of each face and pulls that face alone. A side sliced off by a slanted
+  plane has no arrow. Letting go writes `city_univers` and queues it for Build; the right button or
+  Esc drops a drag, and Undo / Redo take back exactly what the drag changed. With **Whole map** on the
+  editor holds `city_univers` itself; a zone write is carried into that scene too, so the editor's own
+  save does not put the zone back.
+  The layer draws each zone as the edges of its box with a faint fill, hidden by the scene in front of
+  it and fading with distance (not in a parallel view); a zone with one word in its name - which does
+  not load its district by itself - is drawn fainter, the picked zone carries its name and
+  districts over it, and a zone that was added to the game's own has a second, near-white frame
+  round it (and "added" in its label and in the Loading zones list).
+  **New loading zone** (the button at the foot of the tool shelf, with the layer on) makes a zone
+  where the view looks: a name and the one or two districts it keeps loaded are asked, the box appears
+  picked, and Move and Scale put it in place. The name wants two words after its number
+  (`AREA900_DOCK_SOUTH`): that is what makes the game load the districts for a player who appears
+  inside, and the flyout says so when a name has one. It is written at once - the scene, its name
+  table and `cityareas.bin` - and Undo takes it out again. Not with Whole map on.
 - **Stream map…** - find and replace across the text of a `StreamMapa.bin` (archive paths, instance,
   line and group names), with every string it would change listed before anything is written and a
   backup kept beside the file.
@@ -272,7 +297,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 81 tools. The file tools all read through the same format layer the editor uses, so what
+It serves 86 tools. The file tools all read through the same format layer the editor uses, so what
 a model is told about a file is what the toolkit itself sees; the editor tools drive the running
 map editor itself.
 
@@ -291,6 +316,7 @@ map editor itself.
 | **Scene** | `scene_find`, `scene_select`, `scene_delete_selected`, `scene_duplicate_selected`, `object_move`, `object_properties`, `object_set_property`, `actor_import`, `object_import`, `mesh_hide_triangles`, `mesh_materials`, `collision_unused_hulls`, `crash_placements` |
 | **Resource editor** | `editor_target`, `resource_list`, `resource_open`, `resource_status`, `car_tuning`, `car_tuning_set` |
 | **Cars** | `car_clone`, `car_substitute`, `car_export_m2o`, `archive_build` |
+| **Loading zones** | `zones_at`, `zones_map`, `zone_move_face`, `zone_create`, `zone_delete` |
 | **Blender session** | `blender_open`, `blender_push`, `blender_end` |
 | **Viewport** | `camera_get`, `camera_set`, `camera_look_at`, `camera_frame_selection`, `view_set`, `viewport_screenshot` |
 
@@ -311,6 +337,19 @@ and no UV is touched. `collision_unused_hulls` counts, and with `apply` removes,
 `crash_placements` lists the crash-layer props (trees, lamps, bins) standing in a box and can
 delete them, the twin season included.
 
+`zones_at` lists the load zones of `city_univers` that hold a point and the districts they name,
+`zones_map` draws where a district is asked for as a text plan, and `zone_move_face` moves one face
+of a zone (its plane and its box together; reports by default, writes with `apply`). Measured in
+the game: a district streams in where a zone named with two words after its number holds the player
+- one named with a single word does not load it by itself - and free ride reads the base game's
+`city_univers`, not the copy a DLC ships.
+`zone_create` adds a new zone: a box between two corners, made like an existing zone, with a line in
+`cityareas.bin` for the districts it keeps loaded. Measured in the game, with new zones over one
+spot: a player who appears inside a zone named `AREA901_FOO_BAR` gets the district - with one
+district in the table or two - and inside one named `AREA902_FOOXBAR` he does not. With the map
+editor open the new zone is a step of its history; `zone_delete` takes an added zone out again (a
+zone the game ships with is refused). Zones are made in the base game's `city_univers` only.
+
 **Cars.** `car_clone` makes a new car out of an existing one for single player: a copy of its
 archive (and the winter `_z` twin) with the root frame, name table, prefab entry, entity data and
 geometry buffers filed under the new model name, registered in the vehicle, paint, cover-point and
@@ -318,12 +357,17 @@ traffic tables, with a title of its own in every installed language. `car_substi
 under ANOTHER car's name instead - that car's archive is replaced (backup kept) and no table is
 touched - which is how a car is tried where nothing can be registered, such as a multiplayer that
 spawns from a fixed list of names. `car_export_m2o` writes a built car out as an M2O resource
-folder: `package.json`, the archives under `sds/cars/` and `vehicles.json`, which names for each car
-the path the game loads it from, the model name its archive is keyed by, its title per language,
-the car it was cloned from, its `vehicles.tbl` and `PaintCombinations.tbl` rows, and the size and
-SHA-256 of each file; only the archives travel, no table edit does. It refuses an archive that is
-not filed under its own name throughout, and says so when the buffers still bear the source car's
-names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
+folder: `package.json`, the archive (with its winter `_z` twin) under `stream/sds/cars/`, and when
+needed a material library under `stream/materials/`. A clone's archives also carry its `vehicles.tbl`
+row as a table patch the game appends while the car is loaded (the way Joe's Adventures adds its cars),
+keeping the id and title of the car it was made from, which the game indexes per-car data by. That is all a server owner ships - the server registers each archive by its file name, a stock car's name
+replacing that car. Materials the car uses that the game did not ship with (ones the toolkit created
+for it) are written to `stream/materials/<name>.mtl`, an MTL library of just those materials, which
+the multiplayer loads in addition to the game's own libraries the way the game loads a mission
+pack's (`LoadMTL`), and releases when the player leaves the server. "Shipped with" means the libraries in `edit\materials` as they were before the toolkit
+first wrote them (the oldest backup). No other table edit travels. It refuses a car named with anything but a-z, 0-9 and _ (all a server streams), an archive that is not filed
+under its own name throughout and a car using a material no library has, and says so when the
+buffers still bear the source car's names. `archive_build` packs one archive's working copy with the usual backup, for an edit made in
 the working copy itself. `--probe-car-clone` and `--probe-car-m2o` cover them on scratch copies.
 
 Two of the file tools are worth knowing about before you rely on them. `edit_stream_map` is the

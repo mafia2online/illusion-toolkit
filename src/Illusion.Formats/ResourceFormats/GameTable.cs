@@ -21,6 +21,9 @@ public sealed class GameTable
     /// <summary>The Table entry's format version the file carries.</summary>
     public ushort Version { get; }
 
+    /// <summary>The name the game files the table under, such as <c>/tables/vehicles.tbl</c>.</summary>
+    public string Name => _data.Name;
+
     public int ColumnCount => _data.Columns.Count;
 
     public int RowCount => _data.Rows.Count;
@@ -50,6 +53,33 @@ public sealed class GameTable
         copy.Values.AddRange(_data.Rows[row].Values);
         _data.Rows.Add(copy);
         return _data.Rows.Count - 1;
+    }
+
+    /// <summary>
+    /// A copy of one row as a table of its own named <c>/tables/patch_&lt;tag&gt;_&lt;this table's file&gt;</c>: a
+    /// table patch. An archive that carries it appends the row to this table while it is loaded, and takes it
+    /// out again when it unloads — <c>C_Table::LoadSDS</c> reads the target from the name (format version 1),
+    /// and <c>C_TableData::GetLine</c> serves patched rows after the table's own. The tag may not hold an
+    /// underscore: the target is what follows the first one.
+    /// </summary>
+    public GameTable PatchRow(int row, string tag)
+    {
+        if (tag.Length == 0 || tag.Contains('_')) throw new ArgumentException("a patch tag is not empty and holds no underscore", nameof(tag));
+        string name = "/tables/patch_" + tag + "_" + _data.Name[(_data.Name.LastIndexOf('/') + 1)..];
+        var data = new TableData
+        {
+            Name = name,
+            NameHash = Fnv64.Hash(name),
+            Unk1 = _data.Unk1,
+            Unk2 = _data.Unk2,
+            PatchedName = "",
+            RowSizeOnDisk = _data.RowSizeOnDisk,
+        };
+        data.Columns.AddRange(_data.Columns);
+        var copy = new TableData.Row();
+        copy.Values.AddRange(_data.Rows[row].Values);
+        data.Rows.Add(copy);
+        return new GameTable(Version, data);
     }
 
     /// <summary>The first row whose cell in <paramref name="column"/> is the text <paramref name="text"/>,

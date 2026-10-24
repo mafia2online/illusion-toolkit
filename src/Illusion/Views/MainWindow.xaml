@@ -61,6 +61,8 @@
                           ToolTip="Cut an opening in the selected mesh - a doorway, a pane of glass - without rebuilding it" />
                 <MenuItem x:Name="MirrorWinterItem" Header="Mirror to winter…" Click="MirrorWinter_Click" />
                 <Separator />
+                <MenuItem Header="Loading zones…" Click="LoadZones_Click"
+                          ToolTip="Which zones make the game load a district at a point, and moving a zone's face" />
                 <MenuItem Header="Stream map…" Click="StreamMap_Click"
                           ToolTip="Find and replace in StreamMapa.bin - archive paths, line and group names" />
             </MenuItem>
@@ -163,7 +165,7 @@
                                                               Opacity="0.5" />
                                         </Border.Effect>
                                         <StackPanel x:Name="LayerRows">
-                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district">
+                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district. With this on a click picks the zone that spot is in (again for the next one there); Move then moves it and Scale pulls its faces">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />

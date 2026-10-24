@@ -1,4 +1,5 @@
 using System.Numerics;
+using Illusion.Formats.Archive;
 using Illusion.Formats.CityAreas;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -40,10 +41,14 @@ public static class AreaZones
         if (areaDistricts.Count == 0) return zones;
 
         // FrameResource city_univers → AREA boxes (name + world AABB).
-        ExtractedSds scene = ExtractedSds.Load(extracted);
-        if (scene.FrameResource?.FrameObjects == null) return zones;
+        // The scene alone: a volume is a matrix and a box, and the archive's vertex and index pools - which
+        // ExtractedSds reads and decodes in full - say nothing about it. This runs again after every zone edit.
+        IReadOnlyList<string> scenes = SdsManifest.Load(extracted).GetFiles("FrameResource");
+        if (scenes.Count == 0) return zones;
+        var frame = new FrameResource(scenes[0]);
+        if (frame.FrameObjects == null) return zones;
 
-        foreach (var pair in scene.FrameResource.FrameObjects)
+        foreach (var pair in frame.FrameObjects)
         {
             if (pair.Value is not FrameObjectArea area) continue;
             string? name = area.Name?.ToString();

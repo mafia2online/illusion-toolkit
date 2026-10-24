@@ -156,8 +156,8 @@ public interface IEditorSession
     /// no table. Null on success.</summary>
     string? SubstituteCar(string source, string target, out CarSubstituteInfo? result);
 
-    /// <summary>Exports a built car as a multiplayer resource folder (package.json, sds/cars/, vehicles.json);
-    /// nothing of the game is written. Null on success.</summary>
+    /// <summary>Exports a built car as a multiplayer resource folder (package.json, stream/sds/cars/ and, for the
+    /// materials the car adds, stream/materials/); nothing of the game is written. Null on success.</summary>
     string? ExportCarForM2o(string car, string? output, string? resource, out M2oExportInfo? result);
 
     /// <summary>Finds — and with <paramref name="apply"/> hides, as one undoable edit — the triangles of a mesh
@@ -187,4 +187,33 @@ public interface IEditorSession
     string? Undo();
 
     string? Redo();
+
+    /// <summary>The load zones that hold a world point, and those within <paramref name="near"/> metres of holding
+    /// it, read from city_univers; <paramref name="districts"/> are the districts asked for there. Null on success.</summary>
+    /// <param name="copy">Which copy of city_univers.sds: null or "base" for the base game's, or a DLC's folder name
+    /// (a DLC can ship a copy of its own - a different scene; free ride was measured to use the base one).</param>
+    string? ZonesAt(float[] point, float near, string? copy, out IReadOnlyList<LoadZoneInfo> zones, out IReadOnlyList<string> districts,
+        out IReadOnlyList<string> copies);
+
+    /// <summary>A plan, north up, of where a district is asked for: one text row per step, '#' where a zone
+    /// holding the point names the district, '+' where zones hold it and none does, '.' where no zone holds it.
+    /// Null on success.</summary>
+    string? ZonesMap(string district, float[] from, float[] to, float step, float z, string? copy, out IReadOnlyList<string> rows);
+
+    /// <summary>Moves one face of a load zone to a world coordinate - its plane and its box together. Without
+    /// <paramref name="apply"/> nothing is written. With it the scene of city_univers is saved to the working
+    /// copy; archive_build then takes it into the game. The face is moved in the base copy, in the copy named, or -
+    /// for "all" - in EVERY copy of city_univers.sds that has the zone, one result each. Null on success.</summary>
+    string? ZoneMoveFace(string zone, string face, float to, bool apply, string? copy, out IReadOnlyList<LoadZoneMoveInfo> results);
+
+    /// <summary>Adds a new load zone to the base copy of city_univers: a box between two world corners, made like
+    /// an existing zone, keeping the one or two districts named loaded. Without <paramref name="apply"/> nothing
+    /// is written. With it the scene, the frame name table and cityareas.bin are saved to the working copy.
+    /// Null on success.</summary>
+    string? ZoneCreate(string name, string like, float[] boxMin, float[] boxMax, string[] districts, bool apply, out LoadZoneInfo? zone);
+
+    /// <summary>Takes a load zone that was ADDED to the game's own out of the base city_univers.sds again: its
+    /// volume, its place in the frame name table and its line in cityareas.bin. Without <paramref name="apply"/>
+    /// nothing is written. A zone the game ships with is refused. Null on success.</summary>
+    string? ZoneDelete(string name, bool apply, out LoadZoneInfo? zone);
 }
