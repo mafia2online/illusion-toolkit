@@ -376,29 +376,32 @@ public sealed class ShopPlaces
         if ((_shopArchive == null || _shopScene == null) && !_tableOnly) return [];
         string cityDir = MafiaEnvironment.ExtractedDir(CityArchive);
         string? shopDir = _shopArchive == null ? null : MafiaEnvironment.ExtractedDir(_shopArchive);
+        _saved = null;
         bool madeFolder = false;
-        if (_copyFrom != null && shopDir != null)
-        {
-            // a new interior: its working copy is the copied one's, made now - and taken away again if the rest fails
-            if (Directory.Exists(shopDir)) throw new IOException($"there is already a folder at {shopDir}");
-            // the copy asks the engine for the memory its source asks: written beside the source, copied with it
-            if (_copySource != null) SdsWriter.EnsureMemoryRequirements(_copySource);
-            CopyFolder(_copyFrom, shopDir);
-            madeFolder = true;
-        }
-        List<string> files =
-        [
-            .. shopDir == null || madeFolder ? [] : SdsManifest.Load(shopDir).GetFiles("FrameResource").Take(1),
-            .. shopDir == null || madeFolder ? [] : SdsManifest.Load(shopDir).GetFiles("FrameNameTable").Take(1),
-            .. SdsManifest.Load(cityDir).GetFiles("FrameResource").Take(1), .. SdsManifest.Load(cityDir).GetFiles("FrameNameTable").Take(1),
-            _tableFile,
-        ];
         // keyed by the full path: a writer may spell a file another way than the manifest does
         var before = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
-        foreach (string f in files) before[Path.GetFullPath(f)] = File.Exists(f) ? File.ReadAllBytes(f) : null;
         var written = new List<string>();
         try
         {
+            if (_copyFrom != null && shopDir != null)
+            {
+                // a new interior: its working copy is the copied one's, made now - and taken away again if the rest
+                // fails (a copy cut short too: what stands there is the save's own)
+                if (Directory.Exists(shopDir)) throw new IOException($"there is already a folder at {shopDir}");
+                // the copy asks the engine for the memory its source asks: written beside the source, copied with it
+                if (_copySource != null) SdsWriter.EnsureMemoryRequirements(_copySource);
+                madeFolder = true;
+                CopyFolder(_copyFrom, shopDir);
+            }
+            List<string> files =
+            [
+                .. shopDir == null || madeFolder ? [] : SdsManifest.Load(shopDir).GetFiles("FrameResource").Take(1),
+                .. shopDir == null || madeFolder ? [] : SdsManifest.Load(shopDir).GetFiles("FrameNameTable").Take(1),
+                .. SdsManifest.Load(cityDir).GetFiles("FrameResource").Take(1), .. SdsManifest.Load(cityDir).GetFiles("FrameNameTable").Take(1),
+                _tableFile,
+            ];
+            foreach (string f in files) before[Path.GetFullPath(f)] = File.Exists(f) ? File.ReadAllBytes(f) : null;
+
             // the table first: it is the one that can refuse (names past the reach of their offsets)
             byte[] table = _table.ToBytes();
             if (_shopArchive != null && _shopScene != null)
@@ -413,8 +416,9 @@ public sealed class ShopPlaces
             _saved = new SavedState(before, written, madeFolder ? shopDir : null);
             return written;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException)
+        catch (Exception ex)
         {
+            // whatever stopped it (a writer may throw more than file trouble), nothing of it is left half written
             List<string> left = PutBack(new SavedState(before, written, madeFolder ? shopDir : null));
             if (left.Count == 0) throw;
             throw new IOException($"{ex.Message} - and the working copies could not be put back as they were ({string.Join(", ", left)}): unpack the archives again", ex);
@@ -452,7 +456,7 @@ public sealed class ShopPlaces
         }
         foreach (string file in saved.Written)
         {
-            if (saved.MadeFolder is { } inside && Path.GetFullPath(file).StartsWith(Path.GetFullPath(inside), StringComparison.OrdinalIgnoreCase)) continue;
+            if (saved.MadeFolder is { } inside && Path.GetFullPath(file).StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(inside)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
             // a file with no image of its own from before the save is not one this can put back - said, not skipped
             if (!saved.Before.TryGetValue(Path.GetFullPath(file), out byte[]? bytes))
             {
