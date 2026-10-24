@@ -133,6 +133,11 @@ public static class MaterialVariants
         {
             failure = "a texture could not be written: " + ex.Message;
         }
+        catch (Exception ex)
+        {
+            // Anything else part way (a picture the encoder refuses, a library that throws) is taken back the same.
+            failure = $"the variant could not be made ({ex.GetType().Name}): {ex.Message}";
+        }
         if (failure != null)
         {
             // Back to where it started: the copy out of the library, each texture name as it was.

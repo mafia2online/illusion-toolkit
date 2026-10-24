@@ -403,6 +403,19 @@ public static class CarLights
                 return string.Create(CultureInfo.InvariantCulture, $"the car already has the bone '{existing}', standing at {stands.X:0.###}, {stands.Y:0.###}, {stands.Z:0.###} - this does not move a beacon");
             }
         }
+        // ...and only where it works: the casing straight under the scale bone, the lamp under the casing (a casing
+        // hung under another part showed nothing in the game).
+        byte[] hung = o.Model.GetSkeletonHierarchyObject().ParentIndices ?? [];
+        foreach ((string name, string under) in new[] { (BeaconCasing, scaleBone), (BeaconLamp, BeaconCasing) })
+        {
+            int had = Array.FindIndex(o.Bones, b => string.Equals(b, name, StringComparison.OrdinalIgnoreCase));
+            if (had < 0) continue;
+            string? hangs = had < hung.Length && hung[had] < o.Bones.Length ? o.Bones[hung[had]] : null;
+            if (!string.Equals(hangs, under, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"the car already has the bone '{name}', but under '{hangs ?? "(none)"}' - a beacon's {(name == BeaconCasing ? "casing hangs under the scale bone" : "lamp hangs under the casing")} '{under}' - the beacon is not put on a rig made another way";
+            }
+        }
 
         bool bonesAdded = false;
         foreach ((string name, string under) in new[] { (BeaconCasing, scaleBone), (BeaconLamp, BeaconCasing) })

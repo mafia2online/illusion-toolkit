@@ -162,6 +162,12 @@ public static class CarWinter
         result = null;
         string staging = winterDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".new";
         string retired = winterDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".old";
+        if (Directory.Exists(retired) && !Directory.Exists(winterDir))
+        {
+            // An earlier run stopped between moving the winter copy aside and putting the new one in: the set-aside
+            // folder is the only winter copy there is, and clearing it away would lose it.
+            return $"the winter working copy is missing and {retired} holds the previous one - move it back to {winterDir} (or delete it) and run again";
+        }
         try
         {
             // ---- what the reference pair says winter is

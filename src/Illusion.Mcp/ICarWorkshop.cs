@@ -51,7 +51,7 @@ public interface ICarWorkshop
     string? CarCollisionRemove(string car, string component, int index, out CarCollisionsInfo? result);
 
     /// <summary>Makes a car's winter twin (name_z) again from its summer working copy, with the winter
-    /// materials, textures and effects the reference car's own pair shows.</summary>
+    /// materials, textures and effects the reference car's own pair shows. Called OFF the UI thread.</summary>
     string? CarWinter(string car, string reference, out CarWinterInfo? result);
 
     /// <summary>The materials a car's PREFAB tells the game to colour, dirty, burn and deform.</summary>

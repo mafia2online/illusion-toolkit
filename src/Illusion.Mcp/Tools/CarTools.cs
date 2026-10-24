@@ -32,9 +32,11 @@ public sealed class CarTools
             {
                 return ToolResult.Invalid("textures is a JSON object of sampler -> image file, e.g. {\"NormalTexture\": \"C:\\\\work\\\\n.png\"}");
             }
+            if (await ui.RunAsync(() => workshop.StageBusy(archive)) is { } busy) return ToolResult.Invalid(busy);
             MaterialVariantInfo? result = null;
             string? refused = await ui.RunAsync(() => workshop.MaterialVariant(source, name, archive, map ?? [], out result));
-            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, result });
+            if (refused != null) return ToolResult.Invalid(refused);
+            return ToolResult.Json(new { success = true, reloaded = await ui.RunAsync(() => workshop.Landed(archive)), result });
         }
         catch (Exception ex)
         {
@@ -54,9 +56,11 @@ public sealed class CarTools
     {
         try
         {
+            if (await ui.RunAsync(() => workshop.StageBusy(archive)) is { } busy) return ToolResult.Invalid(busy);
             ArchiveTextureInfo? result = null;
             string? refused = await ui.RunAsync(() => workshop.ArchiveTexture(archive, texture, image, remove, out result));
-            return refused != null ? ToolResult.Invalid(refused) : ToolResult.Json(new { success = true, result });
+            if (refused != null) return ToolResult.Invalid(refused);
+            return ToolResult.Json(new { success = true, reloaded = await ui.RunAsync(() => workshop.Landed(archive)), result });
         }
         catch (Exception ex)
         {
@@ -344,7 +348,8 @@ public sealed class CarTools
             if (await ui.RunAsync(() => workshop.StageBusy(car)) is { } busy) return ToolResult.Invalid(busy);
             if (await ui.RunAsync(() => workshop.StageBusy(twin)) is { } busyTwin) return ToolResult.Invalid(busyTwin);
             CarWinterInfo? result = null;
-            string? refused = await ui.RunAsync(() => workshop.CarWinter(car, reference, out result));
+            // The copy is long file work: off the UI thread, so the editor does not freeze while it runs.
+            string? refused = await Task.Run(() => workshop.CarWinter(car, reference, out result));
             if (refused != null) return ToolResult.Invalid(refused);
             return ToolResult.Json(new { success = true, reloaded = await ui.RunAsync(() => workshop.Landed(twin)), result });
         }
