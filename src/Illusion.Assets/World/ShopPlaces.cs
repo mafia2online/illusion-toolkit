@@ -47,6 +47,11 @@ public sealed class ShopPlaces
     private string? _copyFrom;       // the working copy a new interior's own is made from, on Save
     private bool _tableOnly;         // an interior was taken out: only city_univers changed
     private FileInfo? _copySource;   // the archive that working copy belongs to
+    private SavedState? _saved;      // what the last Save replaced, for TakeBackSave
+
+    // The working copies as they were before a Save: each file it was to write (null: not there), and the
+    // interior's folder when the save made it.
+    private sealed record SavedState(Dictionary<string, byte[]?> Before, List<string> Written, string? MadeFolder);
 
     /// <summary>The archive the volumes and the table are in.</summary>
     public FileInfo CityArchive { get; }
@@ -388,7 +393,9 @@ public sealed class ShopPlaces
             .. SdsManifest.Load(cityDir).GetFiles("FrameResource").Take(1), .. SdsManifest.Load(cityDir).GetFiles("FrameNameTable").Take(1),
             _tableFile,
         ];
-        Dictionary<string, byte[]?> before = files.ToDictionary(f => f, f => File.Exists(f) ? File.ReadAllBytes(f) : null, StringComparer.OrdinalIgnoreCase);
+        // keyed by the full path: a writer may spell a file another way than the manifest does
+        var before = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+        foreach (string f in files) before[Path.GetFullPath(f)] = File.Exists(f) ? File.ReadAllBytes(f) : null;
         var written = new List<string>();
         try
         {
@@ -403,37 +410,66 @@ public sealed class ShopPlaces
             if (SdsWriter.SaveFrameNameTable(_cityScene, CityArchive) is { } cityNames) written.Add(cityNames);
             AtomicFile.WriteAllBytes(_tableFile, table);
             written.Add(_tableFile);
+            _saved = new SavedState(before, written, madeFolder ? shopDir : null);
             return written;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException)
         {
-            var left = new List<string>();
-            if (madeFolder)
-            {
-                // the new interior's folder was made by this save and holds nothing else
-                try
-                {
-                    Directory.Delete(shopDir!, recursive: true);
-                }
-                catch (Exception again) when (again is IOException or UnauthorizedAccessException)
-                {
-                    left.Add(shopDir!);
-                }
-            }
-            foreach (string file in written.Where(f => !madeFolder || !f.StartsWith(shopDir!, StringComparison.OrdinalIgnoreCase)))
-            {
-                try
-                {
-                    if (before.GetValueOrDefault(file) is { } bytes) AtomicFile.WriteAllBytes(file, bytes);
-                }
-                catch (Exception again) when (again is IOException or UnauthorizedAccessException)
-                {
-                    left.Add(Path.GetFileName(file));
-                }
-            }
+            List<string> left = PutBack(new SavedState(before, written, madeFolder ? shopDir : null));
             if (left.Count == 0) throw;
             throw new IOException($"{ex.Message} - and the working copies could not be put back as they were ({string.Join(", ", left)}): unpack the archives again", ex);
         }
+    }
+
+    /// <summary>
+    /// Undoes the last <see cref="Save"/>: every file it wrote goes back to what it held (a file it made is
+    /// removed), and a new interior's working copy it made is taken away. For a caller whose next step after
+    /// the save failed - the first pack of a new interior - so that no table row is left naming an archive
+    /// the game does not have.
+    /// </summary>
+    /// <returns>The files and folders that could not be put back; empty when all were.</returns>
+    public IReadOnlyList<string> TakeBackSave()
+    {
+        if (_saved is not { } saved) return [];
+        _saved = null;
+        return PutBack(saved);
+    }
+
+    private static List<string> PutBack(SavedState saved)
+    {
+        var left = new List<string>();
+        if (saved.MadeFolder is { } made)
+        {
+            // the new interior's folder was made by the save and holds nothing else
+            try
+            {
+                if (Directory.Exists(made)) Directory.Delete(made, recursive: true);
+            }
+            catch (Exception again) when (again is IOException or UnauthorizedAccessException)
+            {
+                left.Add(made);
+            }
+        }
+        foreach (string file in saved.Written)
+        {
+            if (saved.MadeFolder is { } inside && Path.GetFullPath(file).StartsWith(Path.GetFullPath(inside), StringComparison.OrdinalIgnoreCase)) continue;
+            // a file with no image of its own from before the save is not one this can put back - said, not skipped
+            if (!saved.Before.TryGetValue(Path.GetFullPath(file), out byte[]? bytes))
+            {
+                left.Add(Path.GetFileName(file));
+                continue;
+            }
+            try
+            {
+                if (bytes != null) AtomicFile.WriteAllBytes(file, bytes);
+                else if (File.Exists(file)) File.Delete(file);       // the save made it
+            }
+            catch (Exception again) when (again is IOException or UnauthorizedAccessException)
+            {
+                left.Add(Path.GetFileName(file));
+            }
+        }
+        return left;
     }
 
     private static void CopyFolder(string from, string to)
