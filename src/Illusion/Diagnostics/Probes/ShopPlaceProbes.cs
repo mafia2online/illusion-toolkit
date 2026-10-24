@@ -46,6 +46,26 @@ internal static class ShopPlaceProbes
                     $"version {read.Version}, {read.Areas.Count} areas, {read.Shops.Count} interiors, {read.Shops.Sum(s => s.Places.Count)} places");
             }
 
+            // ---- a name buffer that holds one name twice, rows naming each copy: written back as it was read
+            {
+                byte[] names = [.. System.Text.Encoding.Latin1.GetBytes("shopa\0M_00\0M_00\0")];
+                using var ms = new MemoryStream();
+                using (var w = new BinaryWriter(ms, System.Text.Encoding.Latin1, leaveOpen: true))
+                {
+                    w.Write(0x63747368u); w.Write(8); w.Write(1); w.Write(names.Length); w.Write(1); w.Write(2); w.Write(0); w.Write(0);
+                    w.Write(names);
+                    w.Write(System.Text.Encoding.Latin1.GetBytes("LOAD\0UNLOAD\0")); w.Write((ushort)0);
+                    w.Write(System.Text.Encoding.Latin1.GetBytes("ShopA\0")); w.Write((ushort)6);
+                    w.Write(System.Text.Encoding.Latin1.GetBytes("act\0desc\0")); w.Write((short)0); w.Write(0); w.Write(0);
+                    w.Write(0);                     // entities
+                    w.Write(2);                     // places: one on each copy of the name
+                    foreach (ushort nameAt in new ushort[] { 6, 11 }) { w.Write(nameAt); w.Write(1f); w.Write(2f); w.Write(0); w.Write(0); }
+                }
+                byte[] doubled = ms.ToArray();
+                Check("a table whose buffer holds a name twice comes back byte for byte",
+                    doubled.AsSpan().SequenceEqual(CityShopsTable.Parse(doubled).ToBytes()));
+            }
+
             // ---- a place added and taken out again, in memory
             ShopPlaces places = ShopPlaces.Open(f => SdsMeshLoader.EnsureExtracted(f));
             byte[] tableBefore = places.Table.ToBytes();

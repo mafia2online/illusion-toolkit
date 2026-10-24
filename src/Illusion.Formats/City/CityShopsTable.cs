@@ -30,6 +30,8 @@ public sealed class CityShopsTable
     private readonly int _version;
     private readonly int _kept;                      // the header's middle number, whose meaning is not known
     private readonly List<string> _names = [];       // the name buffer, in the order it was read
+    private byte[] _nameBytes = [];                  // and as it was read, to be written back unchanged when it can
+    private Dictionary<int, string> _nameAt = [];    // the name that starts at each offset of that buffer
 
     /// <summary>A pair of volumes of <c>city_univers</c> and the archive under <c>shops\</c> they load.</summary>
     public sealed class Area
@@ -39,6 +41,8 @@ public sealed class CityShopsTable
         public required string Archive { get; set; }
         /// <summary>Version 9 only: a byte of the row, kept as read.</summary>
         public byte Pad { get; set; }
+        /// <summary>Where <see cref="Archive"/> was found in the name buffer as read (null: a new row).</summary>
+        internal int? ArchiveAt { get; set; }
     }
 
     /// <summary>One place an interior stands at.</summary>
@@ -55,6 +59,8 @@ public sealed class CityShopsTable
         public short[] Marks { get; set; } = [];
         /// <summary>Version 9 only: a byte of the row, kept as read.</summary>
         public byte Pad { get; set; }
+        /// <summary>Where <see cref="Marker"/> was found in the name buffer as read (null: a new place).</summary>
+        internal int? MarkerAt { get; set; }
     }
 
     /// <summary>An interior: its actor file, the entities of that file, and the places it stands at.</summary>
@@ -63,6 +69,8 @@ public sealed class CityShopsTable
         public required string Name { get; set; }
         /// <summary>The marker frame the interior itself hangs on.</summary>
         public required string Holder { get; set; }
+        /// <summary>Where <see cref="Holder"/> was found in the name buffer as read (null: a new row).</summary>
+        internal int? HolderAt { get; set; }
         public string ActorFile { get; set; } = "";
         public string Description { get; set; } = "";
         public short Unk1 { get; set; }
@@ -105,10 +113,12 @@ public sealed class CityShopsTable
             table._names.Add(name);
         }
         if (at - 32 != namesLength) throw new FileFormatException("cityshops.bin: its names run past the length the header gives");
+        table._nameBytes = bytes.Slice(32, namesLength).ToArray();
+        table._nameAt = byOffset;
 
-        string Named(ReadOnlySpan<byte> all, ref int position)
+        string Named(ReadOnlySpan<byte> all, ref int position, out int key)
         {
-            int key = ReadUInt16(all, ref position);
+            key = ReadUInt16(all, ref position);
             return byOffset.TryGetValue(key, out string? name) ? name : throw new FileFormatException($"cityshops.bin: no name starts at offset {key}");
         }
 
@@ -117,12 +127,14 @@ public sealed class CityShopsTable
         {
             string load = ReadText(bytes, ref at), unload = ReadText(bytes, ref at);
             byte pad = v9 ? ReadByte(bytes, ref at) : (byte)0;
-            table.Areas.Add(new Area { LoadZone = load, UnloadZone = unload, Archive = Named(bytes, ref at), Pad = pad });
+            string archive = Named(bytes, ref at, out int archiveAt);
+            table.Areas.Add(new Area { LoadZone = load, UnloadZone = unload, Archive = archive, Pad = pad, ArchiveAt = archiveAt });
         }
         for (int i = 0; i < shops; i++)
         {
             string name = ReadText(bytes, ref at);
-            var shop = new Shop { Name = name, Holder = Named(bytes, ref at) };
+            string holder = Named(bytes, ref at, out int holderAt);
+            var shop = new Shop { Name = name, Holder = holder, HolderAt = holderAt };
             shop.ActorFile = ReadText(bytes, ref at);
             shop.Description = ReadText(bytes, ref at);
             shop.Unk1 = (short)ReadUInt16(bytes, ref at);
@@ -135,7 +147,8 @@ public sealed class CityShopsTable
             if (places < 0 || places > bytes.Length) throw new FileFormatException($"cityshops.bin: '{name}' counts {places} places");
             for (int p = 0; p < places; p++)
             {
-                var place = new Place { Marker = Named(bytes, ref at) };
+                string marker = Named(bytes, ref at, out int markerAt);
+                var place = new Place { Marker = marker, MarkerAt = markerAt };
                 place.MapX = BitConverter.Int32BitsToSingle(ReadInt32(bytes, ref at));
                 place.MapY = BitConverter.Int32BitsToSingle(ReadInt32(bytes, ref at));
                 place.Icon = ReadInt32(bytes, ref at);
@@ -162,16 +175,38 @@ public sealed class CityShopsTable
             used.Add(s.Holder);
             foreach (Place p in s.Places) used.Add(p.Marker);
         }
+        // Nothing added and nothing dropped: the buffer is written back as it was read, and every row keeps the
+        // offset it was read with - a buffer that holds a name twice has rows naming either copy, and writing
+        // the name once moved them all to the first.
+        bool asRead = used.SetEquals(_names);
         var offsets = new Dictionary<string, int>(StringComparer.Ordinal);
-        using var names = new MemoryStream();
-        foreach (string name in _names.Where(used.Contains).Concat(used.Except(_names).OrderBy(n => n, StringComparer.Ordinal)))
+        byte[] nameBytes;
+        if (asRead)
         {
-            if (offsets.ContainsKey(name)) continue;
-            offsets[name] = (int)names.Length;
-            names.Write(Text.GetBytes(name));
-            names.WriteByte(0);
+            nameBytes = _nameBytes;
+            int position = 0;
+            foreach (string name in _names)
+            {
+                offsets.TryAdd(name, position);
+                position += Text.GetByteCount(name) + 1;
+            }
         }
-        if (names.Length > ushort.MaxValue) throw new InvalidOperationException("cityshops.bin: its names no longer fit the 16-bit offsets that address them");
+        else
+        {
+            using var names = new MemoryStream();
+            foreach (string name in _names.Where(used.Contains).Concat(used.Except(_names).OrderBy(n => n, StringComparer.Ordinal)))
+            {
+                if (offsets.ContainsKey(name)) continue;
+                offsets[name] = (int)names.Length;
+                names.Write(Text.GetBytes(name));
+                names.WriteByte(0);
+            }
+            nameBytes = names.ToArray();
+        }
+        if (nameBytes.Length > ushort.MaxValue) throw new InvalidOperationException("cityshops.bin: its names no longer fit the 16-bit offsets that address them");
+        // (a row renamed since keeps no offset: the one it was read with names something else now)
+        int Offset(string name, int? readAt) =>
+            asRead && readAt is { } kept && _nameAt.TryGetValue(kept, out string? there) && there == name ? kept : offsets[name];
 
         bool v9 = _version == 9;
         using var output = new MemoryStream();
@@ -179,12 +214,12 @@ public sealed class CityShopsTable
         writer.Write(Magic);
         writer.Write(_version);
         writer.Write(Areas.Count);
-        writer.Write((int)names.Length);
+        writer.Write(nameBytes.Length);
         writer.Write(Shops.Count);
         writer.Write(Shops.Sum(s => s.Places.Count));
         writer.Write(_kept);
         writer.Write(Shops.Sum(s => s.Places.Sum(p => p.Marks.Length)));
-        writer.Write(names.ToArray());
+        writer.Write(nameBytes);
         void WriteText(string text)
         {
             writer.Write(Text.GetBytes(text));
@@ -195,12 +230,12 @@ public sealed class CityShopsTable
             WriteText(a.LoadZone);
             WriteText(a.UnloadZone);
             if (v9) writer.Write(a.Pad);
-            writer.Write((ushort)offsets[a.Archive]);
+            writer.Write((ushort)Offset(a.Archive, a.ArchiveAt));
         }
         foreach (Shop s in Shops)
         {
             WriteText(s.Name);
-            writer.Write((ushort)offsets[s.Holder]);
+            writer.Write((ushort)Offset(s.Holder, s.HolderAt));
             WriteText(s.ActorFile);
             WriteText(s.Description);
             writer.Write(s.Unk1);
@@ -212,7 +247,7 @@ public sealed class CityShopsTable
             foreach (Place p in s.Places)
             {
                 if (p.Marks.Length != s.Entities.Count) throw new InvalidOperationException($"cityshops.bin: place '{p.Marker}' of '{s.Name}' has {p.Marks.Length} marks for {s.Entities.Count} entities");
-                writer.Write((ushort)offsets[p.Marker]);
+                writer.Write((ushort)Offset(p.Marker, p.MarkerAt));
                 writer.Write(p.MapX);
                 writer.Write(p.MapY);
                 writer.Write(p.Icon);
