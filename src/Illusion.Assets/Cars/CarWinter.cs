@@ -151,9 +151,20 @@ public static class CarWinter
             if (!needed.Exists) return $"no such archive: {needed.FullName}";
         }
         if (string.Equals(car.FullName, reference.FullName, StringComparison.OrdinalIgnoreCase)) return "the reference is the car this one was made from, not the car itself";
+        // before the winter archive is unpacked again: that would fill the missing folder with the last BUILT twin
+        if (LoneRetired(MafiaEnvironment.ExtractedDir(winter)) is { } lone) return lone;
         return SyncFolders(SdsMeshLoader.EnsureExtracted(car), SdsMeshLoader.EnsureExtracted(winter),
             SdsMeshLoader.EnsureExtracted(reference), SdsMeshLoader.EnsureExtracted(referenceWinter), winter.Name, out result);
     }
+
+    private static string Retired(string winterDir) => winterDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".old";
+
+    // An earlier run stopped between moving the winter copy aside and putting the new one in: the set-aside folder
+    // is the only winter copy there is, and clearing it away would lose it.
+    private static string? LoneRetired(string winterDir) =>
+        Directory.Exists(Retired(winterDir)) && !Directory.Exists(winterDir)
+            ? $"the winter working copy is missing and {Retired(winterDir)} holds the previous one - move it back to {winterDir} (or delete it) and run again"
+            : null;
 
     /// <summary><see cref="Sync"/> on four working-copy folders, wherever they stand: the summer car's, its
     /// winter twin's (replaced), and the reference pair's (read).</summary>
@@ -161,13 +172,8 @@ public static class CarWinter
     {
         result = null;
         string staging = winterDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".new";
-        string retired = winterDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".old";
-        if (Directory.Exists(retired) && !Directory.Exists(winterDir))
-        {
-            // An earlier run stopped between moving the winter copy aside and putting the new one in: the set-aside
-            // folder is the only winter copy there is, and clearing it away would lose it.
-            return $"the winter working copy is missing and {retired} holds the previous one - move it back to {winterDir} (or delete it) and run again";
-        }
+        string retired = Retired(winterDir);
+        if (LoneRetired(winterDir) is { } lone) return lone;
         try
         {
             // ---- what the reference pair says winter is

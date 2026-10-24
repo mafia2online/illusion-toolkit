@@ -151,12 +151,12 @@ public static class MaterialVariants
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    undone = $"; {file} could not be put back ({ex.Message})";
+                    undone += $"; {file} could not be put back ({ex.Message})";
                 }
             }
             // The library holds what its file holds again; writing it says so (and is what clears "unsaved").
-            catalog.SaveDirty(out _);
-            refused = failure + " - nothing of the variant was kept" + undone;
+            if (catalog.SaveDirty(out _) is { } notWritten) undone += "; the library could not be written back, so the variant may still be in it: " + notWritten;
+            refused = failure + (undone.Length == 0 ? " - nothing of the variant was kept" : " - and it could not all be taken back" + undone);
             return null;
         }
         return new Result(name, hash.Value, library, bound, saved);

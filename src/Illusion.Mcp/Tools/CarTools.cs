@@ -11,6 +11,8 @@ namespace Illusion.Mcp.Tools;
 [McpServerToolType]
 public sealed class CarTools
 {
+    private static readonly SemaphoreSlim WinterGate = new(1, 1);
+
     [McpServerTool(Name = "material_variant")]
     [Description("Make a model its OWN material on any shader of the game's: a copy of an existing material under a new name, with some of its textures replaced by pictures of yours. This is how a car gets its own lamp atlas, interior texture or sheet of markings - shaders the toolkit has no preset for (a material made in Blender and pushed gets one of a few plain shaders; this keeps the source's shader, flags, sampler states and every parameter). 'textures' maps a sampler - its id ('S001') or name ('NormalTexture'), as get_material_info lists them - to an image file (png; both sides powers of two). The picture's four channels are stored AS THEY ARE: DXT5 when any pixel is not opaque, else DXT1, split into the top level and the rest the way the game stores textures of 256 and up. So a car's tangent normal map is given the way the game keeps it - x in ALPHA, y in GREEN (read the stock one with inspect_sds_texture / an image tool, edit, hand it back). Each picture is written into the working copy of 'archive' under a file name no texture has in any archive that has a working copy (archives never opened are not looked into; the engine finds textures by name - never reuse a stock name for a changed picture), and the material into default.mtl at once (the previous file is kept in a backups folder beside it) - so it is refused while other material edits wait to be saved. A call that fails part way takes back what it wrote and can be made again. Then point the mesh at it: mesh_materials with the slot and the new name, per level of detail; build the archive; for Mafia II Online car_export_m2o writes the new material into the car's own .mtl. Samplers not named keep the source's textures. A copy of a car's PAINT (or chrome, glass, interior) is not treated as one until the car's PREFAB says so: the game colours, dirties and deforms the materials the prefab lists, and a copy that is not listed is drawn bare primer grey whatever colour the car is given - follow with car_material_like <car> <new name> <source name>. A winter twin is a variant of the source's own winter material under the new name + '^zima'; car_winter then swaps to it.")]
     public static async Task<string> MaterialVariant(
@@ -345,13 +347,28 @@ public sealed class CarTools
             string stem = car.Trim();
             if (stem.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)) stem = stem[..^4];
             string twin = stem + "_z";
-            if (await ui.RunAsync(() => workshop.StageBusy(car)) is { } busy) return ToolResult.Invalid(busy);
-            if (await ui.RunAsync(() => workshop.StageBusy(twin)) is { } busyTwin) return ToolResult.Invalid(busyTwin);
-            CarWinterInfo? result = null;
-            // The copy is long file work: off the UI thread, so the editor does not freeze while it runs.
-            string? refused = await Task.Run(() => workshop.CarWinter(car, reference, out result));
-            if (refused != null) return ToolResult.Invalid(refused);
-            return ToolResult.Json(new { success = true, reloaded = await ui.RunAsync(() => workshop.Landed(twin)), result });
+            // The copy is long file work: off the UI thread, so the editor does not freeze while it runs - and one
+            // run at a time, since every run swaps the same folders (a client that retries must not start a second).
+            if (!await WinterGate.WaitAsync(0)) return ToolResult.Invalid("car_winter is already running - wait for it to finish");
+            try
+            {
+                if (await ui.RunAsync(() => workshop.StageBusy(car)) is { } busy) return ToolResult.Invalid(busy);
+                if (await ui.RunAsync(() => workshop.StageBusy(twin)) is { } busyTwin) return ToolResult.Invalid(busyTwin);
+                CarWinterInfo? result = null;
+                string? refused = await Task.Run(() => workshop.CarWinter(car, reference, out result));
+                if (refused != null) return ToolResult.Invalid(refused);
+                // The twin opened and edited while the copy ran is not reloaded over its edits: what it shows is no
+                // longer what is on disk, and it is said.
+                if (await ui.RunAsync(() => workshop.StageBusy(twin)) is { } editedMeanwhile)
+                {
+                    return ToolResult.Json(new { success = true, reloaded = false, warning = editedMeanwhile, result });
+                }
+                return ToolResult.Json(new { success = true, reloaded = await ui.RunAsync(() => workshop.Landed(twin)), result });
+            }
+            finally
+            {
+                WinterGate.Release();
+            }
         }
         catch (Exception ex)
         {

@@ -208,7 +208,8 @@ internal sealed class AppCarWorkshop : ICarWorkshop
     {
         result = null;
         // Called off the UI thread (copying a car whole takes a while): the launcher's environment is set up there.
-        if (Application.Current.Dispatcher.Invoke(EnsureEnvironment) is { } notReady) return notReady;
+        if (Application.Current?.Dispatcher is not { } dispatcher) return "the toolkit is closing";
+        if (dispatcher.Invoke(EnsureEnvironment) is { } notReady) return notReady;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         if (string.IsNullOrWhiteSpace(reference)) return "reference is the shipped car this one was made from - its own summer and winter archives show what winter changes";
         if (Car(reference, out FileInfo? other) is { } noReference) return noReference;
