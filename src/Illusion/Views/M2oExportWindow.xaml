@@ -11,7 +11,7 @@
         <StackPanel>
             <TextBlock Text="Prepare your server map" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
             <TextBlock Margin="0,8,0,16" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"
-                       Text="Export native patches and map_patches.json together. Add this folder to your server resource's packaged files." />
+                       Text="Exports a resource folder: a native patch for each archive the game ships, each new archive whole, and the materials they add. Copy its stream folder into your server resource." />
             <TextBlock x:Name="ScopeText" Style="{StaticResource DimLabel}" Margin="0,0,0,6" />
         </StackPanel>
         <ListBox Grid.Row="1" x:Name="ArchiveList" FontFamily="Consolas" FontSize="12"
@@ -25,7 +25,7 @@
         </ListBox>
         <StackPanel Grid.Row="2" Margin="0,14,0,0">
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"
-                       Text="Only the listed archives are exported. Edit summer and winter separately to include both. Object removal and collision edits should be checked together in-game." />
+                       Text="Archives that match the game are skipped. Summer and winter are archives of their own: edit both to change both seasons. Check object removals and collision edits together in-game." />
             <TextBlock Text="New export folder" Style="{StaticResource DimLabel}" Margin="0,16,0,6" />
             <DockPanel>
                 <Button DockPanel.Dock="Right" x:Name="BrowseButton" Content="Browse…" Click="Browse_Click"

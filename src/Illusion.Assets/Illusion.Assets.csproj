@@ -18,6 +18,8 @@
     <EmbeddedResource Include="World\ShippedLoadZones.txt" />
     <EmbeddedResource Include="World\ShippedInteriors.txt" />
     <EmbeddedResource Include="Materials\ShippedMaterials.bin" />
+    <!-- The archives the game ships with and their bytes (StockArchives): what an M2O export patches against. -->
+    <EmbeddedResource Include="Sds\StockArchives.txt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -49,9 +49,20 @@ public static class PatchExporter
 
     /// <summary>Exports a changed archive, or returns null without writing a file when unchanged.</summary>
     public static PatchExportResult? TryExport(FileInfo sds, string outputPath)
-        => TryExport(sds, outputPath, out _, out _);
+        => TryExport(sds, outputPath, null, out _, out _);
+
+    /// <summary>Exports a changed archive against <paramref name="baseArchive"/> - a copy of the bytes the patch
+    /// will be applied to - or returns null without writing a file when unchanged.</summary>
+    public static PatchExportResult? TryExport(FileInfo sds, FileInfo baseArchive, string outputPath, out SdsArchive edited)
+    {
+        ArgumentNullException.ThrowIfNull(baseArchive);
+        return TryExport(sds, outputPath, baseArchive, out _, out edited);
+    }
 
     private static PatchExportResult? TryExport(FileInfo sds, string outputPath, out SdsArchive original, out SdsArchive edited)
+        => TryExport(sds, outputPath, null, out original, out edited);
+
+    private static PatchExportResult? TryExport(FileInfo sds, string outputPath, FileInfo? baseArchive, out SdsArchive original, out SdsArchive edited)
     {
         ArgumentNullException.ThrowIfNull(sds);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -67,7 +78,7 @@ public static class PatchExporter
         }
 
         edited = SdsArchive.Pack(extracted, GameProfile.MafiaII);
-        original = SdsArchive.Open(sds.FullName);
+        original = SdsArchive.Open((baseArchive ?? sds).FullName);
 
         if (SdsPatchDiff.TryBetween(original, edited) is not { } diff) return null;
         (SdsPatchFile patch, PatchDiffResult result) = diff;

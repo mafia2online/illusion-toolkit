@@ -396,14 +396,16 @@ public partial class MainWindow : Window
     private void ExportM2o_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-        if (Viewport.PendingBuildArchives().Count == 0)
+        // an archive already built into the game has left the build list, and is exported all the same
+        IReadOnlyList<FileInfo> archives = M2oMapExporter.Candidates(Viewport.PendingBuildArchives());
+        if (archives.Count == 0)
         {
             AppDialog.Show(this, new DialogOptions { Title = "Export for M2O", Icon = DialogIcon.Info,
-                Heading = "No map edits to export", Text = "Move, add or delete an object, then export. Use Save to keep edits in your working copy; Build SDS writes them into the game archive and clears the export list." });
+                Heading = "No map edits to export", Text = "Move, add or delete an object, then export. Edits are exported whether they are only saved or already built into the game." });
             return;
         }
 
-        new M2oExportWindow(Viewport.PendingBuildArchives(), Viewport.HasUnsavedEdits, () =>
+        new M2oExportWindow(archives, Viewport.HasUnsavedEdits, () =>
         {
             Viewport.SaveEdits();
             if (Viewport.HasUnsavedEdits) throw new InvalidOperationException("Some edits could not be saved. Resolve the save notice before exporting.");

@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -48,17 +47,30 @@ internal static class M2oExportProbes
             FileInfo summer = CreateArchive("city/district.sds");
             FileInfo winter = CreateArchive("city/district_z.sds");
             FileInfo sameName = CreateArchive("other/district.sds");
+            FileInfo added = CreateArchive("shops/new_room.sds");
+            FileInfo drifted = CreateArchive("city/drifted.sds");
             byte[] original = File.ReadAllBytes(summer.FullName);
+            // the archives under shops/ are new to the game; drifted.sds is shipped, and no copy of its shipped bytes is left
+            (bool, FileInfo?) Stock(FileInfo archive, string target) => (!target.StartsWith("/sds/shops/", StringComparison.Ordinal), archive == drifted ? null : archive);
+            IReadOnlyList<M2oExportResult> Export(IReadOnlyList<FileInfo> archives, string folder) => M2oMapExporter.Export(archives, folder, null, [], Stock);
             string destination = Path.Combine(root, "export");
-            var results = M2oMapExporter.Export([summer, winter, sameName], destination);
-            Check(results.Count == 3 && results.Select(r => r.PatchPath).Distinct().Count() == 3, "season targets and duplicate basenames remain distinct");
-            using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(destination, "map_patches.json")));
-            foreach (JsonElement entry in manifest.RootElement.GetProperty("patches").EnumerateArray())
+            var results = Export([summer, winter, added], destination);
+            Check(results.Count == 3 && results.Select(r => r.OutputPath).Distinct().Count() == 3, "season targets remain distinct");
+            Check(results.Select(r => Path.GetRelativePath(destination, r.OutputPath).Replace('\\', '/')).SequenceEqual(
+                ["stream/sds/city/district.sds.patch", "stream/sds/city/district_z.sds.patch", "stream/sds/shops/new_room.sds"]), "every file sits at its game path under stream/");
+            Check(!File.Exists(Path.Combine(destination, "map_patches.json")) && !Directory.Exists(Path.Combine(destination, ".edited")), "no manifest and no scratch files are published");
+            foreach (M2oExportResult result in results.Where(r => r.Kind == M2oExportKind.Patch))
             {
-                using FileStream input = File.OpenRead(Path.Combine(destination, entry.GetProperty("patch").GetString()!));
+                using FileStream input = File.OpenRead(result.OutputPath);
                 SdsPatchFile patch = SdsPatchFile.Load(input);
-                Check(patch.Entries.Count == 1 && patch.Entries[0].Data!.SequenceEqual(new byte[] { 4, 3, 2, 1 }), "manifest resolves a readable native patch with edited bytes");
+                Check(patch.Entries.Count == 1 && patch.Entries[0].Data!.SequenceEqual(new byte[] { 4, 3, 2, 1 }), "a shipped archive exports as a readable native patch with edited bytes");
             }
+            M2oExportResult whole = results.Single(r => r.Kind == M2oExportKind.NewArchive);
+            Check(whole.Diff == null && SdsArchive.Open(whole.OutputPath).Entries.Single().Data!.SequenceEqual(new byte[] { 4, 3, 2, 1 }), "a new archive exports whole, as edited");
+            Refuses(() => Export([summer, sameName], Path.Combine(root, "same-stem")), "archives sharing a file name refused (their libraries would collide)");
+            Refuses(() => Export([drifted], Path.Combine(root, "drifted")), "a shipped archive without its shipped bytes refused");
+            Refuses(() => Export([CreateArchive("city/default_x.sds")], Path.Combine(root, "default")), "a library named like the game's own refused");
+            Refuses(() => M2oMapExporter.TargetOf(CreateArchive("city/Bad-Name.sds")), "a name M2O cannot stream refused");
             Check(original.SequenceEqual(File.ReadAllBytes(summer.FullName)), "original game archive remains unchanged");
             Refuses(() => PatchExporter.Export(summer, summer.FullName), "GUI exporter refuses to overwrite its base archive");
             PatchProbes.RunBuildPatch(["--build-patch", summer.FullName, summer.FullName, "--delete", "0"]);
@@ -66,7 +78,7 @@ internal static class M2oExportProbes
             PatchProbes.RunRemoveFrames(["--remove-frames", summer.FullName, Path.Combine(summer.DirectoryName!, ".", summer.Name), "--frame", "*"]);
             Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("overwrite", StringComparison.Ordinal), "removal command normalizes output before overwrite check");
             Check(original.SequenceEqual(File.ReadAllBytes(summer.FullName)), "refused commands preserve archive bytes");
-            PatchProbes.RunPatchDiff(["--patch-diff", summer.FullName, results[0].PatchPath]);
+            PatchProbes.RunPatchDiff(["--patch-diff", summer.FullName, results[0].OutputPath]);
             Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("comparison is unavailable", StringComparison.Ordinal), "non-scene archive comparison reports missing frames");
             PatchProbes.RunFrameCollision(["--frame-collision", summer.FullName, "example"]);
             Check(File.ReadAllText(Path.Combine(Path.GetTempPath(), "illusion_patch.txt")).Contains("no FrameResource", StringComparison.Ordinal), "non-scene collision command reports missing frames");
@@ -121,20 +133,18 @@ internal static class M2oExportProbes
             var match = typeof(ScenePatchAuthor).GetMethod("Match", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
             var matches = (IEnumerable<Illusion.Formats.Frames.ObjectTypes.FrameObjectBase>)match.Invoke(null, [frames, "example*"])!;
             Check(matches.Single() == named, "wildcard matching skips null names and preserves case-insensitive matching");
-            Refuses(() => M2oMapExporter.Export([summer], destination), "existing export protected");
-            Refuses(() => M2oMapExporter.Export([summer, summer], Path.Combine(root, "duplicate")), "duplicate target refused");
-            Refuses(() => M2oMapExporter.Export([new FileInfo(Path.Combine(root, "outside.sds"))], Path.Combine(root, "outside")), "archive outside pc/sds refused");
+            Refuses(() => Export([summer], destination), "existing export protected");
+            Refuses(() => Export([summer, summer], Path.Combine(root, "duplicate")), "duplicate target refused");
+            Refuses(() => Export([new FileInfo(Path.Combine(root, "outside.sds"))], Path.Combine(root, "outside")), "archive outside pc/sds refused");
             string failed = Path.Combine(root, "failed");
-            Refuses(() => M2oMapExporter.Export([summer, new FileInfo(Path.Combine(pc, "sds", "missing.sds"))], failed), "second archive failure reported");
+            Refuses(() => Export([summer, new FileInfo(Path.Combine(pc, "sds", "missing.sds"))], failed), "second archive failure reported");
             Check(!Directory.Exists(failed) && Directory.GetDirectories(root, "*.tmp-*").Length == 0, "failed export publishes nothing and removes staging");
             FileInfo unchanged = CreateArchive("city/unchanged.sds");
             SdsArchive.Open(unchanged.FullName).Extract(MafiaEnvironment.ExtractedDir(unchanged));
             string mixed = Path.Combine(root, "mixed");
-            Check(M2oMapExporter.Export([unchanged, summer], mixed).Count == 1, "undone edits do not block changed archives");
-            using (var mixedManifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(mixed, "map_patches.json"))))
-                Check(mixedManifest.RootElement.GetProperty("patches").GetArrayLength() == 1, "unchanged archives omitted from manifest");
+            Check(Export([unchanged, summer], mixed).Count == 1 && !File.Exists(Path.Combine(mixed, "stream", "sds", "city", "unchanged.sds.patch")), "unchanged archives are skipped without blocking changed ones");
             string empty = Path.Combine(root, "empty");
-            Check(M2oMapExporter.Export([unchanged], empty).Count == 0 && !Directory.Exists(empty), "unchanged export creates no empty map");
+            Check(Export([unchanged], empty).Count == 0 && !Directory.Exists(empty), "unchanged export creates no empty map");
             Refuses(() => PatchExporter.ExportAll([summer, sameName], Path.Combine(root, "raw")), "raw batch refuses filename collisions");
             Refuses(() => PatchExporter.ExportWithSeasonVariant(summer, Path.Combine(root, "district_z.sds.patch")), "season filename collision refused before writing");
             Check(!File.Exists(Path.Combine(root, "district_z.sds.patch")), "season collision leaves destination untouched");

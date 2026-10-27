@@ -185,24 +185,27 @@ Everything the MCP server can do to a scene, the menu can too:
 
 ## Exporting maps for M2O
 
-Use **File → Export for M2O…** after editing the map. The window lists the archives included,
-offers **Save and export** when edits are pending, and reports progress while generating native patches.
-Choose a new output folder; existing exports are preserved. A failed export leaves no partial output folder.
-Archives whose edits were undone are skipped. If every archive is unchanged, no export folder is created.
+Use **File → Export for M2O…** after editing. The window lists every archive with an edit, whether it is only
+saved or already built into the game, and writes a new folder whose `stream` folder goes into a server
+resource as it is (`resources\<name>\stream`). Every file sits at the game path it stands for, so no manifest
+is needed:
 
-Copy the exported folder's contents into your server resource, for example `client/maps/`, and include
-`client/maps/**` in `package.json` → `mafiahub.files`. Keep `map_patches.json` beside the exported `sds/`
-folder: its paths reference those patch files. M2O sends them through the existing packed resource download.
-Reconnect clients after changing the map resource.
+- `stream/sds/<path>.sds.patch` for an archive the game ships: a native patch (the format the game's own
+  DLC uses) against the shipped bytes. The exporter finds those bytes in the archive itself, or in the oldest
+  backup the toolkit (`backups\`) or MafiaToolkit (`BackupSDS\`) kept of it, and refuses to export without them.
+  The shipped archives and their SHA-256 are listed in `src/Illusion.Assets/Sds/StockArchives.txt`.
+- `stream/sds/<path>.sds` for an archive the game does not have, such as a new interior under `shops\`.
+- `stream/materials/<archive>.mtl` for the materials an archive adds. A material the game ships cannot be
+  changed this way (the game keeps its own definition), and a mesh naming a material no library defines
+  stops the export.
 
-Only the listed edited archives are exported. Edit summer and winter separately to include both;
-their resource ordinals differ. Check object removals and collision edits together in-game.
-Use **Save** for working copies before export. **Build SDS** modifies the local game archives and clears
-the pending export list; it is not required for M2O export. Patches must target the same base archives as clients.
+Summer and winter are archives of their own (`<name>.sds`, `<name>_z.sds`): edit both to change both seasons.
+Archives that match the game are skipped, a failed export leaves no folder behind, and existing exports are
+never overwritten. Folder and file names must hold only `a-z`, `0-9` and `_`.
 
-The isolated `Illusion.exe --probe-m2o-export` check exercises native patch output, manifest paths,
-season and filename collisions, overwrite protection and failure cleanup. It writes its report and a window
-render to `%TEMP%/illusion_m2o_export.txt` and `%TEMP%/illusion_m2o_export.png`.
+The isolated `Illusion.exe --probe-m2o-export` check exercises the export layout, patch output, new archives,
+refusals and failure cleanup. It writes its report and a window render to `%TEMP%/illusion_m2o_export.txt`
+and `%TEMP%/illusion_m2o_export.png`.
 
 ## Blender bridge
 
