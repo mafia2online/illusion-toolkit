@@ -185,10 +185,15 @@ Everything the MCP server can do to a scene, the menu can too:
 
 ## Exporting maps for M2O
 
-Use **File → Export for M2O…** after editing. The window lists every archive with an edit, whether it is only
-saved or already built into the game, and writes a new folder whose `stream` folder goes into a server
-resource as it is (`resources\<name>\stream`). Every file sits at the game path it stands for, so no manifest
-is needed:
+**Build SDS…** and **Export…** open the same window: the edited archives with a tick each, and a destination.
+**Game folder** packs them into the game (each kept in its `backups` folder first). **M2O resource** and
+**Patch files** write them to a folder instead and leave the game's archives alone. An export is saved as a
+project (its name, its archives, its folder, kept in `<game>\resources\.exports\`); the window opens on the last
+one, with its archives ticked and every other edited archive listed unticked, and exporting again replaces that
+folder whole. A folder is only ever replaced when an export wrote it (it carries `.illusion-export`).
+
+An M2O resource holds a `stream` folder that goes into the server resource as it is (`resources\<name>\stream`).
+Every file sits at the game path it stands for, so no manifest is needed:
 
 - `stream/sds/<path>.sds.patch` for an archive the game ships: a native patch (the format the game's own
   DLC uses) against the shipped bytes. The exporter finds those bytes in the archive itself, or in the oldest
@@ -199,13 +204,15 @@ is needed:
   changed this way (the game keeps its own definition), and a mesh naming a material no library defines
   stops the export.
 
+**Patch files** are the same files at their game paths, without the `stream` folder around them.
+
 Summer and winter are archives of their own (`<name>.sds`, `<name>_z.sds`): edit both to change both seasons.
-Archives that match the game are skipped, a failed export leaves no folder behind, and existing exports are
-never overwritten. Folder and file names must hold only `a-z`, `0-9` and `_`.
+Archives that match the game are skipped, and a failed export leaves the folder as it was. Folder and file
+names must hold only `a-z`, `0-9` and `_`.
 
 The isolated `Illusion.exe --probe-m2o-export` check exercises the export layout, patch output, new archives,
-refusals and failure cleanup. It writes its report and a window render to `%TEMP%/illusion_m2o_export.txt`
-and `%TEMP%/illusion_m2o_export.png`.
+refusals, failure cleanup, re-export over its own folder, and export projects. It writes its report and a
+window render to `%TEMP%/illusion_m2o_export.txt` and `%TEMP%/illusion_m2o_export.png`.
 
 ## Blender bridge
 

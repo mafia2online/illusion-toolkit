@@ -134,6 +134,28 @@ internal static class M2oExportProbes
             var matches = (IEnumerable<Illusion.Formats.Frames.ObjectTypes.FrameObjectBase>)match.Invoke(null, [frames, "example*"])!;
             Check(matches.Single() == named, "wildcard matching skips null names and preserves case-insensitive matching");
             Refuses(() => Export([summer], destination), "existing export protected");
+            Check(File.Exists(Path.Combine(destination, ExportFolder.MarkerName)), "an export folder carries its marker");
+            File.WriteAllText(Path.Combine(destination, "stale.txt"), "left by the previous export");
+            Check(M2oMapExporter.Export([summer], destination, null, [], Stock, replace: true).Count == 1 && !File.Exists(Path.Combine(destination, "stale.txt"))
+                && File.Exists(Path.Combine(destination, "stream", "sds", "city", "district.sds.patch")) && !File.Exists(Path.Combine(destination, "stream", "sds", "city", "district_z.sds.patch")),
+                "a re-export replaces its own folder whole");
+            string foreign = Path.Combine(root, "foreign");
+            Directory.CreateDirectory(foreign);
+            File.WriteAllText(Path.Combine(foreign, "mine.txt"), "the user's");
+            Refuses(() => M2oMapExporter.Export([summer], foreign, null, [], Stock, replace: true), "a folder no export wrote is never replaced");
+            Check(File.Exists(Path.Combine(foreign, "mine.txt")), "...and is left as it was");
+            string flat = Path.Combine(root, "flat");
+            Check(M2oMapExporter.Export([summer, added], flat, null, [], Stock, streamFolder: false).Count == 2
+                && File.Exists(Path.Combine(flat, "sds", "city", "district.sds.patch")) && File.Exists(Path.Combine(flat, "sds", "shops", "new_room.sds")),
+                "patch files sit at their game paths without stream/");
+            var project = new ExportProject("Greenfield", ExportDestination.M2oResource, destination, [ExportProject.GamePathOf(summer), ExportProject.GamePathOf(added)]);
+            project.Save();
+            ExportProject? loaded = ExportProject.LoadAll().SingleOrDefault();
+            Check(loaded is { Name: "Greenfield", Destination: ExportDestination.M2oResource } && loaded.Archives.SequenceEqual(project.Archives)
+                && loaded.ArchiveFiles().Select(f => f.FullName).SequenceEqual([summer.FullName, added.FullName], StringComparer.OrdinalIgnoreCase)
+                && ExportProject.LastUsed() == "Greenfield", "an export project round-trips and is remembered as the last one");
+            Check(ExportProject.CheckName("") != null && ExportProject.CheckName("a/b") != null && ExportProject.CheckName(".hidden") != null && ExportProject.CheckName("Uptown 2") == null,
+                "project names are checked");
             Refuses(() => Export([summer, summer], Path.Combine(root, "duplicate")), "duplicate target refused");
             Refuses(() => Export([new FileInfo(Path.Combine(root, "outside.sds"))], Path.Combine(root, "outside")), "archive outside pc/sds refused");
             string failed = Path.Combine(root, "failed");
@@ -154,13 +176,16 @@ internal static class M2oExportProbes
 #pragma warning disable WPF0001
             Application.Current.ThemeMode = ThemeMode.Dark;
 #pragma warning restore WPF0001
-            var window = new Views.M2oExportWindow([summer, winter], true, () => { });
+            var window = new Views.BuildWindow([winter], ExportDestination.M2oResource);
+            Check(window.Destination == ExportDestination.M2oResource && window.Rows.Any(r => r.Path == winter.FullName && !r.IsChecked)
+                && window.Rows.Where(r => r.IsChecked).Select(r => r.Path).Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(new[] { summer.FullName, added.FullName }.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase),
+                "the export window opens on the last project: its archives ticked, another edited archive listed unticked");
             var content = (FrameworkElement)window.Content;
             ((System.Windows.Controls.Panel)content).Background = new SolidColorBrush((Color)Application.Current.FindResource("SurfaceWindowColor"));
-            content.Measure(new Size(680, 620));
-            content.Arrange(new Rect(0, 0, 680, 620));
+            content.Measure(new Size(760, 620));
+            content.Arrange(new Rect(0, 0, 760, 620));
             content.UpdateLayout();
-            var bitmap = new RenderTargetBitmap(680, 620, 96, 96, PixelFormats.Pbgra32);
+            var bitmap = new RenderTargetBitmap(760, 620, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(content);
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));

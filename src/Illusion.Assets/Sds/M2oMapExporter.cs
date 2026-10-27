@@ -76,20 +76,22 @@ public static class M2oMapExporter
     }
 
     /// <summary>Exports the supplied edited archives; season variants are archives of their own.</summary>
-    public static IReadOnlyList<M2oExportResult> Export(IReadOnlyList<FileInfo> archives, string destination, IProgress<string>? progress = null)
-        => Export(archives, destination, progress, null, null);
+    /// <param name="replace">Replace <paramref name="destination"/> when an earlier export wrote it (see <see cref="ExportFolder"/>).</param>
+    /// <param name="streamFolder">Put everything under <c>stream\</c>, as an M2O resource has it; without it the files sit
+    /// at their game paths from the root.</param>
+    public static IReadOnlyList<M2oExportResult> Export(IReadOnlyList<FileInfo> archives, string destination, IProgress<string>? progress = null, bool replace = false, bool streamFolder = true)
+        => Export(archives, destination, progress, null, null, replace, streamFolder);
 
     /// <param name="libraries">The game's material libraries; null reads them from the game folder.</param>
     /// <param name="stockCopy">For a target: null when the game does not ship it, else a file holding its shipped
     /// bytes (null file: none was found). Null uses <see cref="StockArchives"/>.</param>
     internal static IReadOnlyList<M2oExportResult> Export(IReadOnlyList<FileInfo> archives, string destination, IProgress<string>? progress,
-        IReadOnlyList<MaterialLibrary>? libraries, Func<FileInfo, string, (bool Stock, FileInfo? Copy)>? stockCopy)
+        IReadOnlyList<MaterialLibrary>? libraries, Func<FileInfo, string, (bool Stock, FileInfo? Copy)>? stockCopy, bool replace = false, bool streamFolder = true)
     {
         ArgumentNullException.ThrowIfNull(archives);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (archives.Count == 0) throw new InvalidOperationException("No edited archives to export.");
         string fullDestination = Path.GetFullPath(destination);
-        if (Directory.Exists(fullDestination) || File.Exists(fullDestination)) throw new IOException("That export folder already exists. Choose a new name to keep the previous export intact.");
         string[] targets = archives.Select(TargetOf).ToArray();
         if (targets.Distinct(StringComparer.OrdinalIgnoreCase).Count() != targets.Length) throw new InvalidOperationException("The export contains duplicate SDS targets.");
         string[] stems = targets.Select(t => Path.GetFileNameWithoutExtension(t)).ToArray();
@@ -100,38 +102,33 @@ public static class M2oMapExporter
         stockCopy ??= (archive, target) => (StockArchives.IsStock(target), StockArchives.ResolveStockCopy(archive, target));
         libraries ??= ArchiveMaterials.LoadLibraries(MafiaEnvironment.GameRoot);
 
-        string stage = fullDestination + ".tmp-" + Guid.NewGuid().ToString("N");
-        Directory.CreateDirectory(stage);
-        try
+        string root = streamFolder ? StreamFolder : "";
+        var results = new List<M2oExportResult>();
+        ExportFolder.Publish(fullDestination, replace, stage =>
         {
-            var results = new List<M2oExportResult>();
             for (int i = 0; i < archives.Count; i++)
             {
                 progress?.Report($"Exporting {i + 1} of {archives.Count}: {archives[i].Name}");
                 try
                 {
-                    if (ExportOne(archives[i], targets[i], stems[i], stage, fullDestination, libraries, stockCopy) is { } result) results.Add(result);
+                    if (ExportOne(archives[i], targets[i], stems[i], stage, fullDestination, root, libraries, stockCopy) is { } result) results.Add(result);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     throw new InvalidOperationException($"Could not export {archives[i].Name}: {ex.Message}", ex);
                 }
             }
-            if (results.Count == 0) return results;
+            if (results.Count == 0) return false;
             Directory.Delete(Path.Combine(stage, ".edited"), true);
-            Directory.Move(stage, fullDestination);
-            return results;
-        }
-        finally
-        {
-            if (Directory.Exists(stage)) Directory.Delete(stage, true);
-        }
+            return true;
+        });
+        return results;
     }
 
-    private static M2oExportResult? ExportOne(FileInfo archive, string target, string stem, string stage, string published,
+    private static M2oExportResult? ExportOne(FileInfo archive, string target, string stem, string stage, string published, string root,
         IReadOnlyList<MaterialLibrary> libraries, Func<FileInfo, string, (bool Stock, FileInfo? Copy)> stockCopy)
     {
-        string relative = StreamFolder + target;
+        string relative = (root + target).TrimStart('/');
         (bool stock, FileInfo? copy) = stockCopy(archive, target);
         M2oExportKind kind;
         PatchDiffResult? diff = null;
@@ -179,9 +176,9 @@ public static class M2oMapExporter
             throw new InvalidOperationException($"it changes {changed.Count} of the game's own material(s) ({string.Join(", ", changed.Take(5))}), "
                 + "which M2O cannot redefine. Make a new material instead.");
         }
-        string library = Path.Combine(stage, StreamFolder, "materials", stem + ".mtl");
+        string library = Path.Combine(stage, root, "materials", stem + ".mtl");
         int materials = ArchiveMaterials.SaveLibrary(report, libraries, library);
         return new M2oExportResult(archive.FullName, target, Path.Combine(published, Path.GetRelativePath(stage, written)), kind, diff,
-            materials > 0 ? Path.Combine(published, StreamFolder, "materials", stem + ".mtl") : null, materials);
+            materials > 0 ? Path.Combine(published, root, "materials", stem + ".mtl") : null, materials);
     }
 }
