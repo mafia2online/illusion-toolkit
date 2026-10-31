@@ -34,7 +34,15 @@ public class MaterialLibrary
 
     public void ReadMatFile(string name)
     {
-        Native.Model.MtlLibraryW wire = Native.Materials.NativeMtl.LoadLibrary(File.ReadAllBytes(name));
+        byte[] bytes = File.ReadAllBytes(name);
+        if (bytes.Length >= 8 && System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4)) == 63)
+        {
+            _version = MaterialVersion.V_63;
+            _materials = Material_v63.Read(bytes, out _unk2);
+            _name = name;
+            return;
+        }
+        Native.Model.MtlLibraryW wire = Native.Materials.NativeMtl.LoadLibrary(bytes);
         _version = (MaterialVersion)wire.Version;
         _unk2 = wire.Unk2;
         _materials = Native.Materials.NativeMtl.ToMaterials(wire);
@@ -48,7 +56,7 @@ public class MaterialLibrary
     }
 
     /// <summary>The library as an .mtl file holds it.</summary>
-    public byte[] ToBytes() =>
+    public byte[] ToBytes() => _version == MaterialVersion.V_63 ? Material_v63.Write(_unk2, _materials) :
         Native.Materials.NativeMtl.SaveLibrary(Native.Materials.NativeMtl.ToWire(_version, _unk2, _materials));
 
     public IMaterial? LookupMaterialByHash(ulong hash)

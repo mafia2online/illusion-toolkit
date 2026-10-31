@@ -78,11 +78,26 @@ public static class PropCatalog
     /// </summary>
     public static IReadOnlyList<PropEntry> Load(Action<string, int, int>? progress = null, CancellationToken cancel = default)
     {
+        if (MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+        {
+            string directory = Path.Combine(MafiaEnvironment.ArchiveFolder, "city_crash");
+            if (!Directory.Exists(directory)) return [];
+            var sources = Directory.GetFiles(directory, "*_city_crash.sds");
+            var compiled = new List<PropEntry>();
+            for (int i = 0; i < sources.Length; i++)
+            {
+                progress?.Invoke(Path.GetFileName(sources[i]), i + 1, sources.Length);
+                foreach (var entry in Compiled.CompiledPropCatalog.Load(new FileInfo(sources[i]), cancel))
+                    compiled.Add(new PropEntry(entry.Archive, entry.Name, entry.Name, entry.IsVehicleMarker ? "Traffic vehicle marker" : entry.HasPhysics ? "Native physics preserved" : entry.IsActor ? "Actor prop" : "Static scenery",
+                        entry.Category, entry.Triangles, [entry.Size.X, entry.Size.Y, entry.Size.Z]) { Compiled = entry });
+            }
+            return compiled;
+        }
         Dictionary<string, CachedArchive> cache = ReadCache();
         var archives = new List<FileInfo>();
         foreach (string folder in Folders)
         {
-            string dir = Path.Combine(MafiaEnvironment.PcFolder, "sds", folder);
+            string dir = Path.Combine(MafiaEnvironment.ArchiveFolder, folder);
             if (!Directory.Exists(dir)) continue;
             foreach (string file in Directory.GetFiles(dir, "*.sds"))
             {
@@ -98,7 +113,7 @@ public static class PropCatalog
         {
             cancel.ThrowIfCancellationRequested();
             FileInfo sds = archives[i];
-            string relative = Path.GetRelativePath(Path.Combine(MafiaEnvironment.PcFolder, "sds"), sds.FullName);
+            string relative = Path.GetRelativePath(MafiaEnvironment.ArchiveFolder, sds.FullName);
             string extracted = MafiaEnvironment.ExtractedDir(sds);
             string manifest = Path.Combine(extracted, "SDSContent.xml");
             if (!File.Exists(manifest)) continue;

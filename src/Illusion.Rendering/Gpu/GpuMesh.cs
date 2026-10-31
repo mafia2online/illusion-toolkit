@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.IO;
 using System.Runtime.InteropServices;
 using Illusion.Domain;
 using Illusion.Rendering.Shaders;
@@ -41,6 +42,8 @@ public struct GpuPart
     public ulong MaterialHash;                          // source game material (0 = none) — for live re-resolve
     public Vector4 Tint;                                // multiplies the albedo; white unless the material paints itself
     public bool Blended;                                // alpha-blended (glass): drawn after the opaque parts, no depth write
+    public SurfaceMaterial? Surface;
+    public ComPtr<ID3D11ShaderResourceView>[]? SurfaceSrvs;
     public ComPtr<ID3D11ShaderResourceView> Srv;        // diffuse t0
     public ComPtr<ID3D11ShaderResourceView> NormalSrv;  // normal t1 (flat-normal when absent)
     public ComPtr<ID3D11ShaderResourceView> SpecSrv;    // specular-level t2 (white when absent → full level)
@@ -75,6 +78,8 @@ public sealed unsafe class GpuMesh : IDisposable
 
     /// <summary>Stream 1: four bone influences per vertex. Null for everything that is not a skinned model.</summary>
     public ComPtr<ID3D11Buffer> SkinBuffer;
+    public ComPtr<ID3D11Buffer> ColorBuffer;
+    public bool HasVertexColors => ColorBuffer.Handle != null;
 
     /// <summary>
     /// What each bone does to the mesh right now: the matrix from the pose the geometry was authored in to
@@ -218,6 +223,8 @@ public sealed unsafe class GpuMesh : IDisposable
                 MaterialHash = part.MaterialHash,
                 Tint = part.Tint,
                 Blended = part.Blended,
+                Surface = part.Surface,
+                SurfaceSrvs = AcquireSurface(textures, part.Surface, leases),
                 Srv = textures.Acquire(part.DiffuseTexture, leases),
                 NormalSrv = textures.AcquireNormalOrFlat(part.NormalTexture, leases), // flat-normal when absent
                 SpecSrv = textures.Acquire(part.SpecularTexture, leases),             // white when absent → spec level ×1
@@ -230,6 +237,11 @@ public sealed unsafe class GpuMesh : IDisposable
             // Upload the CELL-MAJOR sorted copy — InstanceCells' Start/Count index into this order.
             fixed (Matrix4x4* pInst = sortedInstances)
                 result.InstanceBuffer = GpuBuffers.CreateImmutable(gpu, pInst, (uint)(sortedInstances!.Length * sizeof(Matrix4x4)), BindFlag.VertexBuffer);
+        }
+        if (mesh.Colors is { } colors)
+        {
+            if (colors.Length != n) throw new InvalidDataException("Vertex colors do not match the mesh allocation.");
+            fixed (Vector4* data = colors) result.ColorBuffer = GpuBuffers.CreateImmutable(gpu, data, (uint)(n * sizeof(Vector4)), BindFlag.VertexBuffer);
         }
 
         // The skin, when the mesh has one and its rig fits the palette. A rig too big to address is simply not
@@ -311,7 +323,7 @@ public sealed unsafe class GpuMesh : IDisposable
     /// texture. Returns the number of parts rebound.
     /// </summary>
     public int RebindPartTextures(ulong materialHash, string? diffuse, string? normal, string? specular,
-        Vector4 tint, bool blended = false)
+        Vector4 tint, bool blended = false, SurfaceMaterial? surface = null)
     {
         if (_disposed || _textures == null || materialHash == 0) return 0;
         int rebound = 0;
@@ -325,6 +337,7 @@ public sealed unsafe class GpuMesh : IDisposable
             p.SpecSrv = _textures.Acquire(specular, fresh);
             p.Tint = tint;   // a material's colour is as editable as its textures — see MafiaMaterials
             p.Blended = blended;
+            p.Surface = surface; p.SurfaceSrvs = AcquireSurface(_textures, surface, fresh);
             Parts[i] = p;
             Supersede(i, fresh);
             rebound++;
@@ -335,7 +348,7 @@ public sealed unsafe class GpuMesh : IDisposable
     /// <summary>Repoints one part at a different material (a mesh-slot reassignment): swaps the recorded hash
     /// and re-resolves the three texture SRVs. Same lease policy as <see cref="RebindPartTextures"/>.</summary>
     public bool SetPartMaterial(int index, ulong materialHash, string? diffuse, string? normal, string? specular,
-        Vector4 tint, bool blended = false)
+        Vector4 tint, bool blended = false, SurfaceMaterial? surface = null)
     {
         if (_disposed || _textures == null || index < 0 || index >= Parts.Count) return false;
         GpuPart p = Parts[index];
@@ -346,10 +359,20 @@ public sealed unsafe class GpuMesh : IDisposable
         p.SpecSrv = _textures.Acquire(specular, fresh);
         p.Tint = tint;
         p.Blended = blended;
+        p.Surface = surface; p.SurfaceSrvs = AcquireSurface(_textures, surface, fresh);
         Parts[index] = p;
         Supersede(index, fresh);
         return true;
     }
+
+    private static ComPtr<ID3D11ShaderResourceView>[]? AcquireSurface(TextureLibrary textures, SurfaceMaterial? surface, List<TextureLease> leases) =>
+        surface is null || surface.Layers < 2 ? null : new[]
+        {
+            textures.Acquire(surface.Layer2Diffuse, leases), textures.AcquireNormalOrFlat(surface.Layer2Normal, leases),
+            textures.Acquire(surface.Layer2Specular, leases), textures.Acquire(surface.BlendMask, leases),
+            textures.Acquire(surface.Layer3Diffuse, leases), textures.AcquireNormalOrFlat(surface.Layer3Normal, leases),
+            textures.Acquire(surface.Layer3Specular, leases), textures.Acquire(surface.BlendMask2, leases)
+        };
 
     // The new leases are taken BEFORE the old ones go back: a part rebound to the texture it already has must
     // not drop that texture's last reference on the way.
@@ -447,6 +470,7 @@ public sealed unsafe class GpuMesh : IDisposable
         IndexBuffer.Dispose();
         if (Instanced) InstanceBuffer.Dispose();
         if (IsSkinned) SkinBuffer.Dispose();
+        if (ColorBuffer.Handle != null) ColorBuffer.Dispose();
         // SRVs belong to TextureLibrary — returning the leases lets it evict entries with no users left.
         foreach (List<TextureLease> leases in _partLeases) _textures?.Release(leases);
         _textures?.Release(_textureLeases);

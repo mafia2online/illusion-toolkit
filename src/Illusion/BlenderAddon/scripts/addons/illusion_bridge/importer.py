@@ -5,7 +5,7 @@ import os
 
 import bpy
 import numpy as np
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 from . import materials, payload, protocol, server
 
@@ -40,6 +40,11 @@ def handle_load_scene(client, msg):
             warnings.append(f"Failed to build rig '{desc.get('id', '')}': {exc}")
             continue
         collection.objects.link(arm)
+        bpy.context.view_layer.update()
+        names = json.loads(arm[BONES_PROP])
+        arm["illusion_blender_bone_rest"] = json.dumps([
+            [float(value) for row in arm.pose.bones[name].matrix.transposed() for value in row]
+            for name in names])
         armatures[desc.get("id", "")] = arm
         built.append(desc.get("id", ""))
 
@@ -76,6 +81,36 @@ def _build_mesh_object(desc, header, blocks, session, warnings):
     indices = arrays.get("indices")
     if positions is None or indices is None:
         raise ValueError("missing 'positions' or 'indices' array")
+    if len(indices) % 3 or (len(indices) and (int(indices.min()) < 0 or int(indices.max()) >= len(positions))):
+        raise ValueError("invalid triangle index range")
+
+    # validate() removes triangles that repeat a vertex. Remove them before creating the mesh,
+    # keeping the corner channels and face materials in the same order. Otherwise one stock
+    # vehicle's degenerate face discards EVERY UV/normal/original index and material assignment.
+    triangles = indices.reshape(-1, 3)
+    kept = ((triangles[:, 0] != triangles[:, 1])
+            & (triangles[:, 1] != triangles[:, 2])
+            & (triangles[:, 0] != triangles[:, 2]))
+    # Blender also removes repeated polygons irrespective of winding. Retain their first
+    # occurrence, matching validate(), while the source identity still lets the toolkit retain
+    # untouched native duplicates on an ordinary mesh push.
+    _, first_faces = np.unique(np.sort(triangles, axis=1), axis=0, return_index=True)
+    unique = np.zeros(len(triangles), dtype=bool)
+    unique[first_faces] = True
+    kept &= unique
+    if not np.all(kept):
+        original_loops = len(indices)
+        corners = np.repeat(kept, 3)
+        arrays = dict(arrays)
+        for channel in [key for key in arrays if key in ("loopNormals", "loopColor0", "origIndex") or key.startswith("loopUv")]:
+            values = arrays.get(channel)
+            if values is not None and len(values) == original_loops:
+                arrays[channel] = values[corners]
+        faces = arrays.get("faceMaterials")
+        if faces is not None and len(faces) == len(kept):
+            arrays["faceMaterials"] = faces[kept]
+        indices = indices[corners]
+        warnings.append(f"Object '{desc.get('id', '')}': omitted {int(np.count_nonzero(~kept))} repeated-index or duplicate triangles.")
 
     name = desc.get("name") or desc.get("id") or "Illusion Object"
     mesh = bpy.data.meshes.new(name)
@@ -111,12 +146,33 @@ def _build_mesh_object(desc, header, blocks, session, warnings):
         loop_normals = arrays.get("loopNormals")
         if loop_normals is not None and len(loop_normals) == nl:
             mesh.normals_split_custom_set(loop_normals.reshape(-1, 3))
+            # Blender's custom-normal encoding can change normals around tiny/degenerate faces,
+            # even returning non-unit vectors. Remember both sides of this import conversion:
+            # an unchanged Blender normal can return its exact source; a normal the artist
+            # changes must still export the artist's value.
+            raw = mesh.attributes.new("_illusion_import_normal", 'FLOAT_VECTOR', 'CORNER')
+            raw.data.foreach_set("vector", loop_normals.ravel())
+            resolved = np.empty(nl * 3, dtype=np.float32)
+            mesh.corner_normals.foreach_get("vector", resolved)
+            baseline = mesh.attributes.new("_illusion_blender_normal", 'FLOAT_VECTOR', 'CORNER')
+            baseline.data.foreach_set("vector", resolved)
 
         loop_uv = arrays.get("loopUv0")
         if loop_uv is not None and len(loop_uv) == nl:
             uv = mesh.uv_layers.new(name="UVMap")
             if uv is not None:
                 uv.data.foreach_set("uv", loop_uv.ravel())  # V pre-flipped by the toolkit
+
+        for key, values in arrays.items():
+            if key.startswith("loopUv") and key[6:].isdigit() and int(key[6:]) > 0 and len(values) == nl:
+                layer = mesh.uv_layers.new(name="UV" + key[6:])
+                layer.data.foreach_set("uv", values.ravel())
+        if mesh.uv_layers.get("UVMap") is not None:
+            mesh.uv_layers.active_index = mesh.uv_layers.find("UVMap")
+        loop_color = arrays.get("loopColor0")
+        if loop_color is not None and len(loop_color) == nl:
+            color = mesh.color_attributes.new(name="COLOR0", type='FLOAT_COLOR', domain='CORNER')
+            color.data.foreach_set("color", loop_color.ravel())
 
         orig_index = arrays.get("origIndex")
         if orig_index is not None and len(orig_index) == nl:
@@ -133,6 +189,13 @@ def _build_mesh_object(desc, header, blocks, session, warnings):
     # Echoed back by the push exporter — this is what lets the toolkit tell a hull from a mesh.
     obj[KIND_PROP] = kind
     obj["illusion_meta"] = json.dumps(meta)  # carried back verbatim on push
+    extra_uvs = {key[6:]: "UV" + key[6:] for key in arrays
+                 if key.startswith("loopUv") and key[6:].isdigit() and int(key[6:]) > 0}
+    if extra_uvs or "loopColor0" in arrays:
+        obj["illusion_native_attributes"] = True
+        obj["illusion_native_uv_layers"] = json.dumps(extra_uvs)
+        if "loopColor0" in arrays:
+            obj["illusion_native_color"] = "COLOR0"
 
     if kind == "collision":
         # Reads as reference geometry, not as something to sculpt: wireframe over the solid so
@@ -215,6 +278,8 @@ def _build_armature(desc, header, blocks, session):
     # keeps its own — so indexing it by a payload bone index binds vertices to the wrong bones, which
     # looks like dragging a door and watching the headlights move.
     obj[BONES_PROP] = json.dumps(created)
+    obj["illusion_import_bone_rest"] = json.dumps([
+        rest[i].tolist() if hasattr(rest[i], "tolist") else list(rest[i]) for i in range(count)])
 
     world = desc.get("world")
     if isinstance(world, (list, tuple)) and len(world) == 16:
@@ -310,8 +375,20 @@ def _clear_previous():
 
 
 def _frame_view():
-    """Best-effort: frame the loaded scene in the first 3D viewport."""
+    """Best-effort: select and frame the imported objects, including far-world city meshes."""
     try:
+        imported = [obj for obj in bpy.data.objects if ID_PROP in obj]
+        if not imported:
+            return
+        for obj in bpy.context.selected_objects:
+            obj.select_set(False)
+        for obj in imported:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = imported[0]
+        corners = [obj.matrix_world @ Vector(corner) for obj in imported for corner in obj.bound_box]
+        minimum = Vector(tuple(min(point[axis] for point in corners) for axis in range(3)))
+        maximum = Vector(tuple(max(point[axis] for point in corners) for axis in range(3)))
+        radius = (maximum - minimum).length * 0.5
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 if area.type != 'VIEW_3D':
@@ -319,8 +396,9 @@ def _frame_view():
                 region = next((r for r in area.regions if r.type == 'WINDOW'), None)
                 if region is None:
                     continue
+                area.spaces.active.clip_end = max(area.spaces.active.clip_end, radius * 20.0, 1000.0)
                 with bpy.context.temp_override(window=window, area=area, region=region):
-                    bpy.ops.view3d.view_all()
+                    bpy.ops.view3d.view_selected(use_all_regions=False)
                 return
     except Exception:
         pass  # pure nicety; never fail the import over it

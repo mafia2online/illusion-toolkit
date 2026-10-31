@@ -1,6 +1,7 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Bridge;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Frames;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
@@ -74,6 +75,22 @@ internal sealed class GeometryEditController
             if (oldMesh is { Instanced: true }) _host.Streamer.RefreshCrashInstances(item.Node);
             children.Add(new GeometryEdit(this, item.Node, item.Result, oldMesh, newMesh));
             _host.Persistence.MarkFrameModified(item.Node);
+
+            // Compiled LODs share compression coefficients. An expanded lattice re-packs their
+            // buffers together, so every visible representation must follow the same undo unit.
+            if (item.Result.Requantized && (item.Node.GeometrySource ?? item.Node.Source) is ICompiledMeshSource { GeometryBinding: { } binding } compiled)
+            {
+                foreach (var drawn in _host.Rnd.Meshes.ToArray())
+                {
+                    if (drawn.Owner is not SceneNode row || ReferenceEquals(row, item.Node)
+                        || !ReferenceEquals(row.GeometrySource ?? row.Source, compiled)) continue;
+                    if (binding.DecodeLod(row.Lod) is not { } data) continue;
+                    var replacement = _host.Rnd.CreateMeshGpu(data);
+                    replacement.Owner = row;
+                    SwapMesh(row, drawn, replacement);
+                    children.Add(new SharedMeshEdit(this, row, drawn, replacement));
+                }
+            }
 
             // A frame references its mesh, it does not own it: the shipped districts put ten wanted posters on
             // one geometry block. There is a single buffer in the file, so the game redraws all of them — and

@@ -22,6 +22,7 @@ public static class TextureSearchIndex
     // their place in the list: sixty thousand paths would otherwise repeat a few hundred folder names.
     private static Dictionary<string, List<int>>? _byName;
     private static readonly List<string> Folders = new();
+    private static readonly Dictionary<ulong, List<string>> ByHash = [];
     private static readonly Dictionary<string, int> FolderIds = new(StringComparer.OrdinalIgnoreCase);
 
     public static bool IsBuilt
@@ -71,6 +72,14 @@ public static class TextureSearchIndex
             Folders.Add(folder);
         }
         string name = Path.GetFileName(path);
+        string stem = Path.GetFileNameWithoutExtension(name);
+        int separator = stem.LastIndexOf('_');
+        if (name.StartsWith("Texture_", StringComparison.OrdinalIgnoreCase) && separator >= 0
+            && ulong.TryParse(stem[(separator + 1)..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out ulong hash))
+        {
+            if (!ByHash.TryGetValue(hash, out var paths)) ByHash[hash] = paths = [];
+            if (!paths.Contains(path, StringComparer.OrdinalIgnoreCase)) paths.Add(path);
+        }
         if (!map.TryGetValue(name, out List<int>? holders)) map[name] = holders = new List<int>(1);
         if (!holders.Contains(id)) holders.Add(id);
     }
@@ -143,7 +152,8 @@ public static class TextureSearchIndex
         EnsureBuilt();
         lock (Sync)
         {
-            if (_byName == null || !_byName.TryGetValue(name, out List<int>? holders)) return null;
+            if (_byName == null || !_byName.TryGetValue(name, out List<int>? holders))
+                return ByHash.TryGetValue(Illusion.Formats.Hashing.Fnv64.Hash(name), out var paths) ? paths.FirstOrDefault(File.Exists) : null;
             while (holders.Count > 0)
             {
                 string path = Path.Combine(Folders[holders[0]], name);

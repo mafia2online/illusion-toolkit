@@ -109,7 +109,8 @@ public partial class ViewportToolShelf : UserControl
         ToolScale.Checked += (_, _) => SetGizmoMode(GizmoMode.Scale);
 
         // The zone tools belong to a map: a stage handed one archive has no loading zones to add to.
-        ZoneTools.Visibility = viewport.IsMapViewport ? Visibility.Visible : Visibility.Collapsed;
+        ZoneTools.Visibility = viewport.IsMapViewport && Illusion.Assets.MafiaEnvironment.Profile.ArchiveVersion != 20
+            ? Visibility.Visible : Visibility.Collapsed;
 
         ApplyHotkeys();
         HotkeyMap.Current.Changed += ApplyHotkeys;

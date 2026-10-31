@@ -94,7 +94,7 @@ public sealed class CarTools
     // is refused, and one that is merely open is loaded again afterwards.
 
     [McpServerTool(Name = "car_lights")]
-    [Description("A car's LIGHTS and the bones of its body's rig. A car has no light objects: its lights are a list in its PREFAB, each entry naming a BONE - the piece of the body skinned to that bone is what glows, and the flare and the cast light stand at the bone itself. Per entry: the bone, the kind (headlight, indicator, brake, back, beacon, taxi sign - a number, given with its name), the side whose switch it follows, how strongly the piece glows and the middle and speeds of its pulse, the light model of cars_universal it casts (car_headlight_glow, car_brake_glow, car_indicator, car_back, car_beacon), the particles a broken lamp throws, the entry's last number (2 on a beacon), and the bones that must be whole for it to work. 'scaleBone' is the bone the rig is scaled by - a roof beacon's bones hang on it. Reads the SAVED working copy (refused while the resource editor holds the car with unsaved edits); nothing is written.")]
+    [Description("Read a vehicle's saved native light entries and body rig bones. Mafia III reads compiled S_InitLight fields, its own numeric kinds, native light models, damage-check bones and beacon count (Last); ScaleBone is null. Mafia II reads its PREFAB light records and scale bone. Bone identifiers from this result can be passed directly to the editing tools. No files are changed; an open vehicle with unsaved edits is refused.")]
     public static async Task<string> CarLights(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -114,15 +114,15 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_light_set")]
-    [Description("Write the light of ONE BONE of a car. An entry the bone already has is CHANGED: only what you give is replaced, everything else stays as it is. A bone without one gets a new entry (kind is then required), its other numbers written like a light of that kind the car already has, else the way every shipped car writes that kind. A lamp that should light needs three things - a bone standing AT the lamp (car_bone_add; the flare appears at the bone, not at the geometry), the lamp's glass skinned to that bone (in Blender, through the bridge), and this entry. Seen in the game: an indicator-kind entry on a new bone blinks with the car's indicators and hazard lights with whatever model it is given (car_brake_glow makes it red); a beacon-kind entry works as a turning light only in the police cars' own arrangement - use car_beacon for that. Writes the car's working copy; refused while the resource editor has the car with unsaved edits or in a Blender session; afterwards the archive is on that editor's build list (editor_build packs it) and a car on its stage is loaded again from disk - 'reloaded': wait for resource_status to stop saying Loading, and the stage's undo history is gone. Build the archive to see it in the game.")]
+    [Description("Create or update one vehicle light entry. Omitted fields retain existing values; a new entry requires a kind. Mafia III copies a verified native same-kind template, using a compatible stock police-car template when available, preserves unknown fields and allocates an unused emissivity index without changing existing mesh channels. Numeric kinds are profile-specific: use car_lights results. Lamp geometry and its native emissivity/skin channels must be authored separately. Writes the working copy; busy or unsaved editors are refused. A matching resource stage reloads and its undo history is cleared; editor_build packs the changed archive.")]
     public static async Task<string> CarLightSet(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
         [Description("The car: its archive name under pc\\sds\\cars, or a full path to an .sds.")] string car,
-        [Description("The bone the light stands on, by name (car_lights lists the rig's bones).")] string bone,
-        [Description("headlight, indicator, brake, back, beacon or 'taxi sign' - or the number of one of them. Required for a new entry; omit to keep an existing entry's kind.")] string? kind = null,
+        [Description("The bone name or canonical bone:index returned by car_lights.")] string bone,
+        [Description("Profile-specific native kind number or supported label. Mafia III includes headlight, indicator, brake, reverse, beacon and interior; a verified native template is required. Omit to retain the kind.")] string? kind = null,
         [Description("'left' or 'right': which side's switch the light follows. A lamp in the middle is written as left. Default: kept (left for a new entry).")] string? side = null,
-        [Description("The light model of cars_universal it casts, by name: car_headlight_glow, car_brake_glow, car_indicator, car_back, car_beacon (another one by the 0x... hash of its name). Default: kept (for a new entry the one shipped cars use with that kind).")] string? model = null,
+        [Description("Native cars_universal light model name or 0x hash; Mafia III includes car_aux_amber_glow, car_reverse_glow, car_headlight_glow and car_beacon. Omit to retain the template model.")] string? model = null,
         [Description("Bones of the rig that must be whole for the light to work - the deform bone of the part the lamp sits on - separated by commas. '-' takes them all off. Default: kept (none for a new entry).")] string? checkBones = null,
         [Description("How strongly the lit piece glows, 0 to 100 (2 on most lamps, 1.2 on some headlights). Default: kept (as the pattern for a new entry).")] double? power = null)
     {
@@ -143,7 +143,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_light_remove")]
-    [Description("Take the light of a bone out of a car's PREFAB (the bone and its geometry stay). Writes the car's working copy; refused while the resource editor has the car with unsaved edits or in a Blender session; afterwards the archive is on that editor's build list (editor_build packs it) and a car on its stage is loaded again from disk - 'reloaded': wait for resource_status to stop saying Loading, and the stage's undo history is gone.")]
+    [Description("Remove a native vehicle light entry while retaining its bone and geometry. Supports Mafia II PREFAB and Mafia III compiled S_InitLight arrays. Writes the working copy; busy or unsaved editors are refused. A matching resource stage reloads and its undo history is cleared; editor_build packs the changed archive.")]
     public static async Task<string> CarLightRemove(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -192,7 +192,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_beacon")]
-    [Description("Give a car a ROOF BEACON that works like a police car's - a flare at the lamp and a light that sweeps round, switched by the game's beacon switch (in Mafia II Online: vehicle.toggleBeacon()). It copies the police cars' own arrangement whole, the only one seen to work as a turning light: a bone named 'light beacon casing' under the bone the rig is scaled by, a bone named 'light beacon' under it, both standing at the lamp, and one beacon light entry on the casing (model car_beacon). A beacon entry on a bone hung elsewhere in the rig - on a bonnet's bone - showed no light. A car that already has the two bones at that place keeps them and only gets the light entry; one that has them somewhere else is refused - this does not move a beacon ('at' in the result is where the casing stands). Left to do afterwards: skin the lamp's glass to 'light beacon casing' and anything that should turn inside it to 'light beacon' (Blender, a fresh pull - bone numbers have moved), and for a siren set the car's SirenSndCategory1 / SirenSndId1 with car_tuning_set (the police cars carry 27 / 128; vehicle.toggleSiren() switches it). The lamp stands on the body, not on the part under it: on a bonnet it stays in place when the bonnet opens. Writes the car's working copy; refused while the resource editor has the car with unsaved edits or in a Blender session; afterwards the archive is on that editor's build list (editor_build packs it) and a car on its stage is loaded again from disk - 'reloaded': wait for resource_status to stop saying Loading, and the stage's undo history is gone.")]
+    [Description("Set up native rotating-beacon bones and light registration at a model-space position. Mafia III reuses and repositions the existing casing where present, appends missing casing/lamp bones, and copies a schema-compatible native type7 template with car_beacon light model. Its parent/check bone must exist; no housing geometry is invented. Mafia II uses its stock police-car bone arrangement and refuses incompatible existing placement. Author lamp geometry through Blender afterwards. Writes the working copy transactionally; busy or unsaved editors are refused. A matching resource stage reloads and its undo history is cleared; editor_build packs the changed archive.")]
     public static async Task<string> CarBeacon(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -218,7 +218,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_collisions")]
-    [Description("What a car is HIT by and SHOT at, component by component (the body, each door, the bonnet, the bumpers, each window...), in the model's space, metres. A car ships no collision mesh: each deformable part carries volumes in the PREFAB - 'body' ones place a physics shape the archive keeps as its own record (a box, sphere, capsule, cylinder, or a cooked convex hull: the body's and the cabin's are hulls), 'glass' and 'zone' ones are plain boxes. Per collision: its number in the component, role, shape, FULL size along its own axes, where its middle stands, and for a cooked hull the box that bounds it (min, max) with the reason it cannot be changed - the toolkit cannot cook a hull. Use it to see what a changed body is no longer covered by: a raised roof stands above the cabin's hull. Reads the SAVED working copy (refused while the resource editor holds the car with unsaved edits); nothing is written.")]
+    [Description("Read the saved vehicle collision volumes with full dimensions, model-space centers and decoded model-space bounds. Mafia III reports native physical volumes grouped by canonical frame GUID and attachment bone:index; shape kinds include box, sphere, capsule, convex and triangle. Its ParentBoneId is attachment metadata and its placement matrix already contains model bind placement. Mafia II reports its separate body, glass and zone PREFAB roles. No files are changed.")]
     public static async Task<string> CarCollisions(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -238,7 +238,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_collision_add")]
-    [Description("Give a component of a car ONE MORE collision: a box, sphere, capsule or cylinder of a size, with its middle at a place in the model's space - how a body that was made bigger (a raised roof, a longer tail, a box on a pickup's bed) gets something to be hit by where the stock hull does not reach. The stock hulls stay: they cannot be cooked again at another shape, so new volume is ADDED beside them, overlapping a little. Role 'body' is the car's solid (cars, people and bullets meet it; any of the four shapes); 'glass' and 'zone' are plain boxes. A solid on the body's own component moves with the car; one on a door or a bonnet moves with that part. Sizes are FULL sizes, more than 0 and at most 50 m; a capsule and a cylinder take their width from x and y and their whole length from z. The shape stands square to the component's bone - a box cannot be turned. Writes the car's working copy (prefab, shape record, manifest, frames); refused while the resource editor has the car with unsaved edits or in a Blender session; afterwards the archive is on that editor's build list (editor_build packs it) and a car on its stage is loaded again from disk - 'reloaded': wait for resource_status to stop saying Loading, and the stage's undo history is gone. Build the archive to meet it in the game.")]
+    [Description("Add a physical volume to a vehicle component using full dimensions and model-space position in metres (positive dimensions, maximum 50). Mafia III accepts box, sphere or Z-axis capsule; body/physical selects native physical collision, while Mafia II glass/zone roles and unverified cylinders are refused. Select an exact component from car_collisions or a body bone:index. New Mafia III shape and cooked physics resources belong to the car, retaining external templates unchanged. Sphere diameters must match; capsule X/Y diameters match and total Z includes rounded caps. Mafia II also supports its native cylinder, glass and zone paths. Writes the working copy; busy or unsaved editors are refused. The matching stage reloads and its undo history is cleared; editor_build packs all changed archives.")]
     public static async Task<string> CarCollisionAdd(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -250,8 +250,8 @@ public sealed class CarTools
         [Description("The middle, model space, metres: x.")] double x,
         [Description("y (the car's nose is +y).")] double y,
         [Description("z (up).")] double z,
-        [Description("box (default), sphere, capsule or cylinder.")] string shape = "box",
-        [Description("body (default) - the car's solid; glass or zone - plain boxes.")] string role = "body")
+        [Description("Box, sphere or capsule; Mafia II additionally supports cylinder.")] string shape = "box",
+        [Description("Body by default. Mafia III also accepts physical; glass/zone retain their Mafia II meaning and are refused for Mafia III.")] string role = "body")
     {
         try
         {
@@ -268,7 +268,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_collision_remove")]
-    [Description("Take one collision off a component of a car, by its number in car_collisions; its shape record goes with it when nothing else names it. Writes the car's working copy; refused while the resource editor has the car with unsaved edits or in a Blender session; afterwards the archive is on that editor's build list (editor_build packs it) and a car on its stage is loaded again from disk - 'reloaded': wait for resource_status to stop saying Loading, and the stage's undo history is gone.")]
+    [Description("Remove one saved collision placement using its component and zero-based index from car_collisions. Mafia III also updates the native bone-helper allocation; shared shape/physics definitions remain available to other placements. Mafia II uses its PREFAB volume path. Geometry and rig bones stay. Writes the working copy; busy or unsaved editors are refused. The matching stage reloads and its undo history is cleared; editor_build packs changed archives.")]
     public static async Task<string> CarCollisionRemove(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,
@@ -377,7 +377,7 @@ public sealed class CarTools
     }
 
     [McpServerTool(Name = "car_check")]
-    [Description("Check a car's body for what only the GAME shows - run it after every push from Blender and before a build. The editor and Blender draw a mesh from positions, normals and the first UV set and renormalize the skin; the game also reads channels neither shows and takes the skin's bytes as stored. Checked on every level of detail of the SAVED working copy (editor_save first): bone weights whose stored bytes do not add up to 255 (in game the vertex stands part of the way to the origin of the WORLD - a blade pointing the same way from every copy of the car); vertices of a skinned mesh with no bone; vertices far from the model; triangles of no area. With 'reference' - the car this one was made from - also, material by material: vertices whose second/third UV set lies outside what that material spans on the reference, or whose colour the material never has there (hidden channels filled from a neighbour of another material: the panel is lit like nothing else on the car); and more triangles with a first UV set of no area than the reference has (shipped cars carry some - parts drawn from one texel - so only new ones are told; a part with a normal map and no UV area has no tangent space). flatUvTriangles is given per level either way. Also against the reference: a material that rides bones of its own there (the snow layer: the game hides the summer car's snow through its bones) with vertices on other bones here - a face of such a layer hung on a body vertex is stretched out of the car. A material of the car is held against the SAME material of the reference; a material of the car's own (a copy of the paint with the car's maps) is held against the one it was made from - name the pairs in 'same' (own=source), else the reference material on the same shader that shares a texture with it is taken, and 'comparedAs' says which. 'notCompared' lists the materials with no counterpart (a sheet of markings): nothing against the reference was checked on them. 'clean' is true when nothing was found in what WAS checked; 'problems' says each finding in words. It reads the SAVED car: refused while the resource editor holds this car with unsaved edits. Reads only.")]
+    [Description("Read-only vehicle geometry diagnostics for all native levels of detail. Supports Mafia II and compiled Mafia III. Checks referenced packed skin weights sum to 255, empty skin, distant/nonfinite positions, zero-area triangles and UV-degenerate triangles. With a reference, compare additional native UV channels, packed vertex colors and bones exclusive to each matched material. Mafia III decodes its half-UV streams and BGRA paint-mask channels directly, without requiring unique geometry. Material counterparts use exact hashes, explicit same mappings or an unambiguous shader/shared-texture match. Stock files can contain real degenerate triangles; findings report them rather than inferring corruption. notCompared identifies unmatched materials or visual LODs without decoded faces. clean is true only when the checks performed found no problems. Reads the saved working copy and refuses unsaved staged edits.")]
     public static async Task<string> CarCheck(
         ICarWorkshop workshop,
         IUiThreadMarshal ui,

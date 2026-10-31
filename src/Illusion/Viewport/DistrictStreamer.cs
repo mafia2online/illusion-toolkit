@@ -360,6 +360,12 @@ internal sealed class DistrictStreamer
 
         if (wholeMap)
         {
+            if (MafiaEnvironment.Profile.ArchiveVersion == 20 && _host.Rnd is { } renderer
+                && _host.Catalogs.Zones is { Count: > 0 } zones && !zones.Any(z => z.Contains(renderer.Camera.Position)))
+            {
+                var zone = zones.FirstOrDefault(z => area is not null && z.Districts.Contains(area.BaseName)) ?? zones[0];
+                _host.LookAt((zone.Min + zone.Max) * 0.5f, Math.Max(10, (zone.Max - zone.Min).Length() * 0.25f), Vector3.UnitZ);
+            }
             EnterStreaming();
             return;
         }
@@ -401,7 +407,7 @@ internal sealed class DistrictStreamer
     {
         if (!CrashEnabled) return;
         string name = winter ? "city_crash_z.sds" : "city_crash.sds";
-        var f = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "city_crash", name));
+        var f = new FileInfo(Path.Combine(MafiaEnvironment.ArchiveFolder, "city_crash", name));
         if (f.Exists) items.Add((f, "city_crash", CrashLayerKey));
     }
 
@@ -820,7 +826,7 @@ internal sealed class DistrictStreamer
     private void AddSeasonGround(bool winter)
     {
         string ground = winter ? "ground_zima" : "ground_leto";
-        string groundSds = Path.Combine(MafiaEnvironment.PcFolder, "sds", "ground", ground + ".sds");
+        string groundSds = Path.Combine(MafiaEnvironment.ArchiveFolder, "ground", ground + ".sds");
         if (File.Exists(groundSds))
         {
             _host.Rnd!.Textures.AddFolder(SdsMeshLoader.EnsureExtracted(new FileInfo(groundSds)));
@@ -918,7 +924,7 @@ internal sealed class DistrictStreamer
     // must stay on the UI thread; TextureLibrary is thread-safe). On cancellation (scene reset,
     // district unload, dispose) or failure, every mesh created so far is released HERE — device
     // object release is free-threaded too — and null is returned.
-    private static PreparedLoad? LoadAndPrepare(SceneRenderer renderer, FileInfo file, string label,
+    private PreparedLoad? LoadAndPrepare(SceneRenderer renderer, FileInfo file, string label,
         List<string> districtNames, bool crash, bool collision, CancellationToken ct)
     {
         var prepared = new List<(SceneNode Leaf, GpuMesh Mesh)>();
@@ -1173,7 +1179,12 @@ internal sealed class DistrictStreamer
         catch (Exception ex)
         {
             foreach ((_, GpuMesh gm) in prepared) gm.Dispose();
-            if (ex is not OperationCanceledException) Debug.WriteLine("Load failed " + label + ": " + ex);
+            if (ex is not OperationCanceledException)
+            {
+                Debug.WriteLine("Load failed " + label + ": " + ex);
+                if (ex is NotSupportedException)
+                    _host.Dispatcher.BeginInvoke(() => _host.RaiseNotice(label + ": " + ex.Message, isError: true));
+            }
             return null;
         }
     }

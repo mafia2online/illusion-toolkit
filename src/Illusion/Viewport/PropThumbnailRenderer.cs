@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Illusion.Assets.Actors;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
@@ -25,7 +26,7 @@ namespace Illusion.Viewport;
 /// since the library asks for the props of one archive one after another.
 /// </para>
 /// <para>
-/// In two halves: <see cref="Stage"/> reads the archive and converts the object — any thread, nothing of the
+/// In two halves: <see cref="Stage(PropEntry)"/> reads the archive and converts the object — any thread, nothing of the
 /// GPU — and <see cref="Draw"/> puts it on the offscreen target, UI thread only. Reading a district's scene
 /// takes a second or more, and done in the tile timer's tick it froze the editor once per archive. Neither
 /// half throws: the tick has nothing above it to catch an exception.
@@ -47,6 +48,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
     private string? _archiveDir;
     private ExtractedSds? _scene;
     private ActorPlacements? _placements;
+    private readonly CompiledPropPreview _compiled = new();
 
     private static string CacheDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Illusion", "prop_thumbs");
@@ -54,6 +56,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
     /// <summary>The kept picture, without drawing anything — null when there is none yet.</summary>
     public static ImageSource? Cached(PropEntry entry)
     {
+        if (entry.Compiled is { } compiled) return Cached(compiled);
         string path = StemOf(entry) + ".png";
         return File.Exists(path) ? Load(path) : null;
     }
@@ -62,13 +65,23 @@ internal sealed class PropThumbnailRenderer : IDisposable
     /// cannot be found or drawn — the tile then keeps its placeholder.</summary>
     public ImageSource? Render(PropEntry entry) => Cached(entry) ?? Draw(Stage(entry));
 
-    /// <summary>What <see cref="Stage"/> worked out for one prop: what to draw, where its textures are and
+    public static ImageSource? Cached(CompiledPropEntry entry)
+    {
+        string path = StemOf(entry) + ".png";
+        return File.Exists(path) ? Load(path) : null;
+    }
+
+    public ImageSource? Render(CompiledPropEntry entry) => Cached(entry) ?? Draw(Stage(entry));
+
+    /// <summary>What <see cref="Stage(PropEntry)"/> worked out for one prop: what to draw, where its textures are and
     /// what it has to fit in. Nothing to draw when <see cref="Meshes"/> is empty.</summary>
     public sealed class Staged
     {
         public required PropEntry Entry { get; init; }
+        public CompiledPropEntry? CompiledEntry { get; init; }
         public List<MeshData> Meshes { get; init; } = [];
         public string TextureFolder { get; init; } = "";
+        public IReadOnlyList<string> TextureFolders { get; init; } = [];
         public Vector3 Centre { get; init; }
         public float Radius { get; init; }
     }
@@ -80,6 +93,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
     /// </summary>
     public Staged Stage(PropEntry entry)
     {
+        if (entry.Compiled is { } compiled) return Stage(compiled);
         try
         {
             ExtractedSds? held;
@@ -96,7 +110,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
                 // Read OUTSIDE the lock: it takes a second or more, and the lock is also what the UI thread
                 // takes to let the held archive go when the tab is left — held through the read, that froze
                 // the window until the read was done. One prop is staged at a time, so nothing reads twice.
-                var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+                var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, entry.Archive));
                 dir = Assets.MafiaEnvironment.ExtractedDir(sds);
                 held = ExtractedSds.Load(dir);
                 placements = held.FrameResource is { } fr ? ActorPlacements.Load(held.Manifest, fr) : null;
@@ -147,7 +161,33 @@ internal sealed class PropThumbnailRenderer : IDisposable
         }
     }
 
-    /// <summary>Draws what <see cref="Stage"/> worked out and keeps the picture. UI thread. Null when there is
+    public Staged Stage(CompiledPropEntry entry)
+    {
+        var display = new PropEntry(entry.Archive, entry.Name, entry.Name, "CompiledStatic", entry.Category,
+            entry.Triangles, [entry.Size.X, entry.Size.Y, entry.Size.Z]);
+        try
+        {
+            var preview = _compiled.Load(entry);
+            var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
+            foreach (var mesh in preview.Meshes)
+                foreach (var position in mesh.Positions)
+                {
+                    var point = Vector3.Transform(position, mesh.World);
+                    min = Vector3.Min(min, point); max = Vector3.Max(max, point);
+                }
+            if (min.X > max.X || !float.IsFinite((max - min).Length()))
+                return new Staged { Entry = display, CompiledEntry = entry };
+            return new Staged { Entry = display, CompiledEntry = entry, Meshes = preview.Meshes.ToList(),
+                TextureFolders = preview.TextureFolders, Centre = (min + max) / 2,
+                Radius = MathF.Max(0.05f, (max - min).Length() / 2) };
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new Staged { Entry = display, CompiledEntry = entry };
+        }
+    }
+
+    /// <summary>Draws what <see cref="Stage(PropEntry)"/> worked out and keeps the picture. UI thread. Null when there is
     /// nothing to draw or the GPU would not have it; never throws.</summary>
     public ImageSource? Draw(Staged staged)
     {
@@ -159,7 +199,8 @@ internal sealed class PropThumbnailRenderer : IDisposable
             // folders left from the archives drawn before would lend theirs.
             _renderer!.Clear();
             _renderer.Textures.ClearFolders();
-            _renderer.Textures.AddFolder(staged.TextureFolder);
+            if (!string.IsNullOrEmpty(staged.TextureFolder)) _renderer.Textures.AddFolder(staged.TextureFolder);
+            foreach (string folder in staged.TextureFolders) _renderer.Textures.AddFolder(folder);
             foreach (MeshData mesh in staged.Meshes) _renderer.AddMesh(mesh);
 
             // Three-quarters from the front and above, far enough for the bounding sphere to fill the frame.
@@ -173,7 +214,8 @@ internal sealed class PropThumbnailRenderer : IDisposable
             byte[] bgra = RenderTargetReadback.Read(_gpu!, _target!);
             BitmapSource bmp = BitmapSource.Create(Width, Height, 96, 96, PixelFormats.Bgra32, null, bgra, Width * 4);
             bmp.Freeze();
-            Save(bmp, staged.Entry);
+            if (staged.CompiledEntry is { } compiled) Save(bmp, compiled);
+            else Save(bmp, staged.Entry);
             return bmp;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -193,6 +235,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
             _archive = null;
             _rested++;
         }
+        _compiled.Clear();
     }
 
     private static IEnumerable<FrameObjectBase> Subtree(FrameObjectBase root)
@@ -212,6 +255,14 @@ internal sealed class PropThumbnailRenderer : IDisposable
     // Bumped when what a tile shows changes, so that pictures kept by an older build are not handed out.
     private const int Look = 2;
 
+    private static string StemOf(CompiledPropEntry entry)
+    {
+        var source = new FileInfo(entry.SourceResourcePath);
+        string identity = $"compiled|{Assets.MafiaEnvironment.GameRoot}|{entry.Archive}|{source.FullName}|{entry.SourceObjectId:X16}";
+        string revision = source.Exists ? $"{source.Length}|{source.LastWriteTimeUtc.Ticks}|{Look}" : $"missing|{Look}";
+        return Path.Combine(CacheDir, $"{Fnv64.Hash(identity):x16}_{Fnv64.Hash(revision):x16}");
+    }
+
     // "<which prop>_<which state of its archive's working copy>". The picture is drawn from the working
     // copy, and a district's working copy is edited — keyed by the prop alone, a picture stayed whatever
     // became of the object. One prop's pictures share the first half, which is how the outdated ones are found.
@@ -220,7 +271,7 @@ internal sealed class PropThumbnailRenderer : IDisposable
         long copy = 0;
         try
         {
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, entry.Archive));
             string dir = Assets.MafiaEnvironment.ExtractedDir(sds);
             if (Directory.Exists(dir)) copy = Directory.GetLastWriteTimeUtc(dir).Ticks;
         }
@@ -280,6 +331,19 @@ internal sealed class PropThumbnailRenderer : IDisposable
         {
             // not keeping the picture costs drawing it again next time, nothing more
         }
+    }
+
+    private static void Save(BitmapSource bmp, CompiledPropEntry entry)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheDir);
+            string stem = StemOf(entry);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bmp));
+            using (FileStream file = File.Create(stem + ".png")) encoder.Save(file);
+            DropOlder(stem);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private bool EnsureContext()

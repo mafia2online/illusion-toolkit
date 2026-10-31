@@ -19,6 +19,12 @@ internal static class ProbeRunner
 
         switch (args[0])
         {
+            case "--probe-mafia3-editing" when args.Length == 2:
+                Mafia3Probes.RunEditing(args[1]);
+                return true;
+            case "--probe-mafia3" when args.Length == 2:
+                Mafia3Probes.Run(args[1]);
+                return true;
             case "--probe-m2o-export":
                 M2oExportProbes.Run();
                 return true;

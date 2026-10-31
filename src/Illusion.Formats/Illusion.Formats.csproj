@@ -12,6 +12,7 @@
     <!-- The MCP tools decode Table, Texture and Script payloads, whose resource-format classes are
          internal to this assembly (they are file-layout detail, not a public model). -->
     <InternalsVisibleTo Include="Illusion.Mcp" />
+    <InternalsVisibleTo Include="Illusion.NativeCookHost" />
   </ItemGroup>
 
   <!-- ============================== Native core ==============================

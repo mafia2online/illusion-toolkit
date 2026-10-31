@@ -49,6 +49,12 @@ public partial class ScenePropertyTabs : UserControl
     /// </summary>
     public void SurfaceTabFor(SelectionViewModel selection)
     {
+        // Selection notifications and WPF binding transfers can arrive in the same dispatcher
+        // turn. Selecting a still-collapsed tab makes TabControl fall back to Render before
+        // its visibility catches up, so transfer the capability bindings before selecting.
+        foreach (object item in PropertyTabs.Items)
+            if (item is TabItem tab)
+                tab.GetBindingExpression(VisibilityProperty)?.UpdateTarget();
         TabItem target =
             selection.HasTransform ? ObjectTab :
             selection.IsSds ? SdsTab :
@@ -56,8 +62,10 @@ public partial class ScenePropertyTabs : UserControl
             selection.IsScene ? SceneTab :
             selection.HasTypeProperties ? TypeTab : // type-only selections (e.g. a collision placement) surface their type tab
             RenderTab;
-        bool keepCurrent = PropertyTabs.SelectedItem is TabItem cur && cur.Visibility == Visibility.Visible
-            && (ReferenceEquals(cur, ObjectTab) || ReferenceEquals(cur, TypeTab) || ReferenceEquals(cur, MaterialsTab));
+        bool keepCurrent = PropertyTabs.SelectedItem is TabItem cur &&
+            ((ReferenceEquals(cur, ObjectTab) && selection.HasTransform) ||
+             (ReferenceEquals(cur, TypeTab) && selection.HasTypeProperties) ||
+             (ReferenceEquals(cur, MaterialsTab) && selection.HasMaterials));
         if (!keepCurrent) target.IsSelected = true; // its Visibility binding has already made it visible
     }
 }

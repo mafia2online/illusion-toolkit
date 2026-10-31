@@ -36,6 +36,7 @@ public sealed class SceneNode : INotifyPropertyChanged
     /// no consumer ever depends on a concrete format backend.
     /// </summary>
     public ISceneSource? Source { get; set; }
+    public ISceneSource? GeometrySource { get; set; }
 
     /// <summary>
     /// Which level of detail of <see cref="Source"/> this row holds. Zero for everything except the "LOD n"

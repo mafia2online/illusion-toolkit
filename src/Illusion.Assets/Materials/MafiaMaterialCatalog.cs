@@ -122,7 +122,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
         if (source.GetMTLVersion() != lib.Version) return null;
         if (lib.LookupMaterialByName(newName) != null) return null;
 
-        IMaterial copy = source is Material_v58 ? new Material_v58(source) : new Material_v57(source);
+        IMaterial copy = source is Material_v63 v63 ? new Material_v63(v63) : source is Material_v58 ? new Material_v58(source) : new Material_v57(source);
         copy.SetName(newName);
         if (lib.Materials.ContainsKey(copy.GetMaterialHash())) return null;
         var swapped = new Dictionary<ulong, IMaterial>(lib.Materials)

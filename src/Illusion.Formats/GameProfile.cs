@@ -1,22 +1,24 @@
 namespace Illusion.Formats;
 
-/// <summary>The games this library supports. Mafia III / Mafia: DE (version-20 archives) are not.</summary>
+/// <summary>The games this library supports. Includes PC Mafia III version-20 archives.</summary>
 public enum GameVariant
 {
     MafiaII,
     MafiaIIDefinitiveEdition,
+    MafiaIII,
 }
 
 /// <summary>
-/// Per-game knobs the formats need. Both supported games share archive version 19; the differences are
-/// header cosmetics, patch-file support and the material library version.
+/// Per-game archive settings. Mafia II uses version 19; Mafia III uses version 20.
 /// </summary>
 public sealed record GameProfile(GameVariant Variant)
 {
     public static readonly GameProfile MafiaII = new(GameVariant.MafiaII);
     public static readonly GameProfile MafiaIIDe = new(GameVariant.MafiaIIDefinitiveEdition);
 
-    public uint ArchiveVersion => 19;
+    public static readonly GameProfile MafiaIII = new(GameVariant.MafiaIII);
+
+    public uint ArchiveVersion => Variant == GameVariant.MafiaIII ? 20u : 19u;
 
     /// <summary>Classic Mafia II archives carry a fixed byte pattern in the header's Unknown20 field;
     /// the Definitive Edition zeroes it.</summary>
@@ -26,7 +28,13 @@ public sealed record GameProfile(GameVariant Variant)
     public bool SupportsPatchFiles => Variant == GameVariant.MafiaIIDefinitiveEdition;
 
     /// <summary>Material library version (.mtl): 57 classic, 58 DE.</summary>
-    public ushort MaterialVersion => Variant == GameVariant.MafiaII ? (ushort)57 : (ushort)58;
+    public ushort MaterialVersion => Variant switch
+    {
+        GameVariant.MafiaII => 57,
+        GameVariant.MafiaIIDefinitiveEdition => 58,
+        GameVariant.MafiaIII => 63,
+        _ => throw new ArgumentOutOfRangeException(nameof(Variant)),
+    };
 }
 
 /// <summary>

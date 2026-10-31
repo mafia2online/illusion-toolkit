@@ -25,6 +25,10 @@ public static class StageCompanions
     public static IReadOnlyList<FileInfo> For(FileInfo sds)
     {
         DirectoryInfo? folder = sds.Directory;
+        if (folder?.Parent?.Name.Equals("sds_retail", StringComparison.OrdinalIgnoreCase) == true
+            && (folder.Name.Equals("city", StringComparison.OrdinalIgnoreCase)
+                || folder.Name.Equals("city_crash", StringComparison.OrdinalIgnoreCase)))
+            return CompiledCity(sds, folder);
         if (folder == null || !folder.Name.Equals("cars", StringComparison.OrdinalIgnoreCase))
             return Array.Empty<FileInfo>();
 
@@ -38,6 +42,38 @@ public static class StageCompanions
             var companion = new FileInfo(Path.Combine(folder.FullName, name));
             if (companion.Exists) found.Add(companion);
         }
+        return found;
+    }
+
+    private static IReadOnlyList<FileInfo> CompiledCity(FileInfo archive, DirectoryInfo folder)
+    {
+        var found = new List<FileInfo>();
+        string stem = Path.GetFileNameWithoutExtension(archive.Name);
+        var global = new FileInfo(Path.Combine(folder.Parent!.FullName, "city", "bourbon_tex_global.sds"));
+        if (global.Exists && !global.FullName.Equals(archive.FullName, StringComparison.OrdinalIgnoreCase)) found.Add(global);
+        string city = stem.StartsWith("si_", StringComparison.OrdinalIgnoreCase)
+            || stem.Contains("_si_", StringComparison.OrdinalIgnoreCase) ? "si" : "bc";
+        var shared = new FileInfo(Path.Combine(folder.Parent!.FullName, "city_univers", city + "_city_univers.sds"));
+        if (shared.Exists) found.Add(shared);
+        if (!folder.Name.Equals("city", StringComparison.OrdinalIgnoreCase)
+            || stem.EndsWith("_textures", StringComparison.OrdinalIgnoreCase)) return found;
+
+        // Fusion shares low-detail textures at district scope: e.g. french_east_block_b
+        // takes french_east_lod2_textures, while bayou_block_a takes bayou_lod2_textures.
+        const string suffix = "_lod2_textures";
+        var texturePack = folder.EnumerateFiles("*_lod2_textures.sds")
+            .Select(file => (File: file, Prefix: Path.GetFileNameWithoutExtension(file.Name)[..^suffix.Length]))
+            .Where(item => stem.Equals(item.Prefix, StringComparison.OrdinalIgnoreCase)
+                || stem.StartsWith(item.Prefix + "_", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.Prefix.Length).FirstOrDefault().File;
+        if (texturePack is not null) found.Add(texturePack);
+        const string streamingPrefix = "bourbon_tex_";
+        var streamingPack = folder.EnumerateFiles(streamingPrefix + "*.sds")
+            .Select(file => (File: file, Prefix: Path.GetFileNameWithoutExtension(file.Name)[streamingPrefix.Length..]))
+            .Where(item => stem.Equals(item.Prefix, StringComparison.OrdinalIgnoreCase)
+                || stem.StartsWith(item.Prefix + "_", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.Prefix.Length).FirstOrDefault().File;
+        if (streamingPack is not null) found.Add(streamingPack);
         return found;
     }
 }

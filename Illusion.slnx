@@ -15,5 +15,6 @@
   <Project Path="src/Illusion.Formats/Illusion.Formats.csproj" />
   <Project Path="src/Illusion.Assets/Illusion.Assets.csproj" />
   <Project Path="src/Illusion.Rendering/Illusion.Rendering.csproj" />
+  <Project Path="src/Illusion.NativeCookHost/Illusion.NativeCookHost.csproj" />
   <Project Path="src/Illusion/Illusion.csproj" />
 </Solution>

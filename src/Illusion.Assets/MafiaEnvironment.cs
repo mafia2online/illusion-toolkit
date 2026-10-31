@@ -1,4 +1,5 @@
 using Illusion.Domain;
+using Illusion.Formats;
 using Illusion.Formats.Compression;
 using Illusion.Formats.ResourceFormats;
 
@@ -25,10 +26,14 @@ public static class MafiaEnvironment
     /// <summary>Folder of unpacked resources <c>&lt;root&gt;\resources</c> — mirrors the game's structure.</summary>
     public static string? ResourcesFolder => GameRoot is null ? null : Path.Combine(GameRoot, "resources");
 
-    public static string CityFolder => Path.Combine(PcFolder, "sds", "city");
+    public static GameProfile Profile { get; private set; } = GameProfile.MafiaII;
+
+    public static string ArchiveFolder => Path.Combine(PcFolder, Profile.Variant == GameVariant.MafiaIII ? "sds_retail" : "sds");
+
+    public static string CityFolder => Path.Combine(ArchiveFolder, "city");
 
     /// <summary>The shared <c>city_univers</c> SDS (AREA volumes + <c>missions\CITY\cityareas.bin</c>).</summary>
-    public static string CityUniversSds => Path.Combine(PcFolder, "sds", "city_univers", "city_univers.sds");
+    public static string CityUniversSds => Path.Combine(ArchiveFolder, "city_univers", "city_univers.sds");
 
     /// <summary>Resolves <c>cityareas.bin</c> (AREA targets + district adjacency) out of <c>city_univers</c>, or null.</summary>
     public static string? TryGetCityAreasBin(Func<FileInfo, string> ensureExtracted)
@@ -78,13 +83,17 @@ public static class MafiaEnvironment
         error = null;
         if (_initialized)
         {
-            return true;
+            string? requestedRoot = ResolveGameRoot(pcPath);
+            if (requestedRoot is not null && string.Equals(Path.GetFullPath(requestedRoot), Path.GetFullPath(GameRoot), StringComparison.OrdinalIgnoreCase))
+                return true;
+            error = "Restart the toolkit before opening a different game folder.";
+            return false;
         }
 
         string? pc = pcPath;
         if (string.IsNullOrEmpty(pc))
         {
-            error = "Game path is not set — pick the Mafia II folder in the launcher first.";
+            error = "Game path is not set — pick the game folder in the launcher first.";
             return false;
         }
 
@@ -99,11 +108,13 @@ public static class MafiaEnvironment
             error = "Game folder not found: " + pc;
             return false;
         }
-        PcFolder = pc;
+        PcFolder = Path.GetFullPath(pc);
+        Profile = Directory.Exists(Path.Combine(PcFolder, "sds_retail")) ? GameProfile.MafiaIII
+            : File.Exists(Path.Combine(PcFolder, "mafia2definitiveedition.exe")) ? GameProfile.MafiaIIDe : GameProfile.MafiaII;
 
         // Game root (edit\, resources\) — one level above pc\. pc is already normalized above, so
         // ResolveGameRoot is idempotent here and yields the identical root without duplicating the rule.
-        GameRoot = ResolveGameRoot(pc) ?? pc;
+        GameRoot = ResolveGameRoot(PcFolder) ?? PcFolder;
         StreamMapPath = Path.Combine(GameRoot, "edit", "tables", "StreamMapa.bin");
 
         // Point the native oodle shim at the game's own oo2core DLL. Only Mafia II DE archives carry oodle blocks;

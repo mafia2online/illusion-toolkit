@@ -75,7 +75,7 @@ public sealed class UserSettings
         set => _hotkeys = value;
     }
 
-    private static string SettingsFile => Path.Combine(
+    private static string SettingsFile => Environment.GetEnvironmentVariable("ILLUSION_SETTINGS_FILE") ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Illusion", "settings.json");
 

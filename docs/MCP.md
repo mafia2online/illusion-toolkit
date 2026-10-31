@@ -126,3 +126,68 @@ only one that writes: it previews by default (`dryRun` is true unless you say ot
 what it replaces. And `parse_effects_*` report the `.eff` container header only; the property tree
 inside is not decoded, and the responses say so rather than looking complete.
 
+### Mafia III
+
+PC SDS 20 archives use the same browsing/extraction/build tools and report `fileHash` for every
+resource. `decode_resource` decodes `Generic` GENR schemas, object GUIDs and reflected fields.
+MTLB 63 libraries are available through the material tools.
+
+`editor_open_area`, `resource_open`, scene selection/movement, object properties, undo/redo,
+Save/Build, cameras and screenshots work with compiled scenes. `car_tuning` exposes editable reflected
+vehicle component fields as table 1; give its returned band and full field name to `car_tuning_set`.
+District LOD companions and the shared vehicle archive are resolved automatically when present.
+`scene_reparent` moves existing supported hierarchy entries, keeping the local transform; omit its parent
+for the owning document root. `scene_delete_selected` persists supported compiled subtree removal.
+`object_import` accepts verified static prototypes and supported breakable actors from the city's `city_crash` archive. Supply an
+explicit existing Kit `parent` and a prototype name or `guid:...`; collision defaults to `none` for
+Mafia III. Other collision modes are refused; existing actor physics is preserved. Imported scenery has independently editable
+geometry; build both the destination and its modified shared CityCrash companion through editor Build.
+Compiled paths include `[guid:...]` identities to distinguish repeated object names; scene tools also
+accept the `guid:...` identifier directly. `view_set` with `collision=true` draws decoded physics shapes
+in the map and resource editors.
+Verified vehicle engine/brake/fuel/default gearbox fields and wheel model names are exposed alongside
+reflected components. Open the retail `tables/tables.sds` to edit the shared gearbox rows through
+`car_tuning` or their resource property panels. Vehicle tuning presets include their gearbox selection.
+`decode_resource` also recognizes the gearbox and vehicle tuning `SystemObjectDatabase` schemas;
+other database schemas return an explicit refusal.
+See [MAFIA3.md](MAFIA3.md) for test setup and the supported editing scope.
+
+Mafia III authoring tools also include `scene_create_group`, `mesh_make_unique`, `collision_add`,
+`collision_mesh` and `collision_recook`. Box sizes are half-extents, capsule size.x is radius and size.z
+is segment height; convex points are collision-local. These operations share editor undo/redo and save/build.
+`view_set navigation=true` displays compiled AI and walkmesh overlays. `decode_resource` supports
+`NAV_AIWORLD_DATA` and `NAV_PATH_DATA`, with explicit geometry-editing limits.
+
+`animation_open` selects/seeks/plays native transform clips using the named skeleton. `animation_screenshot`
+saves its current rendered frame without activating the preview. `resource_open activate=false` supports
+background test automation; set `ILLUSION_BACKGROUND=1` to suppress activation during app startup.
+
+`collision_remove` removes a compiled volume and its native helper allocation while preserving shared assets.
+`world_collision_meshes` pages the dedicated district collision assets; `world_collision_mesh` returns local
+positions/triangles and one instance matrix. `world_collision_recook` edits a fixed-topology triangle asset
+for ALL its instances, within original world asset bounds, with native compression/BVH recooking and
+companion Save/Build. Unsafe custom variants, aliases and topology changes are explicitly refused.
+`navigation_translate` moves an entire isolated NAV_PATH section and preserves graph costs; sections with
+external streaming boundaries are refused. Both paths use the normal editor history.
+
+`navigation_deform` edits verified interior vertices in their original face planes and recooks native graph
+positions/costs through the isolated cook helper. It requires an exact supported copied executable and a
+source graph that reproduces exactly; boundary/streaming changes and new topology are refused.
+`decode_resource` reports candidate/protected vertices and the limits. The native vertex editor exposes the same operation.
+
+`collision_add` also accepts indexed triangle points for new concave collision meshes. Native tree cooking
+supports up to 100,000 vertices and 100,000 triangles. `collision_recook` preserves existing topology;
+shared descriptors use copy-on-write. `car_collision_add` uses full box dimensions and native vehicle bone
+indices, unlike the generic tool's half-extents. Invalid attachment indices are refused before allocation.
+
+Vehicle authoring includes `car_clone`, `car_bone_add`, light/beacon tools, paint choices and
+`material_parameter` for native material parameter codes. Primary/secondary body paint uses C060/C061
+and the verified native vertex color selectors. Blender exchange retains and edits COLOR0 and all four
+native UV channels where present. `car_check` validates actual native color, UV and weight data.
+
+`object_import` also accepts verified actor-containing Kits and stock traffic markers. Traffic markers return
+an explicit helper-only preview description: actual vehicle spawning is performed by the game runtime.
+`decode_resource` recognizes compiled particle libraries and returns paged effect/generation/operator and
+constant-source summaries. The resource tree exposes reflected editable parameters through
+`object_properties`/`object_set_property`; shared constant sources are labeled with their user counts.
+This is resource authoring, without runtime particle simulation.

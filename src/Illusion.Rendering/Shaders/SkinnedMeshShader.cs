@@ -77,6 +77,7 @@ struct VSIn
     float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD;
     float3 tan : TANGENT;  float3 bin : BINORMAL;
     uint4  idx : BLENDINDICES; float4 wgt : BLENDWEIGHT;
+    float4 color : COLOR;
 };" + ShaderCompiler.PsInStruct + @"
 PSIn VSMain(VSIn i)
 {
@@ -93,6 +94,7 @@ PSIn VSMain(VSIn i)
     o.pos  = mul(WVP, float4(p, 1.0));
     o.nrm  = mul((float3x3)World, mul(skin3, i.nrm));
     o.uv   = i.uv;
+    o.color = i.color;
     o.wpos = mul(World, float4(p, 1.0)).xyz;
     o.tan  = mul((float3x3)World, mul(skin3, i.tan));
     o.bin  = mul((float3x3)World, mul(skin3, i.bin));
@@ -116,7 +118,8 @@ PSIn VSMain(VSIn i)
         byte* binName = (byte*)SilkMarshal.StringToPtr("BINORMAL");
         byte* idxName = (byte*)SilkMarshal.StringToPtr("BLENDINDICES");
         byte* wgtName = (byte*)SilkMarshal.StringToPtr("BLENDWEIGHT");
-        var elems = stackalloc InputElementDesc[7];
+        byte* colorName = (byte*)SilkMarshal.StringToPtr("COLOR");
+        var elems = stackalloc InputElementDesc[8];
         elems[0] = ShaderCompiler.VertexElement(posName, 0, Format.FormatR32G32B32Float, 0);
         elems[1] = ShaderCompiler.VertexElement(nrmName, 0, Format.FormatR32G32B32Float, 12);
         elems[2] = ShaderCompiler.VertexElement(uvName, 0, Format.FormatR32G32Float, 24);
@@ -129,9 +132,10 @@ PSIn VSMain(VSIn i)
         elems[5].InputSlot = 1;
         elems[6] = ShaderCompiler.VertexElement(wgtName, 0, Format.FormatR32G32B32A32Float, 4);
         elems[6].InputSlot = 1;
+        elems[7] = ShaderCompiler.VertexElement(colorName, 0, Format.FormatR32G32B32A32Float, 0); elems[7].InputSlot = 2;
         ID3D11InputLayout* layout = null;
         SilkMarshal.ThrowHResult(gpu.Device11.CreateInputLayout(
-            elems, 7, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
+            elems, 8, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
         _layout = layout;
         SilkMarshal.Free((nint)posName);
         SilkMarshal.Free((nint)nrmName);
@@ -140,6 +144,7 @@ PSIn VSMain(VSIn i)
         SilkMarshal.Free((nint)binName);
         SilkMarshal.Free((nint)idxName);
         SilkMarshal.Free((nint)wgtName);
+        SilkMarshal.Free((nint)colorName);
 
         vsCode.Dispose();
         psCode.Dispose();

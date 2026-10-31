@@ -183,8 +183,9 @@ public sealed class ArchiveContents
         foreach ((string type, string file) in manifest.Entries)
         {
             SdsResourceKind kind = SdsResourceKinds.Of(type);
-            bool namesFile = SdsResourceKinds.NamesFile(type);
-            var info = new FileInfo(Path.Combine(folder, PayloadPath(file, kind)));
+            bool v20 = manifest.ArchiveVersion == 20;
+            bool namesFile = v20 || SdsResourceKinds.NamesFile(type);
+            var info = new FileInfo(Path.Combine(folder, v20 ? file : PayloadPath(file, kind)));
             resources.Add(new SdsResource
             {
                 Name = Path.GetFileName(file),
@@ -228,6 +229,7 @@ public static class SdsResourceKinds
         new(StringComparer.Ordinal)
         {
             ["FrameResource"] = SdsResourceKind.Mesh,
+            ["Generic"] = SdsResourceKind.Mesh,
             ["FrameNameTable"] = SdsResourceKind.NameTable,
             ["IndexBufferPool"] = SdsResourceKind.Buffer,
             ["VertexBufferPool"] = SdsResourceKind.Buffer,
@@ -251,6 +253,7 @@ public static class SdsResourceKinds
             ["AudioSectors"] = SdsResourceKind.AudioSector,
             ["NAV_OBJ_DATA"] = SdsResourceKind.Navigation,
             ["NAV_AIWORLD_DATA"] = SdsResourceKind.Navigation,
+            ["NAV_PATH_DATA"] = SdsResourceKind.Navigation,
             ["NAV_HPD_DATA"] = SdsResourceKind.Navigation,
             ["AnimalTrafficPaths"] = SdsResourceKind.TrafficPath,
             ["Script"] = SdsResourceKind.Script,

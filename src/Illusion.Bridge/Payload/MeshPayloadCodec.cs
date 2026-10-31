@@ -85,6 +85,10 @@ public sealed class MeshObjectPayload
     public uint[] LoopVertexIndices { get; set; } = Array.Empty<uint>();
     public Vector3[] LoopNormals { get; set; } = Array.Empty<Vector3>();
     public Vector2[] LoopUvs { get; set; } = Array.Empty<Vector2>();
+    /// <summary>Optional native UV sets beyond the primary map, keyed by channel order.</summary>
+    public Dictionary<int, Vector2[]> ExtraLoopUvs { get; set; } = [];
+    /// <summary>Optional logical linear COLOR0 per corner; absent means preserve the original channel.</summary>
+    public Vector4[] LoopColors { get; set; } = [];
     public int[] LoopOrigIndex { get; set; } = Array.Empty<int>();
     public ushort[] FaceMaterials { get; set; } = Array.Empty<ushort>();
     public List<MeshMaterialInfo> Materials { get; set; } = new();
@@ -186,6 +190,13 @@ public static class MeshPayloadCodec
             ExchangeSchema.DtypeF32, 3, mesh.LoopNormals.Length, ToBytes(mesh.LoopNormals));
         obj.Arrays[ExchangeSchema.ArrayLoopUv0] = container.AddBlock(
             ExchangeSchema.DtypeF32, 2, mesh.LoopUvs.Length, ToBytes(mesh.LoopUvs));
+        foreach (var (channel, values) in mesh.ExtraLoopUvs.OrderBy(p => p.Key))
+        {
+            if (channel <= 0 || channel > 31) throw new InvalidDataException("Additional UV channel must be between 1 and 31.");
+            obj.Arrays[$"loopUv{channel}"] = container.AddBlock(ExchangeSchema.DtypeF32, 2, values.Length, ToBytes(values));
+        }
+        if (mesh.LoopColors.Length > 0)
+            obj.Arrays[ExchangeSchema.ArrayLoopColor0] = container.AddBlock(ExchangeSchema.DtypeF32, 4, mesh.LoopColors.Length, ToBytes(mesh.LoopColors));
         obj.Arrays[ExchangeSchema.ArrayOrigIndex] = container.AddBlock(
             ExchangeSchema.DtypeI32, 1, mesh.LoopOrigIndex.Length, ToBytes(mesh.LoopOrigIndex));
         obj.Arrays[ExchangeSchema.ArrayFaceMaterials] = container.AddBlock(
@@ -305,6 +316,11 @@ public static class MeshPayloadCodec
             mesh.BoneIndices = Block(container, obj, ExchangeSchema.ArrayBoneIndices).Data;
         if (obj.Arrays.ContainsKey(ExchangeSchema.ArrayBoneWeights))
             mesh.BoneWeights = FromBytes<float>(Block(container, obj, ExchangeSchema.ArrayBoneWeights));
+        if (obj.Arrays.ContainsKey(ExchangeSchema.ArrayLoopColor0))
+            mesh.LoopColors = FromBytes<Vector4>(Block(container, obj, ExchangeSchema.ArrayLoopColor0));
+        foreach (string name in obj.Arrays.Keys)
+            if (name.StartsWith("loopUv", StringComparison.Ordinal) && int.TryParse(name.AsSpan(6), out int semantic) && semantic is > 0 and <= 31)
+                mesh.ExtraLoopUvs.Add(semantic, FromBytes<Vector2>(Block(container, obj, name)));
 
         return mesh;
     }

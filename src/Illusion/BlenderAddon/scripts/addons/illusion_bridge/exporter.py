@@ -188,11 +188,30 @@ def _export_armature(obj, blocks):
     rest = np.zeros((len(bone_names), 16), dtype=np.float32)
     parents = np.full(len(bone_names), -1, dtype=np.int32)
     index_of = {name: i for i, name in enumerate(bone_names)}
+    try:
+        imported = json.loads(obj.get("illusion_import_bone_rest", "[]"))
+        baseline = json.loads(obj.get("illusion_blender_bone_rest", "[]"))
+    except (ValueError, TypeError):
+        imported, baseline = [], []
     for i, name in enumerate(bone_names):
         pose_bone = obj.pose.bones.get(name)
         if pose_bone is None:
             raise RuntimeError(f"bone '{name}' is gone from the rig")
-        rest[i] = _row_major(pose_bone.matrix)
+        current = _row_major(pose_bone.matrix)
+        if i < len(imported) and i < len(baseline):
+            original = np.asarray(imported[i], dtype=np.float32)
+            initial = np.asarray(baseline[i], dtype=np.float32)
+            if original.shape == (16,) and initial.shape == (16,):
+                if np.max(np.abs(np.asarray(current) - initial)) <= 1e-5:
+                    current = original
+                else:
+                    # Edit bones cannot retain arbitrary native scale/shear. Apply the artist's
+                    # armature-space delta to the exact imported basis rather than replacing it
+                    # with Blender's normalized edit-bone basis.
+                    initial_matrix = importer._to_blender_matrix(initial.tolist())
+                    original_matrix = importer._to_blender_matrix(original.tolist())
+                    current = _row_major(pose_bone.matrix @ initial_matrix.inverted() @ original_matrix)
+        rest[i] = current
         parent = pose_bone.parent
         if parent is not None:
             parents[i] = index_of.get(parent.name, -1)
@@ -409,7 +428,22 @@ def _export_object(obj, depsgraph, blocks, image_refs, signatures):
             me.vertices.foreach_get("normal", vertex_normals)
             loop_normals = vertex_normals.reshape(n_verts, 3)[loop_vi]
 
-        uv_layer = me.uv_layers.active
+        imported = me.attributes.get("_illusion_import_normal")
+        baseline = me.attributes.get("_illusion_blender_normal")
+        if (imported is not None and baseline is not None
+                and imported.domain == 'CORNER' and baseline.domain == 'CORNER'
+                and imported.data_type == 'FLOAT_VECTOR' and baseline.data_type == 'FLOAT_VECTOR'
+                and len(imported.data) == n_loops and len(baseline.data) == n_loops):
+            raw = np.empty(n_loops * 3, dtype=np.float32)
+            initial = np.empty(n_loops * 3, dtype=np.float32)
+            imported.data.foreach_get("vector", raw)
+            baseline.data.foreach_get("vector", initial)
+            raw = raw.reshape(n_loops, 3)
+            initial = initial.reshape(n_loops, 3)
+            unchanged = np.sum((loop_normals - initial) ** 2, axis=1) <= 1e-10
+            loop_normals[unchanged] = raw[unchanged]
+
+        uv_layer = me.uv_layers.get("UVMap") if obj.get("illusion_native_attributes", False) else me.uv_layers.active
         if uv_layer is not None:
             loop_uv = np.empty(n_loops * 2, dtype=np.float32)
             uv_layer.data.foreach_get("uv", loop_uv)
@@ -436,6 +470,26 @@ def _export_object(obj, depsgraph, blocks, image_refs, signatures):
             "origIndex": _add_block(blocks, "i32", 1, n_tris * 3, orig[tri_loops]),
             "faceMaterials": _add_block(blocks, "u16", 1, n_tris, face_mats[tri_polys]),
         }
+        try:
+            extra_uvs = json.loads(obj.get("illusion_native_uv_layers", "{}"))
+        except (ValueError, TypeError):
+            extra_uvs = {}
+        for semantic, name in extra_uvs.items():
+            if not str(semantic).isdigit() or not 0 < int(semantic) <= 31:
+                continue
+            layer = me.uv_layers.get(name)
+            if layer is not None:
+                values = np.empty(n_loops * 2, dtype=np.float32)
+                layer.data.foreach_get("uv", values)
+                arrays["loopUv" + str(semantic)] = _add_block(blocks, "f32", 2, n_tris * 3, values.reshape(n_loops, 2)[tri_loops])
+        color = me.color_attributes.get(obj.get("illusion_native_color", ""))
+        if color is not None and color.domain in ('CORNER', 'POINT'):
+            values = np.empty(len(color.data) * 4, dtype=np.float32)
+            color.data.foreach_get("color", values)
+            values = values.reshape(-1, 4)
+            if color.domain == 'POINT':
+                values = values[loop_vi]
+            arrays["loopColor0"] = _add_block(blocks, "f32", 4, n_tris * 3, values[tri_loops])
         _export_skin(obj, me, n_verts, blocks, arrays)
     finally:
         ob_eval.to_mesh_clear()

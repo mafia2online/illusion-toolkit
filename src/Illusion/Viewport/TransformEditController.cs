@@ -373,12 +373,13 @@ internal sealed class TransformEditController
 
     /// <summary>Deletes the selected transformable objects (Del / context menu) as ONE undoable edit. The removed
     /// meshes are detached (not disposed) so undo can re-attach them.</summary>
-    public void DeleteSelected()
+    public bool DeleteSelected()
     {
         INodeEdit? edit = BuildDeleteEdit(DeletableRoots());
-        if (edit == null) return;
+        if (edit == null) return false;
         edit.Redo();          // performs the delete (also clears the selection)
         History.Push(edit);
+        return true;
     }
 
     // ── Duplicate (undoable) ──
@@ -387,7 +388,7 @@ internal sealed class TransformEditController
     public bool CanDuplicateSelection() =>
         _host.Selection.Selected.Any(n => n.Source is IFrameNode fn
             && n.Source is not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter)
-            && FrameDuplicator.CanDuplicate(fn));
+            && (FrameDuplicator.CanDuplicate(fn) || n.OwningDocumentNode()?.Source is IFrameDuplicationProvider provider && provider.CanDuplicate(fn)));
 
     /// <summary>Duplicates the selected static meshes (Ctrl+D / context menu) as ONE undoable edit: deep,
     /// independent copies at the source transform, selected afterwards. Unsupported objects are skipped
@@ -395,6 +396,7 @@ internal sealed class TransformEditController
     public void DuplicateSelected()
     {
         LastDuplicates = [];
+        if (DuplicateStructuredSelection()) return;
         var items = new List<DuplicatedItem>();
         var pairs = new List<(SceneNode Source, SceneNode Copy)>();
         int skipped = 0;
@@ -438,6 +440,88 @@ internal sealed class TransformEditController
     /// <summary>What the last <see cref="DuplicateSelected"/> copied: each source row and the row of its copy —
     /// for the host, which gives a copy of an imported object copies of the collision it was given.</summary>
     public IReadOnlyList<(SceneNode Source, SceneNode Copy)> LastDuplicates { get; private set; } = [];
+
+    private bool DuplicateStructuredSelection()
+    {
+        var selected = _host.Selection.Selected.ToArray();
+        if (!selected.Any(n => n.OwningDocumentNode()?.Source is IFrameDuplicationProvider)) return false;
+        var edits = new List<StructuredDuplicateItem>();
+        var pairs = new List<(SceneNode Source, SceneNode Copy)>();
+        var copiedFrames = new HashSet<IFrameNode>();
+        foreach (var source in selected)
+        {
+            if (source.Source is not IFrameNode frame || !copiedFrames.Add(frame) || source.OwningDocumentNode() is not { } documentNode ||
+                source.OwningDocumentNode()?.Source is not IFrameDuplicationProvider provider) continue;
+            var duplicate = provider.Duplicate(frame, out string? refusal);
+            if (duplicate is null) { _host.RaiseNotice(refusal ?? "The object cannot be duplicated."); continue; }
+            var parent = documentNode;
+            if (duplicate.Root.Source is IFrameNode { Parent: { } parentFrame })
+                for (var ancestor = source.Parent; ancestor is not null; ancestor = ancestor.Parent)
+                    if (ReferenceEquals(ancestor.Source, parentFrame)) { parent = ancestor; break; }
+            var leaves = new List<SceneNode>();
+            var copy = SceneTree.BuildSceneTree(duplicate.Root, leaves);
+            var meshes = new List<GpuMesh>();
+            foreach (var leaf in leaves)
+                if (leaf.Pending is { } pending)
+                {
+                    var mesh = _host.Rnd!.CreateMeshGpu(pending);
+                    mesh.Owner = leaf;
+                    leaf.Mesh = mesh;
+                    leaf.Pending = null;
+                    _host.Rnd.AttachMesh(mesh);
+                    meshes.Add(mesh);
+                }
+            parent.AddChild(copy);
+            _host.Tree.MeshCount += meshes.Count;
+            _host.Persistence.MarkFrameModified(copy);
+            edits.Add(new(copy, parent, duplicate, meshes.ToArray()));
+            pairs.Add((source, copy));
+        }
+        if (edits.Count > 0)
+        {
+            LastDuplicates = pairs;
+            History.Push(new StructuredDuplicateEdit(this, edits.ToArray()));
+            _host.Selection.SetSelection(edits.Select(e => e.Node).ToList(), edits[^1].Node);
+            _host.RaiseSceneChanged();
+        }
+        return true;
+    }
+
+    private sealed record StructuredDuplicateItem(SceneNode Node, SceneNode Parent, IFrameDuplication Duplicate, GpuMesh[] Meshes);
+
+    private sealed class StructuredDuplicateEdit(TransformEditController owner, StructuredDuplicateItem[] items) : INodeEdit
+    {
+        private bool _attached = true;
+        public IEnumerable<SceneNode> Nodes => items.Select(i => i.Node);
+        public void Undo()
+        {
+            owner._host.Selection.Select(null);
+            foreach (var item in items)
+            {
+                owner._host.Rnd?.DetachMeshes(item.Meshes);
+                owner._host.Tree.MeshCount -= item.Meshes.Length;
+                item.Parent.Children.Remove(item.Node);
+                item.Duplicate.Detach();
+                owner._host.Persistence.MarkFrameModified(item.Parent);
+            }
+            _attached = false;
+            owner._host.RaiseSceneChanged();
+        }
+        public void Redo()
+        {
+            foreach (var item in items)
+            {
+                item.Duplicate.Reattach();
+                item.Parent.AddChild(item.Node);
+                foreach (var mesh in item.Meshes) owner._host.Rnd?.AttachMesh(mesh);
+                owner._host.Tree.MeshCount += item.Meshes.Length;
+                owner._host.Persistence.MarkFrameModified(item.Node);
+            }
+            _attached = true;
+            owner._host.RaiseSceneChanged();
+        }
+        public void Discard() { if (!_attached) foreach (var item in items) foreach (var mesh in item.Meshes) mesh.Dispose(); }
+    }
 
     private sealed record DuplicatedItem(
         SceneNode Node, SceneNode Parent, FrameDuplicator.DuplicatedObject Duplicate, GpuMesh Mesh);
@@ -503,18 +587,19 @@ internal sealed class TransformEditController
     /// <summary>Reparents a frame node under a new parent node (another object, a scene folder, or the document
     /// root), moving it in the tree as ONE undoable edit. No-op when invalid (self / a descendant / no change /
     /// the document rejects it).</summary>
-    public void Reparent(SceneNode node, SceneNode newParentNode)
+    public bool Reparent(SceneNode node, SceneNode newParentNode)
     {
-        if (node.Source is not IFrameNode || node.Parent is null) return;
-        if (ReferenceEquals(newParentNode, node) || ReferenceEquals(newParentNode, node.Parent)) return;
-        if (IsSelfOrAncestor(node, newParentNode)) return;          // can't parent under one's own descendant
-        if (node.OwningDocumentNode()?.Source is not ISceneDocument doc) return;
+        if (node.Source is not IFrameNode || node.Parent is null) return false;
+        if (ReferenceEquals(newParentNode, node) || ReferenceEquals(newParentNode, node.Parent)) return false;
+        if (IsSelfOrAncestor(node, newParentNode)) return false;          // can't parent under one's own descendant
+        if (node.OwningDocumentNode()?.Source is not ISceneDocument doc) return false;
 
         var edit = new ReparentEdit(this, doc, node, node.Parent, node.Parent.Children.IndexOf(node), newParentNode);
-        if (!edit.MoveTo(newParentNode)) return;                    // document rejected it (cycle) — record nothing
+        if (!edit.MoveTo(newParentNode)) return false;                    // document rejected it (cycle) — record nothing
         History.Push(edit);
         _host.Persistence.MarkFrameModified(node);
         _host.RaiseSceneChanged();
+        return true;
     }
 
     // True if 'candidate' is 'node' itself or one of its tree descendants (so it can't become node's parent).
@@ -543,8 +628,10 @@ internal sealed class TransformEditController
             var meshes = new List<GpuMesh>();
             foreach (SceneNode leaf in n.DescendantMeshLeaves())
                 if (leaf.Mesh != null) meshes.Add(leaf.Mesh);
+            var detachment = BuildDetachment(n);
+            if (n.OwningDocumentNode()?.Source is IFrameDetachmentProvider && detachment is null) continue;
             items.Add(new DeletedItem(
-                n, parent, parent.Children.IndexOf(n), meshes.ToArray(), BuildDetachment(n), MirrorsOf(n)));
+                n, parent, parent.Children.IndexOf(n), meshes.ToArray(), detachment, MirrorsOf(n)));
         }
         return items.Count == 0 ? null : new DeleteEdit(this, items.ToArray());
     }
@@ -599,12 +686,12 @@ internal sealed class TransformEditController
 
     // The document-level half of a delete: every vendor frame under the subtree, handed to DetachedFrames so
     // Save/Build stop writing them. Null (tree-only removal) when the root has no frame document.
-    private static DetachedFrames? BuildDetachment(SceneNode root)
+    private static IFrameDetachment? BuildDetachment(SceneNode root)
     {
         if (root.OwningDocumentNode()?.Source is not ISceneDocument doc) return null;
         var frames = new List<IFrameNode>();
         CollectSubtreeFrames(root, frames);
-        return DetachedFrames.Capture(doc, frames);
+        return doc is IFrameDetachmentProvider provider ? provider.CaptureDetachment(frames) : DetachedFrames.Capture(doc, frames);
     }
 
     private static void CollectSubtreeFrames(SceneNode node, List<IFrameNode> into)
@@ -708,7 +795,7 @@ internal sealed class TransformEditController
     /// clicked left the frame gone from the document and still listed under the other one, which reads as
     /// "it deleted here and stayed there".</param>
     private sealed record DeletedItem(
-        SceneNode Node, SceneNode Parent, int Index, GpuMesh[] Meshes, DetachedFrames? Detached,
+        SceneNode Node, SceneNode Parent, int Index, GpuMesh[] Meshes, IFrameDetachment? Detached,
         (SceneNode Node, SceneNode Parent, int Index)[] Mirrors);
 
     private sealed class DeleteEdit : INodeEdit

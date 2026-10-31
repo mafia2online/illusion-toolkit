@@ -27,7 +27,7 @@ namespace Illusion.Mcp;
 /// </para>
 /// Every member runs on the UI thread; see the interface.
 /// </summary>
-internal sealed class AppEditorSession : IEditorSession
+internal sealed partial class AppEditorSession : IEditorSession
 {
     private const string NotOpen = "the map editor is not open — call editor_open_area first";
 
@@ -97,12 +97,16 @@ internal sealed class AppEditorSession : IEditorSession
     }
 
     public string? OpenResource(string archive, out string? archivePath)
+        => OpenResourceCore(archive, out archivePath, activate: true);
+    public string? OpenResourceBackground(string archive, out string? archivePath)
+        => OpenResourceCore(archive, out archivePath, activate: false);
+    private string? OpenResourceCore(string archive, out string? archivePath, bool activate)
     {
         archivePath = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         var sds = new FileInfo(Path.IsPathRooted(archive)
             ? archive
-            : Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", archive.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)
+            : Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, archive.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)
                 ? archive
                 : archive + ".sds"));
         if (!sds.Exists)
@@ -110,7 +114,7 @@ internal sealed class AppEditorSession : IEditorSession
             // A bare name: look it up in the library, the way the browser's search would.
             string wanted = Path.GetFileNameWithoutExtension(archive);
             Assets.Library.LibraryEntry? hit = Assets.Library.LibraryCatalog
-                .Build(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds")).AllEntries
+                .Build(Assets.MafiaEnvironment.ArchiveFolder).AllEntries
                 .FirstOrDefault(e => string.Equals(e.Name, wanted, StringComparison.OrdinalIgnoreCase));
             if (hit == null) return $"no archive '{archive}' — resource_list finds them";
             sds = hit.File;
@@ -120,13 +124,15 @@ internal sealed class AppEditorSession : IEditorSession
         {
             // From the launcher the editor takes its place, the way the tile does; beside the map editor it is
             // a second window, the way the File menu opens it.
-            if (Application.Current.Windows.OfType<LauncherWindow>().FirstOrDefault() is { } launcher)
+            if (activate && Application.Current.Windows.OfType<LauncherWindow>().FirstOrDefault() is { } launcher)
             {
                 if (launcher.OpenResourceEditor() is { } failed) return failed;
             }
             else
             {
-                new ResourceEditorWindow().Show();
+                var editor = new ResourceEditorWindow { ShowActivated = activate };
+                if (!activate) editor.WindowState = WindowState.Normal;
+                editor.Show();
             }
         }
         if (ResourceWindow is not { } window) return "the resource editor did not open";
@@ -165,11 +171,11 @@ internal sealed class AppEditorSession : IEditorSession
     public IReadOnlyList<LibraryItem> Library(string? query, string? folder, int limit)
     {
         if (EnsureEnvironment() is { } notReady) throw new InvalidOperationException(notReady);
-        return Assets.Library.LibraryCatalog.Build(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds")).AllEntries
+        return Assets.Library.LibraryCatalog.Build(Assets.MafiaEnvironment.ArchiveFolder).AllEntries
             .Where(e => (query == null || e.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
                         && (folder == null || e.FolderPath.Contains(folder, StringComparison.OrdinalIgnoreCase)))
             .Take(Math.Max(1, limit))
-            .Select(e => new LibraryItem(e.Name, Path.GetRelativePath(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds"), e.File.FullName),
+            .Select(e => new LibraryItem(e.Name, Path.GetRelativePath(Assets.MafiaEnvironment.ArchiveFolder, e.File.FullName),
                 e.Resource.ToString(), e.Size,
                 File.Exists(Path.Combine(Assets.MafiaEnvironment.ExtractedDir(e.File), "SDSContent.xml"))))
             .ToList();
@@ -206,14 +212,18 @@ internal sealed class AppEditorSession : IEditorSession
     public string? EnsureEditor()
     {
         if (Window != null) return null;
-        return Application.Current.Windows.OfType<LauncherWindow>().FirstOrDefault() is { } launcher
-            ? launcher.OpenMapEditor()
-            : "neither the launcher nor the map editor is open";
+        if (Application.Current.Windows.OfType<LauncherWindow>().FirstOrDefault() is { } launcher)
+            return launcher.OpenMapEditor();
+        if (EnsureEnvironment() is { } failed) return failed;
+        new MainWindow().Show();
+        return null;
     }
 
     public string? LoadArea(string area, bool winter, bool discardUnsavedEdits)
     {
         if (Window is not { } window) return NotOpen;
+        if (winter && Assets.MafiaEnvironment.Profile.ArchiveVersion == 20)
+            return "Mafia III has no winter district variants";
         D3DImageHost host = window.Viewport;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
 
@@ -651,17 +661,19 @@ internal sealed class AppEditorSession : IEditorSession
         bool discardUnsavedEdits = false)
     {
         if (TargetHost is not { } host) return TargetNotOpen;
+        bool compiled = Assets.MafiaEnvironment.Profile.ArchiveVersion == 20;
+        if (compiled && (crash != null || zones != null))
+            return "The Mafia III editor uses camera-driven district bounds and compiled scene objects; these Mafia II layers are unavailable";
         Window? owner = _resourceTarget ? ResourceWindow : Window;
-        if (_resourceTarget && (collision != null || crash != null || zones != null || navigation != null))
+        if (_resourceTarget && (crash != null || zones != null || (!compiled && navigation != null)))
         {
-            return "the collision, crash, zone and navigation layers belong to the map — the resource editor draws "
-                + "an archive's own collision from its Render tab";
+            return "the crash, zone and navigation layers belong to the map";
         }
 
         RenderMode mode = default;
         if (renderMode != null && !Enum.TryParse(renderMode, ignoreCase: true, out mode))
             return $"unknown shading mode '{renderMode}' — one of {string.Join(", ", Enum.GetNames<RenderMode>())}";
-        if ((collision != null || crash != null) && host.BridgeEditedCount > 0)
+        if ((!compiled && !_resourceTarget && collision != null || crash != null) && host.BridgeEditedCount > 0)
             return "the collision and crash layers reload part of the scene — blender_end first";
         // Switching the CRASH layer off unloads it, and with it the unsaved edits made there and their undo
         // entries — a crash copy moved and never saved is simply gone. The same loss editor_open_area
@@ -684,7 +696,19 @@ internal sealed class AppEditorSession : IEditorSession
             if (button != null) button.IsChecked = true;
             host.RenderMode = mode;
         }
+        if (_resourceTarget)
+        {
+            if (collision is { } showShapes) ResourceWindow!.Scene.SetCollisionOverlay(showShapes);
+            if (compiled && navigation is { } resourceNavigation) ResourceWindow!.Scene.SetNavigationOverlay(resourceNavigation);
+            return null;
+        }
         if (Window is not { } window) return null;
+        if (compiled)
+        {
+            if (collision is { } showShapes) window.Scene.SetCollisionOverlay(showShapes);
+            if (navigation is { } compiledNavigation) window.Scene.SetNavigationOverlay(compiledNavigation);
+            return null;
+        }
         if (zones is { } showZones) window.ZonesToggle.IsChecked = showZones;
         if (crash is { } showCrash) window.CrashToggle.IsChecked = showCrash;
         if (collision is { } showCollision) window.CollisionToggle.IsChecked = showCollision;
@@ -695,6 +719,7 @@ internal sealed class AppEditorSession : IEditorSession
     public string? Screenshot(string path, int width, int height)
     {
         if (TargetHost is not { } host) return TargetNotOpen;
+        host.CarCollisionEditing.RefreshSharedWorldChanges();
         if (host.CaptureFrame(width, height) is not { } pixels) return "the viewport is not rendering yet";
         try
         {
@@ -737,6 +762,19 @@ internal sealed class AppEditorSession : IEditorSession
         host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(delta));
         host.GizmoEndDrag();
         return null;
+    }
+
+    public string? Reparent(string name, string? parent)
+    {
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
+        SceneNode? destination;
+        if (string.IsNullOrWhiteSpace(parent)) destination = node!.OwningDocumentNode();
+        else if (Resolve(host, parent, out destination) is { } missing) return missing;
+        if (destination == null) return "the object has no owning scene document";
+        if (host.BridgeEditedCount > 0) return "end the Blender session before changing hierarchy";
+        if (ReferenceEquals(node!.Parent, destination)) return null;
+        return host.Reparent(node!, destination) ? null : "the document refused that parent change";
     }
 
     public string? ImportActor(string sourceActFile, string actorName, string newName, float[] position)
@@ -802,7 +840,8 @@ internal sealed class AppEditorSession : IEditorSession
         SceneNode? under = null;
         if (!string.IsNullOrWhiteSpace(parent) && Resolve(host, parent, out under) is { } unresolved) return unresolved;
 
-        Assets.Collisions.CollisionChoice hulls = Assets.Collisions.CollisionChoice.Auto;
+        Assets.Collisions.CollisionChoice hulls = Assets.MafiaEnvironment.Profile == Formats.GameProfile.MafiaIII
+            ? Assets.Collisions.CollisionChoice.None : Assets.Collisions.CollisionChoice.Auto;
         if (!string.IsNullOrEmpty(collision) && !Enum.TryParse(collision, ignoreCase: true, out hulls))
         {
             return $"collision '{collision}' is none of auto, convex, box, mesh, none";
@@ -942,8 +981,10 @@ internal sealed class AppEditorSession : IEditorSession
         if (TargetHost is not { } host) return TargetNotOpen;
         if (host.BridgeEditedCount > 0) return "a Blender edit session is open — blender_end first";
         if (!host.CanDeleteSelection()) return "nothing deletable is selected";
-        deleted = host.SelectedNodes.Count;
-        host.DeleteSelected();
+        SceneNode[] requested = host.SelectedNodes.ToArray();
+        if (!host.DeleteSelected(out var refusal)) return refusal ?? "the document refused to delete the selected objects";
+        var remaining = AllNodes(host).ToHashSet();
+        deleted = requested.Count(node => !remaining.Contains(node));
         return null;
     }
 
@@ -959,6 +1000,15 @@ internal sealed class AppEditorSession : IEditorSession
         return entry.File;
     }
 
+    private static List<(SceneNode Node, Domain.Properties.PropertyDescriptor Property)> CompiledTuningFields()
+    {
+        if (ResourceWindow is not { } window) return [];
+        return AllNodes(window.Stage).Where(n => n.Kind is "Component" or "Vehicle wheel")
+            .DistinctBy(n => n.Source).SelectMany(n => n.Source is Domain.Properties.IPropertySource source
+                ? source.GetPropertyGroups().SelectMany(g => g.Properties).Where(p => p.Set is not null && !p.IsReadOnly).Select(p => (n, p))
+                : Enumerable.Empty<(SceneNode, Domain.Properties.PropertyDescriptor)>()).ToList();
+    }
+
     private static TuningFieldInfo Describe(int table, Assets.EntityData.TuningBandView band,
         Assets.EntityData.TuningElementView element, Assets.EntityData.TuningFieldView field) =>
         new(table, band.Title, element.Title, field.Label, field.Name, field.Kind.ToString(), field.Value);
@@ -969,6 +1019,16 @@ internal sealed class AppEditorSession : IEditorSession
         tables = [];
         fields = [];
         if (TuningArchive(out string? refusal) is not { } archive) return refusal;
+        if (Assets.MafiaEnvironment.Profile.ArchiveVersion == 20)
+        {
+            var reflected = CompiledTuningFields();
+            tables = [new TuningTableInfo(1, "Vehicle components and tables", "Compiled", reflected.Count)];
+            if (table != 1) return "compiled vehicles expose table 1";
+            fields = reflected.Where(x => query is null || x.Property.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || x.Node.Name.Contains(query, StringComparison.OrdinalIgnoreCase)).Take(Math.Max(1, limit))
+                .Select(x => new TuningFieldInfo(1, PathOf(x.Node), null, x.Property.Label, x.Property.Id, x.Property.Kind.ToString(), Show(x.Property))).ToList();
+            return null;
+        }
         if (Assets.EntityData.CarTuning.Read(archive) is not { } tuning || tuning.Tables.Count == 0)
         {
             return $"{archive.Name} carries no tuning table the toolkit can read";
@@ -1000,6 +1060,23 @@ internal sealed class AppEditorSession : IEditorSession
         if (ResourceWindow is not { } window || TuningArchive(out string? refusal) is not { } archive)
         {
             return TuningArchive(out string? why) == null ? why : "the resource editor is not open";
+        }
+        if (Assets.MafiaEnvironment.Profile.ArchiveVersion == 20)
+        {
+            if (table != 1) return "compiled vehicles expose table 1";
+            var reflected = CompiledTuningFields().Where(x => (band is null || PathOf(x.Node).Equals(band, StringComparison.OrdinalIgnoreCase)
+                || PathOf(x.Node, identify: false).Equals(band, StringComparison.OrdinalIgnoreCase)
+                || x.Node.Name.Equals(band, StringComparison.OrdinalIgnoreCase)) && element is null
+                && (x.Property.Id.Equals(field, StringComparison.OrdinalIgnoreCase) || x.Property.Id.EndsWith("." + field, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (reflected.Count != 1) return $"'{field}' matches {reflected.Count} component fields; give the band and full field name from car_tuning";
+            var chosenField = reflected[0];
+            if (!TryParse(chosenField.Property, value, out var parsedValue)) return $"'{value}' is not a {chosenField.Property.Kind} value";
+            window.Stage.CommitPropertyEdit(chosenField.Node, chosenField.Property, chosenField.Property.Get(), parsedValue);
+            var saved = window.Stage.SaveEditsReport();
+            if (!saved.Complete) return string.Join("; ", saved.NotSaved);
+            result = new TuningFieldInfo(1, PathOf(chosenField.Node), null, chosenField.Property.Label, chosenField.Property.Id,
+                chosenField.Property.Kind.ToString(), Show(chosenField.Property));
+            return null;
         }
         if (Assets.EntityData.CarTuning.Read(archive) is not { } tuning) return $"{archive.Name} carries no tuning table";
         if (table < 1 || table > tuning.Tables.Count) return $"there is no table {table} — {tuning.Tables.Count} in all";
@@ -1194,7 +1271,7 @@ internal sealed class AppEditorSession : IEditorSession
         string stem = Path.GetFileNameWithoutExtension(car).ToLowerInvariant();
         foreach (string suffix in new[] { "", "_z" })
         {
-            yield return new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", "cars", stem + suffix + ".sds"));
+            yield return new FileInfo(Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, "cars", stem + suffix + ".sds"));
         }
     }
 
@@ -1287,7 +1364,7 @@ internal sealed class AppEditorSession : IEditorSession
         slots = [];
         if (TargetHost is not { } host) return TargetNotOpen;
         if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
-        if (node!.Source is not Assets.Adapters.FrameNodeAdapter adapter || adapter.GetMaterials() is not { Count: > 0 } before)
+        if (node!.Source is not Domain.Materials.IMaterialListSource adapter || adapter.GetMaterials() is not { Count: > 0 } before)
         {
             return $"'{name}' is a {node.Kind} with no material slots";
         }
@@ -1431,10 +1508,12 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
-    private static string PathOf(SceneNode node)
+    private static string PathOf(SceneNode node, bool identify = true)
     {
         var parts = new List<string>();
-        for (SceneNode? n = node; n != null; n = n.Parent) parts.Add(n.Name);
+        for (SceneNode? n = node; n != null; n = n.Parent)
+            parts.Add(identify && (n.GeometrySource ?? n.Source) is Assets.Compiled.ICompiledMeshSource compiled
+                ? $"{n.Name} [{compiled.SceneIdentity}]" : n.Name);
         parts.Reverse();
         return string.Join('/', parts);
     }
@@ -1456,8 +1535,13 @@ internal sealed class AppEditorSession : IEditorSession
         var matches = new List<SceneNode>();
         foreach (SceneNode candidate in AllNodes(host))
         {
-            bool hit = byPath
+            bool hit = name.StartsWith("guid:", StringComparison.OrdinalIgnoreCase)
+                ? (name.Contains(":visual:", StringComparison.OrdinalIgnoreCase) ? candidate.Kind == "Mesh" : candidate.Kind == "Compiled object")
+                    && (candidate.GeometrySource ?? candidate.Source) is Assets.Compiled.ICompiledMeshSource compiled
+                    && compiled.SceneIdentity.Equals(name, StringComparison.OrdinalIgnoreCase)
+                : byPath
                 ? ("/" + PathOf(candidate)).EndsWith("/" + name.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+                    || ("/" + PathOf(candidate, identify: false)).EndsWith("/" + name.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
                 : string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase);
             if (hit) matches.Add(candidate);
         }
@@ -1472,7 +1556,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (matches.Count > 1)
         {
             return $"'{name}' names {matches.Count} objects — give a path suffix: "
-                + string.Join("; ", matches.Take(8).Select(PathOf));
+                + string.Join("; ", matches.Take(8).Select(candidate => PathOf(candidate)));
         }
         node = matches[0];
         return null;
@@ -1665,7 +1749,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (string.IsNullOrWhiteSpace(archive)) return "archive is a full path to an .sds, or a path under pc\\sds such as 'cars/shubert_38.sds'";
         string asked = archive.Trim().Replace('/', Path.DirectorySeparatorChar);
         if (!asked.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)) asked += ".sds";
-        var file = new FileInfo(Path.IsPathRooted(asked) ? asked : Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", asked));
+        var file = new FileInfo(Path.IsPathRooted(asked) ? asked : Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, asked));
         if (!file.Exists) return $"no such archive: {file.FullName}";
         string? target = string.IsNullOrWhiteSpace(saveTo) ? null : saveTo.Trim();
         if (target != null && !Path.IsPathRooted(target)) return "saveTo is the full path of the file to write";

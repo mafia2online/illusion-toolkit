@@ -5,6 +5,7 @@ using Illusion.Assets;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Bridge;
 using Illusion.Assets.Collisions;
+using Illusion.Assets.Compiled;
 using Illusion.Bridge.Discovery;
 using Illusion.Bridge.Payload;
 using Illusion.Bridge.Protocol;
@@ -268,7 +269,7 @@ internal sealed class BridgeSessionController : IDisposable
                 // An instanced prototype is no longer refused: "instanced" describes how the viewport DRAWS it,
                 // not what it is. The frame underneath is an ordinary single mesh, the exporter reads it from
                 // the frame rather than from the GPU, and the cloud is re-uploaded after the push.
-                if (leaf.Source is not IFrameNode fn) { skips.Add(leaf.Name + " — not an editable frame"); continue; }
+                if ((leaf.GeometrySource ?? leaf.Source) is not IFrameNode fn) { skips.Add(leaf.Name + " — not an editable frame"); continue; }
                 if (FindDocument(leaf) is not { } doc) { skips.Add(leaf.Name + " — no owning document"); continue; }
                 requests.Add(new ExportRequest(leaf, fn, doc));
             }
@@ -384,7 +385,7 @@ internal sealed class BridgeSessionController : IDisposable
         // The rig's id is the model's id with a "|rig" tail — the model is what carries the bones.
         SceneNode? node = _host.Dispatcher.Invoke(() =>
             _exported.Values.FirstOrDefault(n =>
-                _host.Tree.IsInScene(n) && n.Source is IFrameNode f && FindDocument(n) is { } d
+                _host.Tree.IsInScene(n) && (n.GeometrySource ?? n.Source) is IFrameNode f && FindDocument(n) is { } d
                 && BridgeMeshExporter.TryExportSkeleton(f, d)?.Id == rig.Id));
         if (node?.Source is not IFrameNode frame)
         {
@@ -392,7 +393,7 @@ internal sealed class BridgeSessionController : IDisposable
             return null;
         }
 
-        BonePosePush.Result? pose = BonePosePush.TryApply(frame, rig);
+        BonePosePush.Result? pose = BonePosePush.TryApply(node.GeometrySource as IFrameNode ?? frame, rig);
         if (pose == null)
         {
             ack.Skipped.Add(new PushSkip { Id = rig.Id, Reason = "no bone of this rig matched the model" });
@@ -779,6 +780,7 @@ internal sealed class BridgeSessionController : IDisposable
             // carry "the other level as it was", so applying the second put the first level's edit back
             // where it came from. The second is therefore computed with the first in place.
             var perFrame = new Dictionary<FrameObjectSingleMesh, List<BridgeMeshApplier.ApplyResult>>();
+            var compiledEdits = new List<BridgeMeshApplier.ApplyResult>();
             var levelsMoved = new List<(string Name, FrameObjectSingleMesh Frame)>();
             var transforms = new List<GeometryEditController.TransformItem>();
             var reshapes = new List<ReshapedHull>();
@@ -847,6 +849,12 @@ internal sealed class BridgeSessionController : IDisposable
                         // fresh frame object of the bridge scene's document.
                         if (payload.Id.StartsWith("new:", StringComparison.Ordinal))
                         {
+                            if (bridgeDocument is CompiledSceneDocument)
+                            {
+                                ack.Skipped.Add(new PushSkip { Id = payload.Id,
+                                    Reason = "Creating new compiled mesh objects from Blender is not yet supported." });
+                                continue;
+                            }
                             if (bridgeDocument != null
                                 && !authored.TryResolve(payload, bridgeDocument, out string? materialReason))
                             {
@@ -859,7 +867,7 @@ internal sealed class BridgeSessionController : IDisposable
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = "object is not part of this bridge scene" });
                         continue;
                     }
-                    if (node.Source is not IFrameNode fn)
+                    if ((node.GeometrySource ?? node.Source) is not IFrameNode fn)
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = "object is no longer editable" });
                         continue;
@@ -878,7 +886,9 @@ internal sealed class BridgeSessionController : IDisposable
                         Array.Fill(payload.LoopOrigIndex, -1);
                     }
 
-                    if (FindDocument(node) is { } owningDocument
+                    // Compiled geometry preserves material identity. Its applier validates the payload
+                    // without letting the Mafia II authoring resolver create files before a refusal.
+                    if (fn is not ICompiledMeshSource && FindDocument(node) is { } owningDocument
                         && !authored.TryResolve(payload, owningDocument, out string? authoredReason))
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = authoredReason ?? "material not usable" });
@@ -898,6 +908,12 @@ internal sealed class BridgeSessionController : IDisposable
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
                         continue;
                     }
+                    if (!result.Unchanged && compiledEdits.Any(result.ConflictsWithCompiledWrites))
+                    {
+                        ack.Skipped.Add(new PushSkip { Id = payload.Id,
+                            Reason = "Another edited LOD shares this compiled storage. Edit one representation, then re-pull before further changes." });
+                        continue;
+                    }
                     // A skinned mesh whose push carried no weights at all: every vertex group in Blender was
                     // ignored. It has no symptom of its own — re-weighting changes no bytes, so the push
                     // reports "nothing changed" and says nothing — and new geometry silently keeps the skin
@@ -910,6 +926,7 @@ internal sealed class BridgeSessionController : IDisposable
 
                     if (!result.Unchanged)
                     {
+                        if (fn is ICompiledMeshSource) compiledEdits.Add(result);
                         geometry.Add(new GeometryEditController.GeometryItem(node, result));
                         if (levelFrame != null)
                         {

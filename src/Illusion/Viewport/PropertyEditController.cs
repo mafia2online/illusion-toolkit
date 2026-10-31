@@ -19,11 +19,22 @@ internal sealed class PropertyEditController
     public void Commit(SceneNode node, PropertyDescriptor descriptor, object? before, object? after)
     {
         if (descriptor.Set is null || Equals(before, after)) return;
+        if (descriptor.ApplyEdit is { } apply)
+        {
+            var mutation = apply(after);
+            PropagateNameEdit(node, descriptor);
+            _host.Editing.History.Push(new CompoundPropertyEdit(this, node, descriptor, mutation));
+            _host.Persistence.MarkFrameModified(node);
+            _host.CarCollisionEditing.RefreshOverlay();
+            _host.RaiseSelectionPropertiesChanged();
+            return;
+        }
         SetAndKeepLinks(node, descriptor, after);
         PropagateNameEdit(node, descriptor);
         _host.Editing.History.Push(new PropertyEdit(this, node, descriptor, before, after));
         _host.Persistence.MarkFrameModified(node);
         _host.CarCollisionEditing.RefreshOverlay(); // a resized shape has to redraw at its new size
+        _host.RefreshCompiledNavigation();
         _host.RaiseSelectionPropertiesChanged();    // refresh the panel values + the header title
     }
 
@@ -37,6 +48,7 @@ internal sealed class PropertyEditController
         _host.Persistence.MarkFrameModified(node); // undo/redo re-dirties the frame vs. the last save
         _host.Selection.SetSelection(new[] { node }, node);
         _host.CarCollisionEditing.RefreshOverlay();
+        _host.RefreshCompiledNavigation();
         _host.RaiseSelectionPropertiesChanged();
     }
 
@@ -67,6 +79,8 @@ internal sealed class PropertyEditController
     // fields live in the FrameNameTable, not the frame stream, so the next save must rewrite it).
     private void PropagateNameEdit(SceneNode node, PropertyDescriptor descriptor)
     {
+        if (descriptor.Id == "m_Name" && node.Source is Assets.Compiled.ICompiledMeshSource && descriptor.Get() is string compiledName)
+            node.Name = compiledName;
         if (descriptor.Id == "Base.Name" && descriptor.Get() is HashNameValue hn)
             node.Name = hn.Name;
         if (descriptor.Id is "Base.Name" or "Base.IsOnFrameTable")
@@ -100,5 +114,25 @@ internal sealed class PropertyEditController
         public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
         public void Undo() => _owner.ApplyRecorded(_node, _descriptor, _before);
         public void Redo() => _owner.ApplyRecorded(_node, _descriptor, _after);
+    }
+
+    private sealed class CompoundPropertyEdit(PropertyEditController owner, SceneNode node,
+        PropertyDescriptor descriptor, Illusion.Domain.IEditAction mutation) : INodeEdit
+    {
+        public IEnumerable<SceneNode> Nodes => [node];
+        public void Undo() => Apply(undo: true);
+        public void Redo() => Apply(undo: false);
+        private void Apply(bool undo)
+        {
+            if (!owner._host.Tree.IsInScene(node)) return;
+            if (undo) mutation.Undo(); else mutation.Redo();
+            owner.PropagateNameEdit(node, descriptor);
+            owner._host.Persistence.MarkFrameModified(node);
+            owner._host.Selection.SetSelection([node], node);
+            owner._host.CarCollisionEditing.RefreshOverlay();
+            owner._host.RefreshCompiledNavigation();
+            owner._host.RaiseSelectionPropertiesChanged();
+        }
+        public void Discard() => mutation.Discard();
     }
 }

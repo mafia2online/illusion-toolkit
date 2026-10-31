@@ -1,6 +1,7 @@
 using System.Numerics;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Domain;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
@@ -96,6 +97,8 @@ public static class SdsMeshLoader
 
     public static List<MeshData> LoadSds(FileInfo sdsFile, int lod = 0)
     {
+        if (SdsManifest.Load(EnsureExtracted(sdsFile)).ArchiveVersion == 20)
+            return new CompiledSceneDocument(sdsFile, lod).Meshes;
         var result = new List<MeshData>();
         FrameResource? fr = OpenFrameResource(sdsFile, out _, out ActorPlacements placements);
         if (fr == null) return result;
@@ -124,6 +127,11 @@ public static class SdsMeshLoader
     public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document) LoadHierarchy(
         FileInfo sdsFile, IReadOnlyCollection<string>? districtNames = null, int lod = 0)
     {
+        if (SdsManifest.Load(EnsureExtracted(sdsFile)).ArchiveVersion == 20)
+        {
+            var compiled = new CompiledSceneDocument(sdsFile, lod);
+            return (compiled.Roots, compiled.Meshes, compiled);
+        }
         // Names of OTHER districts (to detect neighbor proxy meshes), except the one being loaded.
         string self = Path.GetFileNameWithoutExtension(sdsFile.Name);
         var others = new List<string>();
@@ -154,6 +162,11 @@ public static class SdsMeshLoader
     public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document,
         CrashPlacements? Placements) LoadCrashHierarchy(FileInfo crashSds, int lod = 0)
     {
+        if (SdsManifest.Load(EnsureExtracted(crashSds)).ArchiveVersion == 20)
+        {
+            var compiled = new CompiledSceneDocument(crashSds, lod);
+            return (compiled.Roots, compiled.Meshes, compiled, null);
+        }
         var meshes = new List<MeshData>();
         FrameResource? fr = OpenFrameResource(crashSds, out string extracted, out ActorPlacements actors);
         if (fr == null) return (new List<SdsFrameNode>(), meshes, null, null);

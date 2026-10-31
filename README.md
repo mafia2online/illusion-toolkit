@@ -29,6 +29,8 @@ the [Mafia II: Online](https://github.com/mafia2online) team. It reads the game'
 exposes their contents for editing in a 3D viewport or in Blender, and packs the result back into the
 game with a versioned backup of every file it replaces.
 
+Mafia III PC archives, compiled map/resource rendering, and existing object/vehicle component editing are also supported. See [Mafia III support](docs/MAFIA3.md) for the editing scope and copied-file test setup.
+
 The toolkit is built around three components:
 
 - **Map editor.** The open world streams in as the camera moves. Objects can be moved, duplicated,

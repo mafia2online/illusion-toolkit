@@ -21,7 +21,7 @@ namespace Illusion.Viewport;
 /// archive was loaded with.
 /// </para>
 /// </summary>
-internal sealed class ObjectImportController
+internal sealed partial class ObjectImportController
 {
     private readonly D3DImageHost _host;
 
@@ -148,6 +148,8 @@ internal sealed class ObjectImportController
         if (!float.IsFinite(at.X) || !float.IsFinite(at.Y) || !float.IsFinite(at.Z)) return "the position is not a finite point";
         if (yawDegrees is { } asked && !float.IsFinite(asked)) return "the heading is not a finite number";
         if (occurrence < 1) return "occurrence counts from 1";
+        if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+            return ImportCompiled(destination, sourceArchive, name, newName, at, yawDegrees, hulls, occurrence, under, out outcome);
         // The receiving archive's two rows: its scene, and — when it has a pack — its actors.
         SceneNode? frameRow = AllNodes().FirstOrDefault(n => n.Source is Assets.Adapters.SceneDocumentAdapter d
             && string.Equals(d.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase));
@@ -170,7 +172,7 @@ internal sealed class ObjectImportController
 
         var sds = new FileInfo(Path.IsPathRooted(sourceArchive)
             ? sourceArchive
-            : Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", sourceArchive));
+            : Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, sourceArchive));
         if (!sds.Exists) return $"no such archive: {sds.FullName}";
         if (string.Equals(sds.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
         {
@@ -235,7 +237,7 @@ internal sealed class ObjectImportController
             // Geometry this object's earlier imports already brought is drawn from rather than copied again.
             Assets.Sds.ImportGeometry shared = Assets.Sds.ImportGeometry.Load(
                 Assets.MafiaEnvironment.ExtractedDir(destination),
-                Path.GetRelativePath(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds"), sds.FullName));
+                Path.GetRelativePath(Assets.MafiaEnvironment.ArchiveFolder, sds.FullName));
 
             Assets.Sds.ArchiveCarry.Report Carry(Assets.Frames.FrameTransplant.TransplantedObject copied)
             {
@@ -482,6 +484,9 @@ internal sealed class ObjectImportController
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (SceneNode node in AllNodes())
         {
+            if (node.Source is Domain.IFrameNode && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
+                && string.Equals(document.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
+                taken.Add(node.Name);
             if (node.Source is SceneDocumentAdapter scene
                 && string.Equals(scene.SourceArchive.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
             {

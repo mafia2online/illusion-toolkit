@@ -29,7 +29,7 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         string asked = name.Trim().Replace('/', Path.DirectorySeparatorChar);
         if (!asked.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)) asked += ".sds";
         if (Path.IsPathRooted(asked)) return new FileInfo(asked);
-        string sds = Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds");
+        string sds = Assets.MafiaEnvironment.ArchiveFolder;
         var direct = new FileInfo(Path.Combine(sds, asked));
         if (direct.Exists || !car) return direct;
         return new FileInfo(Path.Combine(sds, "cars", asked));
@@ -230,7 +230,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         Assets.Cars.CarMaterials.Sheet? sheet = null;
-        if (Guarded(() => Assets.Cars.CarMaterials.Read(file!, out sheet)) is { } failed) return failed;
+        if (Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? Assets.Cars.CompiledCarMaterials.Read(file!, out sheet)
+            : Assets.Cars.CarMaterials.Read(file!, out sheet)) is { } failed) return failed;
         result = Info(sheet!);
         return null;
     }
@@ -242,7 +244,10 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         Assets.Cars.CarMaterials.Sheet? sheet = null;
         int count = 0;
-        string? failed = Guarded(() => like == null
+        string? failed = Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? like == null ? Assets.Cars.CompiledCarMaterials.Drop(file!, material, out count, out sheet)
+                : Assets.Cars.CompiledCarMaterials.Adopt(file!, material, like, out count, out sheet)
+            : like == null
             ? Assets.Cars.CarMaterials.Drop(file!, material, out count, out sheet)
             : Assets.Cars.CarMaterials.Adopt(file!, material, like, out count, out sheet));
         if (failed != null) return failed;
@@ -317,6 +322,13 @@ internal sealed class AppCarWorkshop : ICarWorkshop
     {
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
+        if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+        {
+            Assets.Cars.CompiledCarCollisions.Sheet? native = null;
+            string? error = Guarded(() => Assets.Cars.CompiledCarCollisions.Read(file!, out native));
+            if (native is not null) result = Info(native);
+            return error;
+        }
         CarCollisionsInfo? info = null;
         string? failed = Guarded(() =>
         {
@@ -334,6 +346,14 @@ internal sealed class AppCarWorkshop : ICarWorkshop
     {
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
+        if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+        {
+            Assets.Cars.CompiledCarCollisions.Sheet? native = null;
+            string? error = Guarded(() => Assets.Cars.CompiledCarCollisions.Add(file!, component, role, shape,
+                new((float)sizeX, (float)sizeY, (float)sizeZ), new((float)x, (float)y, (float)z), out native));
+            if (native is not null) { result = Info(native); MarkCollisionCompanions(car, native.PendingArchives); }
+            return error;
+        }
         // By NAME only: Enum.TryParse also takes a number, and a number that is no role would be written as a zone.
         Assets.Cars.CarCollisionRole? named = (role ?? "").Trim().ToLowerInvariant() switch
         {
@@ -396,6 +416,13 @@ internal sealed class AppCarWorkshop : ICarWorkshop
     {
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
+        if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+        {
+            Assets.Cars.CompiledCarCollisions.Sheet? native = null;
+            string? error = Guarded(() => Assets.Cars.CompiledCarCollisions.Remove(file!, component, index, out native));
+            if (native is not null) { result = Info(native); MarkCollisionCompanions(car, native.PendingArchives); }
+            return error;
+        }
         CarCollisionsInfo? info = null;
         string? failed = Guarded(() =>
         {
@@ -411,6 +438,17 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         });
         result = info;
         return failed;
+    }
+
+    private static CarCollisionsInfo Info(Assets.Cars.CompiledCarCollisions.Sheet sheet) => new(sheet.Car,
+        sheet.Components.Select(component => new CarCollisionComponent(component.Name, component.Kind, component.Bone,
+            component.Volumes.Select(volume => new CarCollisionInfo(volume.Index, volume.Role, volume.Shape, V(volume.Size), V(volume.Position),
+                volume.Min is { } min ? V(min) : null, volume.Max is { } max ? V(max) : null, volume.ReadOnly)).ToArray())).ToArray());
+
+    private static void MarkCollisionCompanions(string car, IReadOnlyList<FileInfo> archives)
+    {
+        var window = StageOf(car) ?? Application.Current.Windows.OfType<ResourceEditorWindow>().FirstOrDefault();
+        foreach (var archive in archives) window?.TargetStage.MarkArchiveModified(archive);
     }
 
     private static ResourceEditorWindow? StageOf(string car)
@@ -459,7 +497,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         Assets.Cars.CarLights.Sheet? sheet = null;
-        if (Guarded(() => Assets.Cars.CarLights.Read(file!, out sheet)) is { } failed) return failed;
+        if (Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? Assets.Cars.CompiledCarLights.Read(file!, out sheet)
+            : Assets.Cars.CarLights.Read(file!, out sheet)) is { } failed) return failed;
         result = Info(sheet!);
         return null;
     }
@@ -473,7 +513,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         Assets.Cars.CarLights.Sheet? sheet = null;
         bool wasAdded = false;
         if (power is { } asked && !double.IsFinite(asked)) return "power is a number";
-        if (Guarded(() => Assets.Cars.CarLights.SetLight(file!, bone, kind, side, model, checkBones, (float?)power, out wasAdded, out sheet)) is { } failed) return failed;
+        if (Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? Assets.Cars.CompiledCarLights.SetLight(file!, bone, kind, side, model, checkBones, (float?)power, out wasAdded, out sheet)
+            : Assets.Cars.CarLights.SetLight(file!, bone, kind, side, model, checkBones, (float?)power, out wasAdded, out sheet)) is { } failed) return failed;
         added = wasAdded;
         result = Info(sheet!);
         return null;
@@ -484,7 +526,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         Assets.Cars.CarLights.Sheet? sheet = null;
-        if (Guarded(() => Assets.Cars.CarLights.RemoveLight(file!, bone, out sheet)) is { } failed) return failed;
+        if (Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? Assets.Cars.CompiledCarLights.RemoveLight(file!, bone, out sheet)
+            : Assets.Cars.CarLights.RemoveLight(file!, bone, out sheet)) is { } failed) return failed;
         result = Info(sheet!);
         return null;
     }
@@ -494,7 +538,13 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         int index = -1, count = 0;
-        if (Guarded(() => Assets.Cars.CarLights.AddBone(file!, name, parent, new System.Numerics.Vector3((float)x, (float)y, (float)z), (float)reach, out index, out count)) is { } failed) return failed;
+        if (Guarded(() =>
+            {
+                if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+                    (index, count) = Assets.Cars.CompiledCarRig.AddBone(file!, name, parent, new System.Numerics.Vector3((float)x, (float)y, (float)z), (float)reach);
+                else Assets.Cars.CarLights.AddBone(file!, name, parent, new System.Numerics.Vector3((float)x, (float)y, (float)z), (float)reach, out index, out count);
+                return null;
+            }) is { } failed) return failed;
         result = new CarBoneInfo(file!.Name, name.Trim(), parent.Trim(), index, count);
         return null;
     }
@@ -504,7 +554,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         result = null;
         if (Car(car, out FileInfo? file) is { } refused) return refused;
         Assets.Cars.CarLights.Beacon? beacon = null;
-        if (Guarded(() => Assets.Cars.CarLights.AddBeacon(file!, new System.Numerics.Vector3((float)x, (float)y, (float)z), checkBone, (float)reach, out beacon)) is { } failed) return failed;
+        if (Guarded(() => Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+            ? Assets.Cars.CompiledCarLights.AddBeacon(file!, new System.Numerics.Vector3((float)x, (float)y, (float)z), checkBone, (float)reach, out beacon)
+            : Assets.Cars.CarLights.AddBeacon(file!, new System.Numerics.Vector3((float)x, (float)y, (float)z), checkBone, (float)reach, out beacon)) is { } failed) return failed;
         result = new CarBeaconInfo(file!.Name, beacon!.Casing, beacon.Lamp, beacon.Parent, V(beacon.At), beacon.BonesAdded, beacon.LightAdded, beacon.Bones);
         return null;
     }
@@ -520,7 +572,9 @@ internal sealed class AppCarWorkshop : ICarWorkshop
         if (other is { Exists: false }) return $"no such reference archive: {other.FullName}";
         try
         {
-            Assets.Cars.CarCheck.Report report = Assets.Cars.CarCheck.Run(file, other, same);
+            Assets.Cars.CarCheck.Report report = Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+                ? Assets.Cars.CompiledCarCheck.Run(file, other, same)
+                : Assets.Cars.CarCheck.Run(file, other, same);
             result = new CarCheckInfo(report.Car, report.Reference, report.Problems.Count == 0, report.Problems, report.ComparedAs, report.NotCompared,
                 [.. report.Levels.Select(l => new CarCheckLevel(l.Lod, l.Vertices, l.Triangles, l.Skinned, l.WeightsOffLattice, l.Unskinned,
                     l.FarVertices, l.ThinTriangles, l.FlatUvTriangles,

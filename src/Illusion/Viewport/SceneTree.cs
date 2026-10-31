@@ -75,7 +75,7 @@ internal sealed class SceneTree
         if (folder.Children.Count == 0) { Roots.Remove(folder); _folders.Remove(folder.Name); }
     }
 
-    public static SceneNode BuildSceneTree(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves) =>
+    public static SceneNode BuildSceneTree(Illusion.Domain.ISceneHierarchyNode fn, List<SceneNode> meshLeaves) =>
         BuildSceneTree(fn, meshLeaves, top: true);
 
     /// <param name="top">
@@ -84,10 +84,10 @@ internal sealed class SceneTree
     /// deeper in a hierarchy means nothing, and a default that hides things is worth keeping on a short leash.
     /// </param>
     private static SceneNode BuildSceneTree(
-        Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves, bool top)
+        Illusion.Domain.ISceneHierarchyNode fn, List<SceneNode> meshLeaves, bool top)
     {
         bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null || fn.LodMeshes.Count > 1;
-        var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source };
+        var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source, GeometrySource = fn.GeometrySource };
         if (fn.Mesh != null)
         {
             node.Pending = fn.Mesh;
@@ -107,7 +107,7 @@ internal sealed class SceneTree
         // exactly like one that has none.
         if (lodRows.Count > 0) node.IsExpanded = true;
         if (fn.Skeleton is { } skeleton) node.AddChild(BuildSkeletonTree(skeleton));
-        foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves, false));
+        foreach (Illusion.Domain.ISceneHierarchyNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves, false));
 
         // Hidden once the subtree exists, so the cascade reaches all of it: a shell is a holder frame with
         // its geometry underneath, and hiding the holder before its children arrive would hide nothing.
@@ -124,7 +124,7 @@ internal sealed class SceneTree
     /// it they act on. Level 0 is visible and its parent opens on it; the coarser ones start hidden.
     /// </para>
     /// </summary>
-    private static List<SceneNode> BuildLodRows(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves)
+    private static List<SceneNode> BuildLodRows(Illusion.Domain.ISceneHierarchyNode fn, List<SceneNode> meshLeaves)
     {
         var rows = new List<SceneNode>();
         if (fn.LodMeshes.Count < 2) return rows;
@@ -132,7 +132,7 @@ internal sealed class SceneTree
         for (int level = 0; level < fn.LodMeshes.Count; level++)
         {
             MeshData mesh = fn.LodMeshes[level];
-            var row = new SceneNode($"LOD {level}", "Lod", false) { Source = fn.Source, Lod = level, Pending = mesh };
+            var row = new SceneNode($"LOD {mesh.Lod}", "Lod", false) { Source = fn.Source, GeometrySource = fn.GeometrySource, Lod = mesh.Lod, Pending = mesh };
             // Hidden BEFORE the upload: SceneNode.Mesh applies the row's visibility as the GPU mesh is
             // assigned, so a coarse level is never drawn for a frame and then taken away again.
             if (level > 0) row.IsVisible = false;

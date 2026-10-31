@@ -17,6 +17,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 {
     private readonly GpuContext _gpu;
     private readonly MeshShader _shader;
+    private readonly SurfaceBindings _surfaceBindings;
     private readonly SkinnedMeshShader _skinnedShader;
     private readonly InstancedMeshShader _instShader;
     private readonly SkyRenderer _sky;
@@ -296,6 +297,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         _gpu = gpu;
         _shader = new MeshShader(gpu);
+        _surfaceBindings = new SurfaceBindings(gpu);
         _skinnedShader = new SkinnedMeshShader(gpu);
         _instShader = new InstancedMeshShader(gpu);
         _sky = new SkyRenderer(gpu);
@@ -743,6 +745,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             Vector4 boundTint = Vector4.One;
 
             var vb = mesh.VertexBuffer.Handle;
+            SurfaceBindings.BindColors(ctx, mesh);
             ctx.IASetVertexBuffers(0, 1, &vb, &stride, &offset);
             if (mesh.IsSkinned)
             {
@@ -753,6 +756,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             foreach (GpuPart part in mesh.Parts)
             {
+                _surfaceBindings.Bind(ctx, part);
                 if (filter != PartFilter.All && part.Blended != (filter == PartFilter.Blended)) continue;
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
@@ -869,11 +873,13 @@ public sealed unsafe class SceneRenderer : IDisposable
             ctx.IASetVertexBuffers(0, 1, &vb, &stride, &offset);
             var ib = mesh.InstanceBuffer.Handle;
             ctx.IASetVertexBuffers(1, 1, &ib, &instStride, &offset);
+            SurfaceBindings.BindColors(ctx, mesh);
             ctx.IASetIndexBuffer(mesh.IndexBuffer, Format.FormatR32Uint, 0);
 
             foreach (GpuPart part in mesh.Parts)
             {
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
+                _surfaceBindings.Bind(ctx, part);
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
                 srvs[2] = part.SpecSrv.Handle;     // t2 specular level
                 if (srvs[0] != last0 || srvs[1] != last1 || srvs[2] != last2)
@@ -927,6 +933,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _sky.Dispose();
         _instShader.Dispose();
         _shader.Dispose();
+        _surfaceBindings.Dispose();
         _skinnedShader.Dispose();
     }
 }

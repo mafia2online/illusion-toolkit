@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Sds;
 using Illusion.Bridge.Geometry;
 using Illusion.Bridge.Payload;
@@ -57,6 +58,12 @@ public static class BridgeMeshApplier
     /// <summary>A computed geometry change, ready to flip in and out of the live frame data.</summary>
     public sealed class ApplyResult
     {
+        internal IReadOnlyList<Formats.Compiled.CompiledElement> CompiledWriteFields { get; init; } = [];
+        public bool ConflictsWithCompiledWrites(ApplyResult other) =>
+            CompiledWriteFields.Count != 0 && CompiledWriteFields.Any(other.CompiledWriteFields.Contains);
+        internal Action? ApplyCompiled;
+        internal Action? RestoreCompiled;
+        internal bool CompiledTopologyRebuilt;
         internal FrameObjectSingleMesh Frame = null!;
         internal VertexBuffer Buffer = null!;
         internal List<RequantizedLod> RepackedLods = new();
@@ -120,7 +127,7 @@ public static class BridgeMeshApplier
 
         /// <summary>The push changed the mesh's topology — the whole edited level was rebuilt (the other
         /// levels and the collision keep their old shape until their own pipelines exist).</summary>
-        public bool TopologyRebuilt => Rebuild != null;
+        public bool TopologyRebuilt => Rebuild != null || CompiledTopologyRebuilt;
 
         /// <summary>Which level of detail this push writes into — already clamped to what the mesh ships.</summary>
         public int Lod { get; internal set; }
@@ -132,6 +139,7 @@ public static class BridgeMeshApplier
         /// <summary>Writes the new geometry into the live frame data (initial apply and redo).</summary>
         public void ApplyNew()
         {
+            if (ApplyCompiled is { } apply) { apply(); return; }
             ApplyBuffers();
             if (Frame is FrameObjectModel skinned) SkinAfter?.Apply(skinned);
 
@@ -183,6 +191,7 @@ public static class BridgeMeshApplier
         /// may already have written the pushed bytes, so the working copy must be rewritten.</summary>
         public void RestoreOriginal()
         {
+            if (RestoreCompiled is { } restore) { restore(); return; }
             Buffer.Data = OldVertexData;
             Frame.Geometry.DecompressionOffset = OldDecompressionOffset;
             Frame.Geometry.DecompressionFactor = OldDecompressionFactor;
@@ -240,6 +249,12 @@ public static class BridgeMeshApplier
     public static ApplyResult? TryApply(IFrameNode node, MeshObjectPayload payload, out string? skipReason,
         int lod = 0)
     {
+        if (node is ICompiledMeshSource compiled)
+        {
+            if (compiled.GeometryBinding is { } binding) return binding.TryApply(payload, lod, out skipReason);
+            skipReason = "Compiled frames with multiple or unresolved visuals cannot yet be edited through Blender.";
+            return null;
+        }
         if (UngroupedVertices(node, payload) is var stray and > 0)
         {
             skipReason = $"{stray} vertices are in no vertex group. On a rigged model every vertex has to "

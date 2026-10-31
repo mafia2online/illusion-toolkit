@@ -14,8 +14,12 @@ namespace Illusion.Assets.Library;
 public sealed record PropEntry(
     string Archive, string Name, string Label, string Kind, string Category, int Triangles, float[] Size)
 {
+    /// <summary>Compiled stock-prototype metadata; absent for Mafia II entries.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Compiled.CompiledPropEntry? Compiled { get; init; }
+
     /// <summary>A key that names this entry across runs — for the thumbnail cache.</summary>
-    public string Key => $"{Archive}|{Name}";
+    public string Key => Compiled is { } compiled ? $"{Archive}|{compiled.SourceObjectId:X16}" : $"{Archive}|{Name}";
 
     /// <summary>The archive's own name, for the tile's second line.</summary>
     public string ArchiveName => Path.GetFileNameWithoutExtension(Archive);

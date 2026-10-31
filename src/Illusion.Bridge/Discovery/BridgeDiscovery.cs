@@ -22,8 +22,9 @@ public sealed class BridgeEndpoint
 public static class BridgeDiscovery
 {
     /// <summary>Roaming app folder shared with the addon (which resolves it as %APPDATA%\Illusion).</summary>
-    public static string AppDataDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Illusion");
+    public static string AppDataDir => Environment.GetEnvironmentVariable("ILLUSION_BRIDGE_DIR") is { Length: > 0 } directory
+        ? Path.GetFullPath(directory)
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Illusion");
 
     public static string DiscoveryFile => Path.Combine(AppDataDir, "bridge.json");
 

@@ -18,7 +18,7 @@ namespace Illusion.Assets.Frames;
 /// degrades a ref to a missing object to -1 ("no parent"), and an undo makes the same refs resolve again.
 /// </para>
 /// </summary>
-public sealed class DetachedFrames
+public sealed class DetachedFrames : IFrameDetachment
 {
     // Where a detached frame was held by something OUTSIDE the set: the holder's child list and the slot to
     // re-insert at on undo. A frame can appear in several containers (its hierarchy parent OR its anchor's

@@ -17,6 +17,8 @@ public static class AreaZones
     public static List<AreaZone> Load(Func<FileInfo, string> ensureExtracted,
         IReadOnlyCollection<string> validBases)
     {
+        if (MafiaEnvironment.Profile.ArchiveVersion == 20)
+            return Compiled.CompiledStreamingZones.Load(ensureExtracted, validBases);
         var zones = new List<AreaZone>();
 
         var cuSds = new FileInfo(MafiaEnvironment.CityUniversSds);

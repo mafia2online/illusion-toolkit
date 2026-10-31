@@ -34,6 +34,10 @@ internal sealed class CarCollisionController
     }
 
     private bool _show;
+    private readonly object _compiledWorldKey = new();
+    private MeshData[] _compiledWorldMeshes = [];
+    private long _compiledWorldRevision;
+
 
     /// <summary>
     /// The volumes of each loaded document, kept between redraws. Reading them means opening the archive's
@@ -101,11 +105,21 @@ internal sealed class CarCollisionController
     /// window, every snow volume — is drawn where the prefab puts it.
     /// </para>
     /// </summary>
+    internal void RefreshSharedWorldChanges()
+    {
+        if (!_show) return;
+        long revision = 0;
+        foreach (var document in _host.FrameDocumentNodes().Select(node=>node.Source)
+                     .OfType<Illusion.Assets.Compiled.CompiledSceneDocument>().Distinct())
+            revision = unchecked(revision + document.WorldCollisionRevision);
+        if (revision != _compiledWorldRevision) Redraw();
+    }
+
     private void Redraw()
     {
         if (_host.Rnd is not { } renderer) return;
         renderer.ShowPartShapes = _show;
-        if (!_show) { renderer.SetPartShapeLines([], []); return; }
+        if (!_show) { renderer.SetPartShapeLines([], []); renderer.RemoveCollisionDistrict(_compiledWorldKey); _compiledWorldMeshes = []; return; }
 
         var lines = new List<Vector3>();
         var colors = new List<Vector4>();
@@ -130,6 +144,42 @@ internal sealed class CarCollisionController
                 Vector4 tint = ColorOf(volume);
                 for (int i = before; i < lines.Count; i++) colors.Add(tint);
             }
+        }
+        var seenCompiledMeshes = new HashSet<MeshData>(ReferenceEqualityComparer.Instance);
+        var worldMeshes = new List<MeshData>();
+        long worldRevision = 0;
+        foreach (var document in _host.FrameDocumentNodes().Select(n => n.Source)
+                     .OfType<Illusion.Assets.Compiled.CompiledSceneDocument>().Distinct())
+        {
+            foreach (MeshData mesh in document.CollisionMeshes().Where(seenCompiledMeshes.Add))
+            {
+                if (mesh.Instances is not null) { worldMeshes.Add(mesh); continue; }
+                for (int triangle = 0; triangle + 2 < mesh.Indices.Length; triangle += 3)
+                    for (int edge = 0; edge < 3; edge++)
+                    {
+                        uint first = mesh.Indices[triangle + edge];
+                        uint second = mesh.Indices[triangle + (edge + 1) % 3];
+                        lines.Add(Vector3.Transform(mesh.Positions[first], mesh.World));
+                        lines.Add(Vector3.Transform(mesh.Positions[second], mesh.World));
+                        colors.Add(new Vector4(1f, 0.45f, 0.25f, 0.95f));
+                        colors.Add(new Vector4(1f, 0.45f, 0.25f, 0.95f));
+                    }
+            }
+            worldRevision = unchecked(worldRevision + document.WorldCollisionRevision);
+        }
+        if (_compiledWorldRevision != worldRevision || !_compiledWorldMeshes.SequenceEqual(worldMeshes) || (worldMeshes.Count > 0 && !renderer.HasCollisionData))
+        {
+            renderer.SetCollisionDistrict(_compiledWorldKey, new CollisionRenderData
+            {
+                Meshes = worldMeshes.Select((mesh, index) => new CollisionRenderMesh
+                {
+                    Hash = (ulong)index + 1, Positions = mesh.Positions, Indices = mesh.Indices,
+                    SourceTriangle = Enumerable.Range(0, mesh.Indices.Length / 3).ToArray(),
+                    Parts = [new CollisionRenderPart(0, mesh.Indices.Length, 0, new Vector3(1, .45f, .25f))],
+                    Instances = mesh.Instances!, LocalMin = mesh.Positions.Aggregate(Vector3.Min), LocalMax = mesh.Positions.Aggregate(Vector3.Max)
+                }).ToArray()
+            });
+            _compiledWorldMeshes = worldMeshes.ToArray(); _compiledWorldRevision = worldRevision;
         }
         renderer.SetPartShapeLines(lines, colors);
     }

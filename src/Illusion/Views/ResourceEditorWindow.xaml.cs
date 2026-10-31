@@ -41,7 +41,10 @@ public partial class ResourceEditorWindow : Window
     public ResourceEditorWindow()
     {
         InitializeComponent();
+        InitializeAnimationPreview();
+        Mafia3AuthoringItem.Visibility = MafiaEnvironment.Profile.ArchiveVersion == 20 ? Visibility.Visible : Visibility.Collapsed;
         WindowFit.ToWorkArea(this);
+        if (App.BackgroundLaunch) { ShowActivated = false; WindowState = WindowState.Normal; }
 
         Scene.Attach(Stage);
         Scene.HideCityFilters();          // no proxy districts and no winter twin off the map
@@ -107,6 +110,7 @@ public partial class ResourceEditorWindow : Window
 
         // Multiplayer is only available when the M2Online launcher is present in the game folder.
         MultiplayerBtn.IsEnabled = GameLauncher.HasMultiplayer;
+        PlayBtn.ToolTip = GameLauncher.PlayTooltip;
 
         UpdateStageChrome();
         Loaded += (_, _) => BuildCatalog();
@@ -161,7 +165,7 @@ public partial class ResourceEditorWindow : Window
     private async void BuildCatalog()
     {
         if (_catalog != null || !MafiaEnvironment.IsInitialized) return;
-        string sdsFolder = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        string sdsFolder = MafiaEnvironment.ArchiveFolder;
         try
         {
             LibraryCatalog catalog = await Task.Run(() => LibraryCatalog.Build(sdsFolder));

@@ -19,6 +19,23 @@ internal static unsafe class ShaderCompiler
 Texture2D    DiffuseTex  : register(t0);
 Texture2D    NormalTex   : register(t1);
 Texture2D    SpecularTex : register(t2);
+Texture2D    Layer2Diffuse : register(t3);
+Texture2D    Layer2Normal : register(t4);
+Texture2D    Layer2Specular : register(t5);
+Texture2D    LayerMask : register(t6);
+Texture2D    Layer3Diffuse : register(t7);
+Texture2D    Layer3Normal : register(t8);
+Texture2D    Layer3Specular : register(t9);
+Texture2D    LayerMask2 : register(t10);
+cbuffer SurfaceCB : register(b2)
+{
+    float4 SurfaceMode;
+    float4 SurfaceScales;
+    float4 SurfaceScales2;
+    float4 SurfaceMasks;
+    float4 SurfacePaintPrimary;
+    float4 SurfacePaintSecondary;
+};
 SamplerState Samp        : register(s0);
 ";
 
@@ -34,7 +51,7 @@ SamplerState Samp        : register(s0);
 
     /// <summary>Interpolators produced by both mesh VS and consumed by <see cref="MafiaLitPs"/>.</summary>
     public const string PsInStruct = @"
-struct PSIn { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 wpos : TEXCOORD1; float3 tan : TEXCOORD2; float3 bin : TEXCOORD3; };";
+struct PSIn { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 wpos : TEXCOORD1; float3 tan : TEXCOORD2; float3 bin : TEXCOORD3; float4 color : TEXCOORD4; };";
 
     /// <summary>
     /// Shared surface-PS for meshes (regular and instanced), reproducing the Mafia II look in gamma space.
@@ -67,19 +84,44 @@ float4 PSMain(PSIn i) : SV_TARGET
     float sel  = ghost ? BaseColor.a - 4.0 : BaseColor.a;
     bool textured = sel >= 0.5;                                   // Material Preview (1) + Render (2) sample DiffuseTex
     bool simple   = sel > 0.5 && sel < 1.5;                       // Material Preview: no normal/spec maps, no specular, no rim
+    bool terrain = SurfaceMode.x >= 1.5;
+    bool waterDefinition = SurfaceMode.x > 0.5 && SurfaceMode.x < 1.5;
+    bool threeLayers = SurfaceMode.x >= 2.5;
+    float2 baseUv = terrain ? i.uv * SurfaceScales.xy : i.uv;
+    float2 layer2Uv = i.uv * SurfaceScales.zw;
+    float2 layer3Uv = i.uv * SurfaceScales2.xy;
+    float primaryWeight = saturate(i.color.b);
+    float secondaryWeight = saturate(i.color.g);
 
     bool  blended  = Tint.a > 1.5;                                // glass and the like: drawn in the blended pass
     float coverage = 1.0;
     float3 albedo;
     if (textured)
     {
-        float4 tex = DiffuseTex.Sample(Samp, i.uv);
+        float4 tex = DiffuseTex.Sample(Samp, baseUv);
+        if (terrain)
+        {
+            float mask = LayerMask.Sample(Samp, i.uv * SurfaceMasks.xy).r;
+            // Native terrain_2blend / terrain_3blend: mask-enhanced vertex B, then vertex G.
+            float weight = saturate(mask * primaryWeight / max(1 - primaryWeight, 1e-7));
+            float4 second = Layer2Diffuse.Sample(Samp, layer2Uv);
+            if (threeLayers)
+            {
+                float mask2 = LayerMask2.Sample(Samp, i.uv * SurfaceMasks.zw).r;
+                float weight2 = saturate(mask2 * secondaryWeight / max(1 - secondaryWeight, 1e-7));
+                second = lerp(Layer3Diffuse.Sample(Samp, layer3Uv), second, weight2);
+            }
+            tex = lerp(second, tex, weight);
+        }
+        if (waterDefinition) tex.a = 1.0;                          // native defining pass stores alpha as data, without discard
         if (blended) coverage = tex.a;                             // how much of the surface shows
         else clip(tex.a - 0.5);                                    // alpha-test: transparent texels (fences/grates/foliage)
         // Tint is white for every material that HAS an albedo, so this is a no-op almost everywhere. It earns
         // its keep on the ones that do not: a car body's paint is a material colour, not a texture, and
         // sampling its missing albedo returns the cache's white placeholder — 1 × paint is the paint.
         albedo = tex.rgb * Tint.rgb;
+        if (SurfaceMode.x < -0.5)
+            albedo = SurfacePaintPrimary.rgb * i.color.r + SurfacePaintSecondary.rgb * i.color.g;
     }
     else
     {
@@ -101,11 +143,17 @@ float4 PSMain(PSIn i) : SV_TARGET
     float3 N = Ngeom;
     float  tl = dot(i.tan, i.tan);
     float  bl = dot(i.bin, i.bin);
-    if (!simple && tl > 1e-8 && bl > 1e-8)                         // Material Preview keeps the geometric normal (no normal map)
+    if (!simple && !waterDefinition && tl > 1e-8 && bl > 1e-8)     // defining T003 XY may contain flow, not a tangent-space normal
     {
         float3 T = i.tan * rsqrt(tl);
         float3 B = i.bin * rsqrt(bl);
-        float4 nt = NormalTex.Sample(Samp, i.uv);
+        float4 nt = NormalTex.Sample(Samp, baseUv);
+        if (terrain)
+        {
+            float4 second = Layer2Normal.Sample(Samp, layer2Uv);
+            if (threeLayers) second = lerp(Layer3Normal.Sample(Samp, layer3Uv), second, secondaryWeight);
+            nt = lerp(second, nt, primaryWeight);
+        }
         nt.x *= nt.w;
         float2 nxy = nt.xy * 2.0 - 1.0;
         float3 nTan = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
@@ -136,7 +184,14 @@ float4 PSMain(PSIn i) : SV_TARGET
         // Phong specular (the engine's standard opaque path), spatially modulated by the specular-level map
         // (.g; white → 1). Additive, gated to the lit hemisphere so back faces get no spurious highlight.
         // R uses the unclamped cosAngle, as in-engine.
-        float  specLevel = SpecularTex.Sample(Samp, i.uv).g * SpecParams.y;
+        float specSample = SpecularTex.Sample(Samp, baseUv).g;
+        if (terrain)
+        {
+            float second = Layer2Specular.Sample(Samp, layer2Uv).g;
+            if (threeLayers) second = lerp(Layer3Specular.Sample(Samp, layer3Uv).g, second, secondaryWeight);
+            specSample = lerp(second, specSample, primaryWeight);
+        }
+        float  specLevel = specSample * SpecParams.y;
         float3 R         = 2.0 * cosAngle * N - L;
         float  vdr       = saturate(dot(V, R));
         float  specTerm  = pow(vdr, SpecParams.x) * specLevel * step(1e-4, ndl);

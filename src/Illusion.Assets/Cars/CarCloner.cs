@@ -79,8 +79,10 @@ public static partial class CarCloner
             refusal = "the game folder is not set";
             return null;
         }
+        if (MafiaEnvironment.Profile.Variant == Illusion.Formats.GameVariant.MafiaIII)
+            return CloneCompiled(source, name, traffic, title, out refusal);
 
-        string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        string sds = MafiaEnvironment.ArchiveFolder;
         var tablesSds = new FileInfo(Path.Combine(sds, "tables", "tables.sds"));
         var ingameSds = new FileInfo(Path.Combine(sds, "tables", "ingame.sds"));
         string stem = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();

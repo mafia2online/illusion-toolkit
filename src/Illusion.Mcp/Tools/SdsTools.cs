@@ -13,9 +13,8 @@ namespace Illusion.Mcp.Tools;
 /// through an archive without the toolkit having it open in the editor. Names come from the same
 /// resolution the extractor uses, so what a tool calls a resource is what unpacking would write.
 /// </para>
-/// The reader is Mafia II / Mafia II DE only (archive version 19). A version-20 archive from
-/// Mafia III or the Definitive Editions, and any big-endian console archive, is refused by the
-/// format layer rather than half-parsed — the failure comes back as the error payload.
+/// Reads PC version-19 and version-20 archives. Compiled Mafia III scene resources are
+/// available as opaque payloads; they are not Mafia II frame resources.
 /// </summary>
 [McpServerToolType]
 public sealed class SdsTools
@@ -383,6 +382,7 @@ public sealed class SdsTools
             // The game identifies most named resources by the FNV64 of this name, so reporting it
             // saves a hash_fnv64 round trip whenever a caller is chasing a hash it found elsewhere.
             nameFnv64 = Fnv64.Hash(name),
+            fileHash = entry.FileHash,
             version = entry.Version,
             dataSize = entry.Data?.Length ?? 0,
             slotRamRequired = entry.SlotRamRequired,

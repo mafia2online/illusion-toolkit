@@ -137,23 +137,34 @@ public sealed unsafe class GpuContext : IDisposable
 
     private void CreateD3D11()
     {
+        // Keep native out-pointer storage on the stack, rather than exposing managed instance
+        // fields through Silk's ref-ComPtr overload during device/driver initialization.
+        ID3D11Device* device = null;
+        ID3D11DeviceContext* context = null;
         // BgraSupport is mandatory: D3DImage works with BGRA surfaces.
         SilkMarshal.ThrowHResult(D3D11.CreateDevice(
-            default(ComPtr<IDXGIAdapter>),
+            (IDXGIAdapter*)null,
             D3DDriverType.Hardware,
             nint.Zero,
             (uint)CreateDeviceFlag.BgraSupport,
             (D3DFeatureLevel*)null,   // pFeatureLevels — let the driver pick on its own
             0,
             D3D11.SdkVersion,
-            ref Device11,
+            &device,
             (D3DFeatureLevel*)null,   // we don't need the selected level
-            ref Context11));
+            &context));
+        Device11 = device;
+        Context11 = context;
+        if (device == null || context == null)
+            throw new InvalidOperationException("D3D11 device creation returned an empty device or immediate context.");
     }
 
     private void CreateD3D9()
     {
-        SilkMarshal.ThrowHResult(D3D9.Direct3DCreate9Ex(D3D9.SdkVersion, ref D3D9Ex));
+        IDirect3D9Ex* api = null;
+        SilkMarshal.ThrowHResult(D3D9.Direct3DCreate9Ex(D3D9.SdkVersion, &api));
+        D3D9Ex = api;
+        if (api == null) throw new InvalidOperationException("D3D9Ex creation returned an empty API.");
 
         // The D3D9 device needs a focus window; use the desktop — there is no real window.
         nint focus = GetDesktopWindow();
@@ -172,6 +183,7 @@ public sealed unsafe class GpuContext : IDisposable
         const uint flags =
             D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED | D3DCREATE_FPU_PRESERVE;
 
+        IDirect3DDevice9Ex* device = null;
         SilkMarshal.ThrowHResult(D3D9Ex.CreateDeviceEx(
             0,
             Devtype.Hal,
@@ -179,7 +191,9 @@ public sealed unsafe class GpuContext : IDisposable
             flags,
             ref pp,
             (Displaymodeex*)null,
-            ref Device9));
+            &device));
+        Device9 = device;
+        if (device == null) throw new InvalidOperationException("D3D9Ex device creation returned an empty device.");
     }
 
     public void Dispose()

@@ -92,7 +92,7 @@ public static partial class CarM2oExport
             return null;
         }
         string stem = Path.GetFileNameWithoutExtension(car).ToLowerInvariant();
-        string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        string sds = MafiaEnvironment.ArchiveFolder;
         var archive = new FileInfo(Path.Combine(sds, "cars", stem + ".sds"));
         if (!archive.Exists)
         {

@@ -32,7 +32,7 @@ namespace Illusion.Viewport;
 /// <see cref="ScenePersistence"/> (save/build tracking). This class wires them to the base control and
 /// exposes the single facade the UI binds to, including the transform-gizmo host (<see cref="ITransformGizmoHost"/>).
 /// </summary>
-public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGizmoHost
+public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGizmoHost
 {
     internal readonly SceneTree Tree;
     internal readonly ViewportCatalogs Catalogs;
@@ -295,22 +295,42 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
 
     /// <summary>Deletes the selection: collision placements from their .col, frame objects from their
     /// FrameResource — both undoable and both persisted by Save/Build.</summary>
-    public void DeleteSelected()
+    public bool DeleteSelected() => DeleteSelected(out _);
+
+    /// <summary>Deletes the selection, returning a native removal refusal without deleting any selected volume.</summary>
+    public bool DeleteSelected(out string? refusal)
     {
+        refusal = null;
+        if (IsLoading || BridgeEditedCount > 0)
+        {
+            refusal = "Wait for loading and end the Blender session before deleting objects.";
+            RaiseNotice(refusal, isError: true);
+            return false;
+        }
         // An object carried in from another archive takes the collision it was given along — those hulls
         // stand where it stood and are nothing without it.
         List<SceneNode> selected = [.. Selection.Selected];
         var held = new HashSet<SceneNode>(selected);
         List<SceneNode> linked = [.. LinkedCollision(selected).Values.SelectMany(hulls => hulls).Where(n => !held.Contains(n)).Distinct()];
-        if (linked.Count > 0) Selection.SetSelection([.. selected, .. linked], SelectedNode);
-
         int before = Editing.History.UndoCount;
+        var deleteTargets = selected.Concat(linked).ToArray();
+        var compiledVolumes = deleteTargets.Where(node => node.Kind == "Collision volume"
+            && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument).ToArray();
+        if (compiledVolumes.Length > 0 && RemoveCompiledCollisions(compiledVolumes) is { } collisionRefusal)
+        {
+            refusal = "Nothing was deleted: " + collisionRefusal;
+            RaiseNotice(refusal, isError: true);
+            return false;
+        }
+        var remainingTargets = deleteTargets.Where(Tree.IsInScene).ToArray();
+        Selection.SetSelection(remainingTargets, remainingTargets.FirstOrDefault());
         ActorEditing.DeleteSelected();     // actors (drops their record from the .act pack)
         CollisionEditing.DeleteSelected(); // collision instances (drops them from the selection)
         CrashEditing.DeleteSelected();     // city_crash placements, in both seasons when linked
         Editing.DeleteSelected();          // frame objects (its DeletableRoots excludes collision)
         // One Delete is one Ctrl+Z, however many kinds of thing it took out.
         Editing.History.SquashSince(before, edits => new CompositeEdit(edits));
+        return Editing.History.UndoCount > before;
     }
 
     /// <summary>
@@ -822,7 +842,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     public void RebuildHitBoxes() => HitBoxes.RebuildSelected();
 
     /// <inheritdoc cref="TransformEditController.Reparent"/>
-    public void Reparent(SceneNode node, SceneNode newParent) => Editing.Reparent(node, newParent);
+    public bool Reparent(SceneNode node, SceneNode newParent) => Editing.Reparent(node, newParent);
 
     /// <inheritdoc cref="TransformEditController.RecordTransform"/>
     public void RecordTransform(SceneNode node, Matrix4x4 before, Matrix4x4 after) =>
@@ -1194,10 +1214,18 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     /// </summary>
     public bool IsMapViewport { get; set; } = true;
 
-    protected override void OnSceneInitialized() => Catalogs.InitAsync(IsMapViewport);
+    protected override void OnSceneInitialized()
+    {
+        Renderer!.Textures.SetFallbackResolver(Assets.Textures.TextureSearchIndex.FindPath);
+        Catalogs.InitAsync(IsMapViewport);
+    }
 
     // Per-frame scene advancement (before the base moves the camera) — the streamer's pipeline.
-    protected override void OnFrameUpdate(float dt) => Streamer.Tick(dt);
+    protected override void OnFrameUpdate(float dt)
+    {
+        Streamer.Tick(dt);
+        CarCollisionEditing.RefreshSharedWorldChanges();
+    }
 
     // Left-click on the render surface selects the mesh under the cursor. Ctrl+click toggles it in the
     // multi-selection (a miss is ignored); a plain click replaces the selection (or clears it on a miss).
@@ -1578,6 +1606,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost, IBoxGiz
     internal void RaiseSceneChanged()
     {
         HitBoxes.Redraw();
+        RefreshCompiledNavigation();
         SceneChanged?.Invoke();
     }
     internal void RaiseCatalogReady() => CatalogReady?.Invoke();

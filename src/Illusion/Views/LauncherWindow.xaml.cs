@@ -31,6 +31,7 @@ public partial class LauncherWindow : Window
     public LauncherWindow()
     {
         InitializeComponent();
+        if (App.BackgroundLaunch) { ShowActivated = false; WindowState = WindowState.Normal; }
 
         // Subscribed here rather than in Loaded: the server starts before this window does, so its
         // first state changes can land before Loaded ever runs.
@@ -174,7 +175,7 @@ public partial class LauncherWindow : Window
                 ? "The game is not unpacked. Click the unpack button before opening the editors."
                 : string.IsNullOrWhiteSpace(PathBox.Text)
                     ? "No game folder chosen yet — pick it with the folder button, or type the path."
-                    : "Enter a valid Mafia II install path (the pc folder or the game root).";
+                    : "Enter a valid Mafia II or Mafia III install path (the pc folder or the game root).";
         }
     }
 
@@ -476,6 +477,7 @@ public partial class LauncherWindow : Window
         if (!EnsureEnv(out string? err)) return "Could not open the game: " + err;
 
         Window editor = create();
+        if (App.BackgroundLaunch) { editor.ShowActivated = false; editor.WindowState = WindowState.Normal; }
         Application.Current.MainWindow = editor;
         editor.Show();
         Close();

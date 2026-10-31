@@ -87,6 +87,9 @@ public interface IEditorSession
     /// <summary>Moves one object (undoable): to a world position, and/or by a world offset.</summary>
     string? Move(string name, float[]? position, float[]? offset);
 
+    /// <summary>Changes an object's parent, keeping its local transform. Null parent means its document root.</summary>
+    string? Reparent(string name, string? parent) => "hierarchy editing is unavailable in this session";
+
     /// <summary>Copies an actor out of another archive's pack (<paramref name="sourceActFile"/>) into the
     /// loaded area, under <paramref name="newName"/>, at a world position. Undoable. Null on success.</summary>
     string? ImportActor(string sourceActFile, string actorName, string newName, float[] position);
@@ -110,6 +113,22 @@ public interface IEditorSession
     /// <summary>Duplicates the selection (undoable) and leaves the copies selected. Null on success.</summary>
     string? DuplicateSelected(out IReadOnlyList<string> copies);
 
+    string? AddTriangleCollision(string parent, float[][] positions, uint[] indices, float[]? position, ushort material, ushort bone, out string? path) { path = null; return "triangle collision authoring is unavailable"; }
+    string? CreateGroup(string name, string? parent, out string? path) { path = null; return "group creation is unavailable"; }
+    string? WorldCollisionMeshes(string name, int offset, int limit, out IReadOnlyList<WorldCollisionInfo> result, out int total) { result = []; total = 0; return "world collision inspection is unavailable"; }
+    string? WorldCollisionMesh(string name, int mesh, int instance, out CollisionMeshInfo? result) { result = null; return "world collision inspection is unavailable"; }
+    string? RecookWorldCollision(string name, int mesh, float[][] positions) => "world collision recooking is unavailable";
+    string? MaterialParameter(string material, string parameter, float[]? values, out float[] current) { current = []; return "material parameter editing is unavailable"; }
+    string? RemoveCollision(string name) => "collision removal is unavailable";
+    Task<string?> DeformNavigationAsync(string name, int section, int[] vertices, float[][] positions, string? executable) => Task.FromResult<string?>("native navigation deformation is unavailable");
+    string? TranslateNavigation(string name, int section, float[] offset) => "navigation translation is unavailable";
+    string? RecookCollision(string name, float[][] positions) => "compiled collision recooking is unavailable";
+    string? MakeMeshUnique(string name) => "compiled geometry isolation is unavailable";
+    string? AnimationScreenshot(string path) => "native animation preview is unavailable";
+    string? AddCollision(string parent, string kind, float[] size, float[]? position, float[][]? points,
+        ushort material, ushort bone, out string? path) { path = null; return "compiled collision creation is unavailable"; }
+    string? CollisionMesh(string name, out CollisionMeshInfo? mesh) { mesh = null; return "compiled collision geometry is unavailable"; }
+
     /// <summary>The property panel of one object, flattened: every field with its id, kind and value.</summary>
     IReadOnlyList<ObjectProperty> Properties(string name);
 
@@ -129,6 +148,7 @@ public interface IEditorSession
     /// <summary>Opens the resource editor (if it is not open) on an archive — a path, a path under <c>pc\sds</c>
     /// such as <c>cars/shubert_38.sds</c>, or a bare name — and makes it the target. Null when the load started.</summary>
     string? OpenResource(string archive, out string? archivePath);
+    string? OpenResourceBackground(string archive, out string? archivePath) => OpenResource(archive, out archivePath);
 
     /// <summary>Archives of the game's library, by name fragment and/or folder fragment.</summary>
     IReadOnlyList<LibraryItem> Library(string? query, string? folder, int limit);
@@ -254,4 +274,7 @@ public interface IEditorSession
     /// that file, and with <paramref name="libraryTo"/> the added and changed materials are written as a material
     /// library (.mtl) of their own. Nothing of the game is written. Null on success.</summary>
     string? ArchiveMaterials(string archive, bool all, string? saveTo, string? libraryTo, out ArchiveMaterialsInfo? result);
+
+    string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result)
+    { result = null; return "Native animation preview is unavailable."; }
 }

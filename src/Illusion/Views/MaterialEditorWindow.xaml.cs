@@ -107,7 +107,7 @@ public partial class MaterialEditorWindow : Window
     /// carry the mesh slot the editor was opened from (null = plain browsing, no assign overlay).</summary>
     public void ShowMaterial(ulong hash, SceneNode? contextNode, int slotIndex)
     {
-        _contextNode = contextNode is { Source: IMaterialSlotEditor } ? contextNode : null;
+        _contextNode = (contextNode?.GeometrySource ?? contextNode?.Source) is IMaterialSlotEditor ? contextNode : null;
         _contextSlot = slotIndex;
 
         SearchBox.Text = ""; // the filter must not hide the requested material
@@ -442,7 +442,7 @@ public partial class MaterialEditorWindow : Window
         AssignPanel.Visibility = Visibility.Visible;
         AssignBtn.IsEnabled = _currentHash != 0;
         string current = "—";
-        if (_contextNode.Source is IMaterialSlotEditor editor && editor.GetSlotMaterial(_contextSlot) is { } bound)
+        if ((_contextNode.GeometrySource ?? _contextNode.Source) is IMaterialSlotEditor editor && editor.GetSlotMaterial(_contextSlot) is { } bound)
             current = _viewport.MaterialCatalog.GetMaterial(bound)?.Name ?? ("0x" + bound.ToString("X"));
         AssignContextLabel.Text = $"SLOT {_contextSlot + 1} · {_contextNode.Name}";
         AssignBtn.ToolTip =

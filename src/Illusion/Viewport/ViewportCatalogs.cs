@@ -58,7 +58,7 @@ internal sealed class ViewportCatalogs
 
                 // Mafia sky (equirect panorama FreeRide.dds from skies\freeride.sds).
                 string? skyTex = null;
-                string skySds = Path.Combine(MafiaEnvironment.PcFolder, "sds", "skies", "freeride.sds");
+                string skySds = Path.Combine(MafiaEnvironment.ArchiveFolder, "skies", "freeride.sds");
                 if (File.Exists(skySds))
                 {
                     string tex = Path.Combine(SdsMeshLoader.EnsureExtracted(new FileInfo(skySds)), "FreeRide.dds");

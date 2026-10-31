@@ -28,6 +28,7 @@ public static class ExchangeSchema
     public const string ArrayIndices = "indices";           // u32 x1 per loop (welded vertex index)
     public const string ArrayLoopNormals = "loopNormals";   // f32 x3 per loop
     public const string ArrayLoopUv0 = "loopUv0";           // f32 x2 per loop (V already Blender-flipped)
+    public const string ArrayLoopColor0 = "loopColor0";     // optional f32 x4 per loop, logical linear RGBA
     public const string ArrayOrigIndex = "origIndex";       // i32 x1 per loop (source split-vertex index, -1 = new)
     public const string ArrayFaceMaterials = "faceMaterials"; // u16 x1 per triangle (material slot)
     public const string ArrayBoneIndices = "boneIndices";   // u8  x4 per welded vertex (index into the skeleton's bones)

@@ -15,6 +15,20 @@ namespace Illusion.Mcp.Tools;
 [McpServerToolType]
 public sealed class EditorTools
 {
+    [McpServerTool(Name = "scene_reparent")]
+    [Description("Change an object's parent (undoable), keeping its local transform. Omit parent to move to its scene document root. The document refuses unsupported hierarchy changes.")]
+    public static async Task<string> Reparent(IEditorSession editor, IUiThreadMarshal ui,
+        [Description("Object name or unambiguous scene path suffix.")] string name,
+        [Description("New parent name or path; omit for the document root.")] string? parent = null)
+    {
+        try
+        {
+            string? refused = await ui.RunAsync(() => editor.Reparent(name, parent));
+            return refused == null ? ToolResult.Json(new { success = true }) : ToolResult.Invalid(refused);
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
+
     private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(250);
 
     [McpServerTool(Name = "editor_status")]
@@ -75,12 +89,13 @@ public sealed class EditorTools
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("The archive: a path under pc\\sds such as 'cars/shubert_38.sds', a full path, or a bare name such as 'shubert_38'.")] string archive,
-        [Description("How long to wait for the load, in seconds. Default 120.")] int timeoutSeconds = 120)
+        [Description("How long to wait for the load, in seconds. Default 120.")] int timeoutSeconds = 120,
+        [Description("Activate a newly opened window. Set false for background automation.")] bool activate = true)
     {
         try
         {
             string? wanted = null;
-            if (await ui.RunAsync(() => editor.OpenResource(archive, out wanted)) is { } refused) return ToolResult.Invalid(refused);
+            if (await ui.RunAsync(() => activate ? editor.OpenResource(archive, out wanted) : editor.OpenResourceBackground(archive, out wanted)) is { } refused) return ToolResult.Invalid(refused);
             DateTime until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 1, 600));
             ResourceStatus status;
             DateTime? emptySince = null;
@@ -108,7 +123,7 @@ public sealed class EditorTools
                     resource = status,
                 });
             }
-            return ToolResult.Json(new { success = true, loaded = !status.Loading && status.Meshes > 0, resource = status });
+            return ToolResult.Json(new { success = true, loaded = !status.Loading, resource = status });
         }
         catch (Exception ex)
         {
@@ -183,7 +198,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "car_clone")]
-    [Description("Make a new car out of an existing one for single player: copies pc\\sds\\cars\\<source>.sds (and its winter _z twin) to <name in lower case>.sds with the root frame, prefab entry, entity data and geometry buffers renamed, adds the car to vehicles.tbl under a new id (class, price and flags of the source), to PaintCombinations.tbl and AiProps, and — with traffic — to every CARM* traffic row that can pick the source. Then builds the new archives plus tables.sds and ingame.sds (backups kept). Only the main game's tables are edited: the story DLCs ship an ingame.sds of their own and the clone is not in those (the result's notes say which). A source that is not keyed by its model name the way a stock car is, or anything failing on the way, is refused and everything written is taken back. A source open in an editor with unsaved edits is refused — save it first. The game must not be running. Open the clone with resource_open and tune it with car_tuning_set.")]
+    [Description("Clone a car and build its registration companions, with backups and rollback. Mafia III: creates independent compiled object/geometry/rig identities, native Vehicles and paint rows; traffic preserves or clears the native CommonFlags, and title adds a 64-bit localized key in available language tables while preserving existing lookups. Mafia II: copies the summer/winter archives and updates vehicles.tbl, PaintCombinations, AiProps and applicable CARM rows. A source open with unsaved edits is refused; save first. The game must not be running. Open the result with resource_open to edit its components.")]
     public static async Task<string> CarClone(
         IEditorSession editor,
         IUiThreadMarshal ui,
@@ -751,7 +766,7 @@ public sealed class EditorTools
         IEditorSession editor,
         IUiThreadMarshal ui,
         [Description("Shading mode: Render, MaterialPreview, Solid or Wireframe.")] string? renderMode = null,
-        [Description("Show collision hulls.")] bool? collision = null,
+        [Description("Show map collision hulls, or the archive's own physics shapes when targeting the resource editor.")] bool? collision = null,
         [Description("Show the city_crash prop layer.")] bool? crash = null,
         [Description("Show district load zones.")] bool? zones = null,
         [Description("Show AI navigation overlays.")] bool? navigation = null,
@@ -869,7 +884,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "object_import")]
-    [Description("Copy an object out of ANOTHER archive into the loaded area — or, with the resource editor as the target (editor_target), into the archive open there, which is how an interior under shops\\ is furnished: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
+    [Description("For Mafia III, import a verified static CityCrash prototype by name or guid:HEX under an explicit existing Kit parent; collision must be none (the default). It brings visual scenery only, with independent geometry stored in a modified CityCrash companion; editor Build includes that companion. For Mafia II: copy an object out of ANOTHER archive into the loaded area — or, with the resource editor as the target (editor_target), into the archive open there, which is how an interior under shops\\ is furnished: a door from a shop, a prop or a piece of furniture from an interior. 'name' is looked up first among the source archive's actors (entity name, as decode_actors lists it) — then the actor comes too, with the object it places, its behaviour row, its prefab entry and the item descriptions its collision hulls name — and otherwise among its scene's frame objects (as decode_frame_resource lists them), which arrive as plain scenery anchored to the district's scene, with the source's collision hulls that stand inside their footprint — or, when they had none, a hull cooked from their triangles. Geometry is copied into the area's own buffer pools and the textures its materials name into its working copy, so the object does not depend on the source archive being loaded. Undoable: undone and saved, the textures it brought are set aside (and come back if it is redone), while the item descriptions and the prefab entry stay in the working copy, unused. An import that is refused or fails leaves nothing — neither in the scene nor in the working copy. Skinned models cannot travel yet.")]
     public static async Task<string> ImportObject(
         IEditorSession editor,
         IUiThreadMarshal ui,

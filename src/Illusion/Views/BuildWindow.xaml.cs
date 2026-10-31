@@ -51,7 +51,7 @@ public sealed partial class BuildWindow : Window
 
         public FileInfo Archive { get; }
         // the path under sds\, not the bare name: two districts' archives can share one (city\x.sds, city_crash\x.sds)
-        public string Name => MafiaEnvironment.IsInitialized && System.IO.Path.GetRelativePath(System.IO.Path.Combine(MafiaEnvironment.PcFolder, "sds"), Archive.FullName) is { } under
+        public string Name => MafiaEnvironment.IsInitialized && System.IO.Path.GetRelativePath(MafiaEnvironment.ArchiveFolder, Archive.FullName) is { } under
             && !under.StartsWith("..", StringComparison.Ordinal) && !System.IO.Path.IsPathRooted(under) ? under.Replace('\\', '/') : Archive.Name;
         public string Path => Archive.FullName;
 
@@ -305,7 +305,7 @@ public sealed partial class BuildWindow : Window
             Filter = "SDS archives (*.sds)|*.sds",
             CheckFileExists = false,       // a new archive has a working copy and no file in the game yet
         };
-        if (MafiaEnvironment.IsInitialized) dialog.InitialDirectory = System.IO.Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        if (MafiaEnvironment.IsInitialized) dialog.InitialDirectory = MafiaEnvironment.ArchiveFolder;
         if (dialog.ShowDialog(this) != true) return;
 
         var archive = new FileInfo(dialog.FileName);
@@ -445,8 +445,11 @@ public sealed partial class BuildWindow : Window
             {
                 FooterText.Text = footer;
                 Refresh();
-                AppDialog.Show(this, new DialogOptions { Title = "Export", Icon = DialogIcon.Info, Heading = "Nothing to export",
-                    Text = "Every ticked archive matches the game's own. The folder was left as it was." });
+                AppDialog.Show(this, new DialogOptions
+                {
+                    Title = "Export", Icon = DialogIcon.Info, Heading = "Nothing to export",
+                    Text = "Every ticked archive matches the game's own. The folder was left as it was."
+                });
                 return;
             }
             project.Save();

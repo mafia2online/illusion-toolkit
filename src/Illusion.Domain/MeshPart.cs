@@ -7,7 +7,7 @@ public readonly struct MeshPart
 {
     public MeshPart(int startIndex, int indexCount, string? diffuseTexture,
         string? normalTexture = null, string? specularTexture = null, ulong materialHash = 0,
-        Vector4? tint = null, bool blended = false)
+        Vector4? tint = null, bool blended = false, SurfaceMaterial? surface = null)
     {
         StartIndex = startIndex;
         IndexCount = indexCount;
@@ -17,6 +17,7 @@ public readonly struct MeshPart
         MaterialHash = materialHash;
         Tint = tint ?? Vector4.One;
         Blended = blended;
+        Surface = surface;
     }
 
     public int StartIndex { get; }
@@ -36,4 +37,5 @@ public readonly struct MeshPart
     /// <summary>Whether the material's alpha is how much of the surface shows (glass) rather than a mask that
     /// cuts texels out (a fence). A blended part is drawn after the opaque ones, without writing depth.</summary>
     public bool Blended { get; }
+    public SurfaceMaterial? Surface { get; }
 }

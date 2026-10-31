@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Bridge.Payload;
 using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -22,7 +23,10 @@ public static class BonePosePush
     /// <summary>What a push did to one model's rig — enough to undo it and to report it.</summary>
     public sealed class Result
     {
-        public required FrameObjectModel Model { get; init; }
+        public FrameObjectModel? Model { get; init; }
+        public CompiledVehicleRig? CompiledRig { get; init; }
+        public Matrix4x4[]? CompiledBeforeLocal { get; init; }
+        public Matrix4x4[]? CompiledAfterLocal { get; init; }
 
         /// <summary>The whole rest table as it was, so undo is one assignment rather than a replay.</summary>
         public required Matrix4x4[] Before { get; init; }
@@ -44,6 +48,46 @@ public static class BonePosePush
     public static Result? TryApply(IFrameNode node, SkeletonObjectPayload rig)
     {
         ArgumentNullException.ThrowIfNull(rig);
+        if (node is ICompiledMeshSource compiled
+            && compiled.CanonicalFrame is CompiledSceneDocument.CompiledFrameNode frame
+            && frame.VehicleRig is { } nativeRig)
+        {
+            var original = nativeRig.LiveRest.ToArray();
+            var inverseBind = Matrix4x4.Identity;
+            if (compiled.GeometryBinding?.GeometryBind is { } geometryBind
+                && !Matrix4x4.Invert(geometryBind, out inverseBind))
+                throw new InvalidDataException("Compiled visual geometry bind is singular.");
+            var desired = (Matrix4x4[])original.Clone();
+            var changed = new List<string>();
+            var unmatched = new List<string>();
+            for (int i = 0; i < Math.Min(rig.BoneNames.Length, rig.BoneRest.Length); i++)
+            {
+                int target = nativeRig.Find(rig.BoneNames[i]);
+                if (target < 0) { unmatched.Add(rig.BoneNames[i]); continue; }
+                var incoming = Affine(rig.BoneRest[i]) * inverseBind;
+                if (Same(original[target], incoming)) continue;
+                if (!Matrix4x4.Invert(incoming, out _) || !Finite(incoming))
+                    throw new InvalidDataException("A pushed bone transform must be finite and invertible.");
+                desired[target] = incoming; changed.Add(rig.BoneNames[i]);
+            }
+            var localBefore = Enumerable.Range(0, nativeRig.Count).Select(i => nativeRig.BoneSource(i).LocalTransform).ToArray();
+            var localAfter = (Matrix4x4[])localBefore.Clone();
+            for (int i = 0; i < localAfter.Length; i++)
+            {
+                int parent = nativeRig.Parent(i);
+                if (Same(original[i], desired[i]) && (parent < 0 || Same(original[parent], desired[parent]))) continue;
+                localAfter[i] = desired[i];
+                if (parent >= 0)
+                {
+                    if (!Matrix4x4.Invert(desired[parent], out var inverse))
+                        throw new InvalidDataException("Pushed parent bone transform is singular.");
+                    localAfter[i] *= inverse;
+                }
+            }
+            return new Result { CompiledRig = nativeRig, CompiledBeforeLocal = localBefore, CompiledAfterLocal = localAfter,
+                Before = original, After = desired,
+                Moved = changed, Unknown = unmatched };
+        }
         if (node is not FrameNodeAdapter adapter || adapter.Frame is not FrameObjectModel model) return null;
         if (model.RestTransform is not { Length: > 0 } rest) return null;
 
@@ -92,6 +136,15 @@ public static class BonePosePush
     {
         ArgumentNullException.ThrowIfNull(result);
         Matrix4x4[] source = undo ? result.Before : result.After;
+        if (result.CompiledRig is { } compiled)
+        {
+            var locals = (undo ? result.CompiledBeforeLocal : result.CompiledAfterLocal)
+                ?? throw new InvalidDataException("Missing compiled bone pose snapshot.");
+            for (int i = 0; i < locals.Length; i++)
+                if (compiled.BoneSource(i).LocalTransform != locals[i]) compiled.BoneSource(i).LocalTransform = locals[i];
+            return;
+        }
+        if (result.Model is null) return;
         Matrix4x4[] rest = result.Model.RestTransform;
         if (rest.Length != source.Length) return;
 
@@ -102,6 +155,10 @@ public static class BonePosePush
             a.Attachment?.SetWorldTransform();
         }
     }
+
+    private static bool Finite(Matrix4x4 matrix) => new[] { matrix.M11, matrix.M12, matrix.M13,
+        matrix.M21, matrix.M22, matrix.M23, matrix.M31, matrix.M32, matrix.M33,
+        matrix.M41, matrix.M42, matrix.M43 }.All(float.IsFinite);
 
     /// <summary>
     /// Brings the skeleton's joint transforms back in step with the rest table. The pose is stored twice —

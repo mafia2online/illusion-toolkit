@@ -11,6 +11,7 @@ namespace Illusion;
 
 public partial class App : Application
 {
+    public static bool BackgroundLaunch => Environment.GetEnvironmentVariable("ILLUSION_BACKGROUND") == "1";
     /// <summary>
     /// The MCP server, shared by every window. It belongs to the application rather than to a window
     /// because there is no single main window: the launcher and the editor replace one another as the
@@ -28,6 +29,13 @@ public partial class App : Application
         // "0,34" and fail to repack). UI culture is left alone; this only pins number/date formatting.
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+
+        // Native Havok queries run only in this isolated child process, before UI/MCP/game setup.
+        if (e.Args is ["--native-nav-cook"])
+        {
+            Shutdown(NativeCookHost.Program.Run());
+            return;
+        }
 
         // Headless probes (--probe-*): diagnose load chains without UI,
         // reports are written to %TEMP%\illusion_*.txt.

@@ -94,11 +94,13 @@ public static class MafiaMaterials
         // unknown black instead of leaving it on the white placeholder it has always had.
         if (mat == null) return new MaterialTextures(null, null, null);
 
-        string? diffuse = Clean(mat.GetTextureByID("S000"));   // S000 = diffuse/albedo
+        bool compiled = MafiaEnvironment.Profile == Illusion.Formats.GameProfile.MafiaIII;
+        bool water = compiled && Compiled.CompiledSurfaceMaterials.IsWaterDefinition(materialHash);
+        string? diffuse = Clean(mat.GetTextureByID(compiled ? water ? "T031" : "T000" : "S000"));
         return new MaterialTextures(
             diffuse,
-            Clean(mat.GetTextureByID("S001")),                 // S001 = tangent-space normal map
-            Clean(mat.GetTextureByID("S002")),                 // S002 = specular-level map
+            Clean(mat.GetTextureByID(compiled ? water ? "T003" : "T001" : "S001")),                 // S001 = tangent-space normal map
+            Clean(mat.GetTextureByID(compiled ? "T002" : "S002")),                 // S002 = specular-level map
             diffuse == null ? PaintColour(mat) : Vector4.One,
             (mat.Flags & MaterialFlags.Disable_ZWriting) != 0);
     }
@@ -185,6 +187,7 @@ public static class MafiaMaterials
     {
         if (mat is Material_v57 v57) foreach (MaterialSampler_v57 s in v57.Samplers) yield return s;
         else if (mat is Material_v58 v58) foreach (MaterialSampler_v58 s in v58.Samplers) yield return s;
+        else if (mat is Material_v63 v63) foreach (IMaterialSampler s in v63.Bindings) yield return s;
     }
 
     private static string? Clean2(string? name) =>

@@ -27,7 +27,7 @@ public static partial class CarCloner
             return null;
         }
 
-        string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        string sds = MafiaEnvironment.ArchiveFolder;
         string sourceStem = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
         string targetStem = Path.GetFileNameWithoutExtension(target).ToLowerInvariant();
         if (sourceStem == targetStem)

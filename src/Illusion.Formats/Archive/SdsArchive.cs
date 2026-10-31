@@ -7,7 +7,7 @@ using Illusion.Formats.IO;
 namespace Illusion.Formats.Archive;
 
 /// <summary>
-/// A Mafia II / Mafia II DE SDS archive (version 19): the resource-type table, the resource entries
+/// A PC Mafia II / Mafia II DE (version 19) or Mafia III (version 20) SDS archive: the resource-type table, the resource entries
 /// (decompressed), and the ResourceInfo XML trailer. <see cref="Open"/>/<see cref="Load"/> read,
 /// <see cref="Save"/> writes, <see cref="Extract"/> unpacks to a folder with an SDSContent.xml manifest,
 /// and <see cref="Pack"/> rebuilds an archive from such a folder. Replaces the vendored ArchiveFile
@@ -23,6 +23,7 @@ public sealed class SdsArchive
 
     public Endian Endian { get; set; } = Endian.Little;
     public uint Version { get; set; } = 19;
+    public uint Flags { get; set; } = 1;
     public Platform Platform { get; set; } = Platform.PC;
     public uint SlotRamRequired { get; set; }
     public uint SlotVramRequired { get; set; }
@@ -40,7 +41,8 @@ public sealed class SdsArchive
     /// Console big-endian archives are not supported (the toolkit is PC-only).</summary>
     public static SdsArchive Open(string path)
     {
-        return Native.Archive.NativeSds.Load(File.ReadAllBytes(path));
+        using var input = File.OpenRead(path);
+        return Load(input);
     }
 
     /// <summary>Reads an (unwrapped) archive stream into memory, decompressing every entry.</summary>
@@ -48,7 +50,12 @@ public sealed class SdsArchive
     {
         byte[] remaining = new byte[input.Length - input.Position];
         input.ReadExactly(remaining);
-        return Native.Archive.NativeSds.Load(remaining);
+        byte[] bytes = remaining.Length >= 4 && System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(remaining) == Signature
+            ? remaining
+            : Native.Archive.NativeSds.Unwrap(remaining);
+        return bytes.Length >= 8 && System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4)) == 20
+            ? SdsV20.Load(bytes)
+            : Native.Archive.NativeSds.Load(bytes);
     }
 
     // ── Writing ──
@@ -60,6 +67,11 @@ public sealed class SdsArchive
         if (Endian != Endian.Little)
         {
             throw new NotSupportedException("console (big-endian) archives are not supported — the toolkit is PC-only");
+        }
+        if (Version == 20)
+        {
+            SdsV20.Save(this, output, options);
+            return;
         }
         byte[] bytes = Native.Archive.NativeSds.Save(this, options);
         output.Write(bytes, 0, bytes.Length);
@@ -74,6 +86,11 @@ public sealed class SdsArchive
     /// </summary>
     public void Extract(string targetFolder)
     {
+        if (Version == 20)
+        {
+            SdsV20Folder.Extract(this, targetFolder);
+            return;
+        }
         Directory.CreateDirectory(targetFolder);
         List<string> names = ResolveEntryNames();
 
@@ -132,6 +149,18 @@ public sealed class SdsArchive
     /// </summary>
     public List<string> ResolveEntryNames()
     {
+        if (Version == 20)
+        {
+            var resolved = new List<string>(Entries.Count);
+            for (int i = 0; i < Entries.Count; i++)
+            {
+                var entry = Entries[i];
+                string type = ResourceTypes[entry.TypeId].Name;
+                string extension = SdsV20Folder.Layout(type, entry.Data ?? []).Extension;
+                resolved.Add(SdsV20Folder.EntryFileName(type, i, entry.FileHash, extension));
+            }
+            return resolved;
+        }
         XPathDocument? doc = null;
         if (!string.IsNullOrEmpty(ResourceInfoXml))
         {
@@ -239,6 +268,12 @@ public sealed class SdsArchive
         {
             throw new ResourcePackException($"SDSContent.xml not found in '{extractedFolder}'");
         }
+
+        if (System.Xml.Linq.XElement.Load(manifestPath).Attribute("ArchiveVersion")?.Value == "20")
+            return SdsV20Folder.Pack(extractedFolder);
+
+        if (profile.ArchiveVersion == 20)
+            throw new ResourcePackException("A Mafia III archive requires a version-20 extraction manifest; re-extract the original archive.");
 
         XPathDocument manifest;
         using (FileStream stream = File.OpenRead(manifestPath))

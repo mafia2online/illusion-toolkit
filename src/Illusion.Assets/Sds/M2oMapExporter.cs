@@ -61,7 +61,7 @@ public static class M2oMapExporter
         ArgumentNullException.ThrowIfNull(pending);
         var found = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (FileInfo archive in pending) found.TryAdd(archive.FullName, archive);
-        string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        string sds = MafiaEnvironment.ArchiveFolder;
         if (Directory.Exists(sds))
         {
             foreach (string file in Directory.EnumerateFiles(sds, "*.sds", SearchOption.AllDirectories))

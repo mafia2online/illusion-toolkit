@@ -87,6 +87,24 @@ internal static class BridgeProbes
             Check("quantization meta round-trips",
                 back.DecompressionFactor == mesh.DecompressionFactor && back.DecompressionOffset == mesh.DecompressionOffset
                 && back.VertexDeclaration == mesh.VertexDeclaration);
+            Check("legacy mesh has no optional native attributes", back.LoopColors.Length == 0 && back.ExtraLoopUvs.Count == 0);
+
+            var attributed = SyntheticMesh();
+            attributed.LoopColors = attributed.LoopVertexIndices.Select((_, i) => new Vector4(i / 8f, .25f, .75f, 1)).ToArray();
+            attributed.ExtraLoopUvs[1] = attributed.LoopUvs.Select(uv => uv + new Vector2(.125f, .25f)).ToArray();
+            attributed.ExtraLoopUvs[3] = attributed.LoopUvs.Select(uv => uv * .5f).ToArray();
+            var extra = new ExchangeContainer(); MeshPayloadCodec.Add(extra, attributed);
+            ExchangeWriter.Write(file, extra);
+            var extraRead = ExchangeReader.Read(file);
+            var restored = MeshPayloadCodec.Read(extraRead, extraRead.Objects.Single());
+            Check("optional linear corner colors round-trip", SequenceEqual(attributed.LoopColors, restored.LoopColors));
+            Check("additional native UV sets round-trip", restored.ExtraLoopUvs.Count == 2
+                && SequenceEqual(attributed.ExtraLoopUvs[1], restored.ExtraLoopUvs[1])
+                && SequenceEqual(attributed.ExtraLoopUvs[3], restored.ExtraLoopUvs[3]));
+            extraRead.Objects[0].Arrays.Remove(ExchangeSchema.ArrayLoopColor0);
+            extraRead.Objects[0].Arrays.Remove("loopUv1"); extraRead.Objects[0].Arrays.Remove("loopUv3");
+            var legacyPush = MeshPayloadCodec.Read(extraRead, extraRead.Objects.Single());
+            Check("older peer may omit optional arrays", legacyPush.LoopColors.Length == 0 && legacyPush.ExtraLoopUvs.Count == 0);
 
             // A newer major version must be rejected, not misread.
             byte[] bytes = File.ReadAllBytes(file);

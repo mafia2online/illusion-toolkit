@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Sds;
 using Illusion.Bridge.Geometry;
 using Illusion.Bridge.Payload;
@@ -28,6 +29,13 @@ public static class BridgeMeshExporter
         int lod = 0)
     {
         skipReason = null;
+
+        if (node is ICompiledMeshSource compiled)
+        {
+            if (compiled.GeometryBinding is { } binding) return binding.Export(document, lod, out skipReason);
+            skipReason = "Compiled frames with multiple or unresolved visuals cannot yet be edited through Blender.";
+            return null;
+        }
 
         if (node is not FrameNodeAdapter adapter)
         {
@@ -157,6 +165,18 @@ public static class BridgeMeshExporter
     /// </summary>
     public static SkeletonObjectPayload? TryExportSkeleton(IFrameNode node, ISceneDocument document)
     {
+        if (node is ICompiledMeshSource compiled
+            && compiled.CanonicalFrame is CompiledSceneDocument.CompiledFrameNode frame
+            && frame.VehicleRig is { } nativeRig)
+            return new SkeletonObjectPayload
+            {
+                Id = compiled.GeometryBinding?.SkeletonIdentity ?? CompiledSkeletonId(frame, document), Name = frame.Name,
+                World = frame.WorldTransform,
+                BoneNames = Enumerable.Range(0, nativeRig.Count).Select(nativeRig.Name).ToArray(),
+                BoneParents = Enumerable.Range(0, nativeRig.Count).Select(nativeRig.Parent).ToArray(),
+                BoneRest = Enumerable.Range(0, nativeRig.Count).Select(i => nativeRig.ModelRest(i)
+                    * (compiled.GeometryBinding?.GeometryBind ?? Matrix4x4.Identity)).ToArray()
+            };
         if (node is not FrameNodeAdapter adapter || adapter.Frame is not FrameObjectModel model) return null;
 
         HashName[] names;
@@ -193,6 +213,9 @@ public static class BridgeMeshExporter
             BoneRest = [.. rest.Take(count)],
         };
     }
+
+    public static string CompiledSkeletonId(IFrameNode frame, ISceneDocument document) =>
+        $"m3:{document.SourceArchive.FullName}:{((ICompiledMeshSource)frame).SceneIdentity}:rig";
 
     /// <summary>
     /// The skinned model's bone ids resolved to its own bone list — on the wire they index a per-LOD remap
@@ -345,7 +368,7 @@ public static class BridgeMeshExporter
         {
             foreach (string ground in new[] { "ground_leto", "ground_zima" })
             {
-                string sds = Path.Combine(MafiaEnvironment.PcFolder, "sds", "ground", ground + ".sds");
+                string sds = Path.Combine(MafiaEnvironment.ArchiveFolder, "ground", ground + ".sds");
                 if (File.Exists(sds)) dirs.Add(SdsMeshLoader.EnsureExtracted(new FileInfo(sds)));
             }
         }

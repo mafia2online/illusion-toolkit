@@ -32,6 +32,8 @@
     <ProjectReference Include="..\Illusion.Assets\Illusion.Assets.csproj" />
     <ProjectReference Include="..\Illusion.Bridge\Illusion.Bridge.csproj" />
     <ProjectReference Include="..\Illusion.Mcp\Illusion.Mcp.csproj" />
+    <!-- Invoked only by the isolated native navigation child-process startup path. -->
+    <ProjectReference Include="..\Illusion.NativeCookHost\Illusion.NativeCookHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

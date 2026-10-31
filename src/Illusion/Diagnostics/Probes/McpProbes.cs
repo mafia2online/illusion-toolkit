@@ -55,7 +55,8 @@ internal static class McpProbes
         "editor_status", "editor_list_areas", "editor_open_area", "scene_find", "scene_select",
         "blender_open", "blender_push", "blender_end", "editor_notices", "editor_save", "editor_build",
         "camera_get", "camera_look_at", "camera_set", "camera_frame_selection", "view_set",
-        "viewport_screenshot", "object_move", "scene_delete_selected", "scene_duplicate_selected",
+        "viewport_screenshot", "object_move", "scene_reparent", "scene_delete_selected", "scene_duplicate_selected",
+        "scene_create_group", "collision_mesh", "collision_recook", "collision_remove", "material_parameter", "world_collision_meshes", "world_collision_mesh", "world_collision_recook", "navigation_translate", "navigation_deform", "mesh_make_unique", "collision_add", "animation_open", "animation_screenshot",
         "actor_import", "object_properties", "object_set_property", "editor_undo", "editor_redo",
         "editor_mirror_winter",
         "object_import",
@@ -267,7 +268,56 @@ internal static class McpProbes
             return;
         }
 
-        string sdsRoot = Path.Combine(MafiaEnvironment.PcFolder, "sds");
+        if (MafiaEnvironment.Profile.ArchiveVersion == 20)
+        {
+            foreach (string file in Illusion.Assets.Sds.ResourceUnpacker.EnumerateGameSds().Select(archive => archive.FullName))
+            {
+                JsonElement archive = await CallAsync(client, "open_sds_file", new Dictionary<string, object?> { ["filePath"] = file }).ConfigureAwait(false);
+                check(Path.GetFileName(file) + " MCP opens version 20", archive.GetProperty("success").GetBoolean() && archive.GetProperty("version").GetInt32() == 20);
+                var expected = Illusion.Formats.Archive.SdsArchive.Open(file);
+                if (expected.Entries.Count == 0) continue;
+                JsonElement info = await CallAsync(client, "get_resource_info", new Dictionary<string, object?> { ["filePath"] = file, ["resourceIndex"] = 0 }).ConfigureAwait(false);
+                check("MCP preserves resource identifier", info.GetProperty("resource").GetProperty("fileHash").GetUInt64() == expected.Entries[0].FileHash);
+                JsonElement payload = await CallAsync(client, "extract_resource", new Dictionary<string, object?> { ["filePath"] = file, ["resourceIndex"] = 0, ["maxBytes"] = 16 }).ConfigureAwait(false);
+                check("MCP extracts exact bytes", Convert.FromBase64String(payload.GetProperty("base64Data").GetString()!).SequenceEqual(expected.Entries[0].Data!.Take(16)));
+                int compiledIndex = expected.Entries.FindIndex(e => expected.ResourceTypes[e.TypeId].Name == "Generic");
+                if (compiledIndex >= 0)
+                {
+                    JsonElement compiled = await CallAsync(client, "decode_resource", new Dictionary<string, object?>
+                    { ["sdsPath"] = file, ["resourceIndex"] = compiledIndex, ["limit"] = 3 }).ConfigureAwait(false);
+                    check("MCP decodes GENR reflection", compiled.GetProperty("success").GetBoolean()
+                        && compiled.GetProperty("decoded").GetProperty("format").GetString() == "GENR", compiled.ToString());
+                }
+                int textureIndex = expected.Entries.FindIndex(e => expected.ResourceTypes[e.TypeId].Name == "Texture");
+                int gearboxIndex = expected.Entries.FindIndex(e => expected.ResourceTypes[e.TypeId].Name == "SystemObjectDatabase"
+                    && Illusion.Formats.Compiled.CompiledGearboxTable.TryRead(e.Data ?? []) is not null);
+                if (gearboxIndex >= 0)
+                {
+                    JsonElement gearbox = await CallAsync(client, "decode_resource", new Dictionary<string, object?>
+                    { ["sdsPath"] = file, ["resourceIndex"] = gearboxIndex, ["limit"] = 2 }).ConfigureAwait(false);
+                    check("MCP decodes native gearbox database", gearbox.GetProperty("success").GetBoolean()
+                        && gearbox.GetProperty("decoded").GetProperty("format").GetString() == "CarGearboxes"
+                        && gearbox.GetProperty("decoded").GetProperty("rows").GetArrayLength() <= 2, gearbox.ToString());
+                }
+                int tuningIndex = expected.Entries.FindIndex(e => expected.ResourceTypes[e.TypeId].Name == "SystemObjectDatabase"
+                    && Illusion.Formats.Compiled.CompiledCarTuningTable.TryRead(e.Data ?? []) is not null);
+                if (tuningIndex >= 0)
+                {
+                    JsonElement tuning = await CallAsync(client, "decode_resource", new Dictionary<string, object?>
+                    { ["sdsPath"] = file, ["resourceIndex"] = tuningIndex, ["limit"] = 2 }).ConfigureAwait(false);
+                    check("MCP decodes native vehicle tuning database", tuning.GetProperty("success").GetBoolean()
+                        && tuning.GetProperty("decoded").GetProperty("format").GetString() == "CarTuningItems"
+                        && tuning.GetProperty("decoded").GetProperty("rows").GetArrayLength() <= 2, tuning.ToString());
+                }
+                if (textureIndex >= 0)
+                {
+                    JsonElement texture = await CallAsync(client, "inspect_sds_texture", new Dictionary<string, object?> { ["sdsPath"] = file, ["resourceIndex"] = textureIndex }).ConfigureAwait(false);
+                    check("MCP reads Mafia III texture metadata", texture.GetProperty("success").GetBoolean(), texture.ToString());
+                }
+            }
+            return;
+        }
+        string sdsRoot = MafiaEnvironment.ArchiveFolder;
         string tablesSds = Path.Combine(sdsRoot, "tables", "tables.sds");
 
         JsonElement listed = await CallAsync(client, "list_sds_files",

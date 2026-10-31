@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        if (App.BackgroundLaunch) { ShowActivated = false; WindowState = WindowState.Normal; }
+        Mafia3AuthoringItem.Visibility = MafiaEnvironment.Profile.ArchiveVersion == 20 ? Visibility.Visible : Visibility.Collapsed;
 
         // The window opens maximized; this is about the size it restores to, which must fit the desktop too.
         WindowFit.ToWorkArea(this);
@@ -104,6 +106,13 @@ public partial class MainWindow : Window
 
         // Multiplayer is only available when the M2Online launcher is present in the game folder.
         MultiplayerBtn.IsEnabled = GameLauncher.HasMultiplayer;
+        PlayBtn.ToolTip = GameLauncher.PlayTooltip;
+        if (MafiaEnvironment.Profile.ArchiveVersion == 20)
+        {
+            WinterToggle.Visibility = Visibility.Collapsed;
+            LayersBtn.Visibility = Visibility.Collapsed;
+            Scene.HideCityFilters();
+        }
 
         UpdateBridgeUi(); // initial chrome state (no session, nothing selected → Blender button disabled)
 
@@ -561,7 +570,7 @@ public partial class MainWindow : Window
 
         // A card that comes from the district itself cannot be carried into it — it is already there. A copy
         // of it, made in place and moved to where the card was dropped, is what the drop asked for.
-        var source = new FileInfo(Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", entry.Archive));
+        var source = new FileInfo(Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, entry.Archive));
         if (string.Equals(source.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
         {
             DuplicatePropInPlace(entry, position);
@@ -574,7 +583,8 @@ public partial class MainWindow : Window
         try
         {
             if (Viewport.ObjectImporting.Import(destination, entry.Archive, entry.Name, name, position, null,
-                    out _, PropsPanel.Collision) is { } refused)
+                    out _, PropsPanel.Collision, under: entry.Compiled is null ? null :
+                        Viewport.Selection.Selected.FirstOrDefault(n => n.Source is Domain.IFrameNode)) is { } refused)
             {
                 Viewport.RaiseNotice($"{entry.Label} not placed — {refused}", isError: true);
             }

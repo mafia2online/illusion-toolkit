@@ -243,6 +243,9 @@ def _schedule_auto_push():
 
 
 def _discovery_path():
+    override = os.environ.get("ILLUSION_BRIDGE_DIR")
+    if override:
+        return os.path.join(os.path.abspath(override), "bridge.json")
     base = os.environ.get("APPDATA") or os.path.join(
         os.path.expanduser("~"), "AppData", "Roaming")
     return os.path.join(base, "Illusion", "bridge.json")

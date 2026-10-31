@@ -318,13 +318,15 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     private void SetBackBuffer(nint surface)
     {
         _image.Lock();
-        _image.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface);
+        // WPF also composites through software surfaces during remote sessions and window capture.
+        // Retain the shared surface there instead of silently displaying an empty image.
+        _image.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface, enableSoftwareFallback: true);
         _image.Unlock();
     }
 
     private void OnRendering(object? sender, EventArgs e)
     {
-        if (Renderer == null || _surface == null || !_image.IsFrontBufferAvailable) return;
+        if (Renderer == null || _surface == null) return;
 
         // Catch the surface up with the size layout last asked for — once per frame, whatever the drag did.
         _surface.Commit(SetBackBuffer);

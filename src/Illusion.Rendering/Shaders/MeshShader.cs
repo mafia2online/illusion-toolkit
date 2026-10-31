@@ -38,13 +38,14 @@ cbuffer CB : register(b0)
     float4   BaseColor;
     float4   Tint;" + ShaderCompiler.LightingCbufferTail + @"
 };
-struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 tan : TANGENT; float3 bin : BINORMAL; };" + ShaderCompiler.PsInStruct + @"
+struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 tan : TANGENT; float3 bin : BINORMAL; float4 color : COLOR; };" + ShaderCompiler.PsInStruct + @"
 PSIn VSMain(VSIn i)
 {
     PSIn o;
     o.pos  = mul(WVP, float4(i.pos, 1.0));
     o.nrm  = mul((float3x3)World, i.nrm);
     o.uv   = i.uv;
+    o.color = i.color;
     o.wpos = mul(World, float4(i.pos, 1.0)).xyz;                   // world position for the specular view vector
     o.tan  = mul((float3x3)World, i.tan);                          // tangent frame → world for normal mapping
     o.bin  = mul((float3x3)World, i.bin);
@@ -64,21 +65,24 @@ PSIn VSMain(VSIn i)
         byte* uvName = (byte*)SilkMarshal.StringToPtr("TEXCOORD");
         byte* tanName = (byte*)SilkMarshal.StringToPtr("TANGENT");
         byte* binName = (byte*)SilkMarshal.StringToPtr("BINORMAL");
-        var elems = stackalloc InputElementDesc[5];
+        byte* colorName = (byte*)SilkMarshal.StringToPtr("COLOR");
+        var elems = stackalloc InputElementDesc[6];
         elems[0] = ShaderCompiler.VertexElement(posName, 0, Format.FormatR32G32B32Float, 0);
         elems[1] = ShaderCompiler.VertexElement(nrmName, 0, Format.FormatR32G32B32Float, 12);
         elems[2] = ShaderCompiler.VertexElement(uvName, 0, Format.FormatR32G32Float, 24);
         elems[3] = ShaderCompiler.VertexElement(tanName, 0, Format.FormatR32G32B32Float, 32);
         elems[4] = ShaderCompiler.VertexElement(binName, 0, Format.FormatR32G32B32Float, 44);
+        elems[5] = ShaderCompiler.VertexElement(colorName, 0, Format.FormatR32G32B32A32Float, 0); elems[5].InputSlot = 2;
         ID3D11InputLayout* layout = null;
         SilkMarshal.ThrowHResult(gpu.Device11.CreateInputLayout(
-            elems, 5, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
+            elems, 6, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
         _layout = layout;
         SilkMarshal.Free((nint)posName);
         SilkMarshal.Free((nint)nrmName);
         SilkMarshal.Free((nint)uvName);
         SilkMarshal.Free((nint)tanName);
         SilkMarshal.Free((nint)binName);
+        SilkMarshal.Free((nint)colorName);
 
         vsCode.Dispose();
         psCode.Dispose();

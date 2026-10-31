@@ -49,6 +49,12 @@ public partial class PropsTabView : UserControl
     public PropsTabView()
     {
         InitializeComponent();
+        if (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII)
+        {
+            CollisionBox.SelectedIndex = 4;
+            CollisionBox.IsEnabled = false;
+            CollisionBox.ToolTip = "Mafia III props retain their native physics; no extra collision is generated. Select the destination kit before placing.";
+        }
         CategoryBox.Items.Add(AllShelves);
         foreach ((string name, _) in PropCatalog.Categories) CategoryBox.Items.Add(name);
         CategoryBox.Items.Add("Other");
@@ -140,7 +146,10 @@ public partial class PropsTabView : UserControl
         ShowAnotherPage();
         if (_loaded)
         {
-            Status.Text = $"{shown.Count} of {_all.Count} objects · drag one onto the viewport, or double-click it";
+            Status.Text = $"{shown.Count} of {_all.Count} objects · " +
+                (Assets.MafiaEnvironment.Profile.Variant == Formats.GameVariant.MafiaIII
+                    ? "select a destination kit, then place a prop (native physics retained)"
+                    : "drag one onto the viewport, or double-click it");
         }
         if (shown.Count > 0) _pictures.Start();
     }

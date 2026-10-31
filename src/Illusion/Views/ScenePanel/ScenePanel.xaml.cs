@@ -224,9 +224,12 @@ public partial class ScenePanel : UserControl
 
     /// <inheritdoc cref="RenderTabView.HideCityFilters"/>
     public void HideCityFilters() => Tabs.RenderFilters.HideCityFilters();
+    public void SetNavigationOverlay(bool on) => Tabs.RenderFilters.SetNavigationOverlay(on);
 
     /// <inheritdoc cref="RenderTabView.SetSnowFilter"/>
     public void SetSnowFilter(bool on) => Tabs.RenderFilters.SetSnowFilter(on);
+
+    public void SetCollisionOverlay(bool on) => Tabs.RenderFilters.SetCollisionOverlay(on);
 
     // ── Components ⇄ Raw ──
 

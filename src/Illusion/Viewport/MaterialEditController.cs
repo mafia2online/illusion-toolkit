@@ -263,7 +263,7 @@ internal sealed class MaterialEditController
     /// undo path (<see cref="ApplySlot"/>) and ImportBatch already apply.</summary>
     public bool AssignSlotMaterial(SceneNode node, int slotIndex, ulong newHash)
     {
-        if (node.Source is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return false;
+        if ((node.GeometrySource ?? node.Source) is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return false;
         if (SlotAssignObstacle(node) != null) return false;
         ulong? before = editor.GetSlotMaterial(slotIndex);
         if (before == null) return false;
@@ -284,6 +284,9 @@ internal sealed class MaterialEditController
     /// </summary>
     public string? SlotAssignObstacle(SceneNode node)
     {
+        if ((node.GeometrySource ?? node.Source) is Assets.Compiled.ICompiledMeshSource && (node.GeometrySource ?? node.Source) is IMaterialSlotEditor compiled
+            && compiled.GetSlotTable().Count == 0)
+            return "Select an independent compiled visual with supported face groups.";
         if (node.Source is not Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectSingleMesh mesh } adapter
             || adapter.Document.MaterialSharers(mesh) is not { Count: > 0 } sharers)
         {
@@ -296,7 +299,7 @@ internal sealed class MaterialEditController
 
     private void ApplySlot(SceneNode node, int slotIndex, ulong hash, IReadOnlyList<ulong[]> table)
     {
-        if (node.Source is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return;
+        if ((node.GeometrySource ?? node.Source) is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return;
         if (editor.SetSlotTable(table) || editor.SetSlotMaterial(slotIndex, hash)) AfterSlotChanged(node, slotIndex, hash);
     }
 
@@ -324,25 +327,85 @@ internal sealed class MaterialEditController
     private void AfterSlotChanged(SceneNode node, int slotIndex, ulong hash)
     {
         _host.Persistence.MarkFrameModified(node);
-        if (node.Mesh is { } gm)
+        var materialSource = node.GeometrySource ?? node.Source;
+        if (materialSource is Assets.Compiled.ICompiledMeshSource && materialSource is IMaterialSlotEditor compiled && _host.Rnd is { } renderer)
         {
-            MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
-            gm.SetPartMaterial(slotIndex, hash, tex.Diffuse, tex.Normal, tex.Specular, tex.Tint, tex.Blended);
+            var table = compiled.GetSlotTable();
+            void RefreshPending(SceneNode row)
+            {
+                if (ReferenceEquals(row.GeometrySource ?? row.Source, materialSource) && row.Pending is { } pending && table.Count > 0)
+                {
+                    var hashes = table[Math.Clamp(row.Lod, 0, table.Count - 1)];
+                    for (int slot = 0; slot < Math.Min(hashes.Length, pending.Parts.Length); slot++)
+                    {
+                        var part = pending.Parts[slot];
+                        pending.Parts[slot] = Appearance(hashes[slot], row, pending.Colors is not null, part.StartIndex, part.IndexCount);
+                    }
+                }
+                foreach (SceneNode child in row.Children) RefreshPending(child);
+            }
+            if (node.OwningDocumentNode() is { } document) RefreshPending(document);
+            foreach (GpuMesh mesh in renderer.Meshes)
+                if (mesh.Owner is SceneNode owner && ReferenceEquals(owner.GeometrySource ?? owner.Source, materialSource) && table.Count > 0)
+                {
+                    var hashes = table[Math.Clamp(owner.Lod, 0, table.Count - 1)];
+                    for (int slot = 0; slot < hashes.Length; slot++)
+                    {
+                        var appearance = Appearance(hashes[slot], owner, mesh.HasVertexColors);
+                        mesh.SetPartMaterial(slot, hashes[slot], appearance.DiffuseTexture, appearance.NormalTexture,
+                            appearance.SpecularTexture, appearance.Tint, appearance.Blended, appearance.Surface);
+                    }
+                }
+        }
+        else if (node.Mesh is { } gm)
+        {
+            var appearance = Appearance(hash, node, gm.HasVertexColors);
+            gm.SetPartMaterial(slotIndex, hash, appearance.DiffuseTexture, appearance.NormalTexture,
+                appearance.SpecularTexture, appearance.Tint, appearance.Blended, appearance.Surface);
         }
         _host.RaiseMaterialsChanged();
         _host.RaiseSelectionPropertiesChanged();
     }
 
+    private static SurfaceMaterial? Surface(ulong hash) => MafiaEnvironment.Profile == Illusion.Formats.GameProfile.MafiaIII
+        ? Assets.Compiled.CompiledSurfaceMaterials.Terrain(hash, slot =>
+        {
+            var texture = MafiaMaterials.Collection?.FindByHash(hash)?.GetTextureByID(slot);
+            return texture is null ? null : Assets.Textures.TextureSearchIndex.FindPath(texture.String) ?? texture.String;
+        }) : null;
+
+    private static MeshPart Appearance(ulong hash, SceneNode? node, bool hasColors, int start = 0, int count = 0)
+    {
+        var textures = MafiaMaterials.GetMaterialTextures(hash);
+        var part = new MeshPart(start, count, textures.Diffuse, textures.Normal, textures.Specular,
+            hash, textures.Tint, textures.Blended, Surface(hash));
+        if (node?.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document)
+            part = document.ApplyVehiclePaint(new MeshData { Parts = [part], Colors = hasColors ? [System.Numerics.Vector4.One] : null }).Parts[0];
+        return part;
+    }
+
     internal void RefreshMeshesUsing(ulong hash)
     {
         if (_host.Rnd is not { } renderer) return;
-        MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
         foreach (GpuMesh gm in renderer.Meshes)
-            gm.RebindPartTextures(hash, tex.Diffuse, tex.Normal, tex.Specular, tex.Tint, tex.Blended);
+        {
+            var appearance = Appearance(hash, gm.Owner as SceneNode, gm.HasVertexColors);
+            gm.RebindPartTextures(hash, appearance.DiffuseTexture, appearance.NormalTexture,
+                appearance.SpecularTexture, appearance.Tint, appearance.Blended, appearance.Surface);
+        }
+        void RefreshPending(SceneNode row)
+        {
+            if (row.Pending is { } pending)
+                for (int i = 0; i < pending.Parts.Length; i++)
+                    if (pending.Parts[i].MaterialHash == hash)
+                    {
+                        var part = pending.Parts[i];
+                        pending.Parts[i] = Appearance(hash, row, pending.Colors is not null, part.StartIndex, part.IndexCount);
+                    }
+            foreach (var child in row.Children) RefreshPending(child);
+        }
+        foreach (var row in _host.Roots.Concat(_host.StageRoots).Distinct()) RefreshPending(row);
     }
-
-    // ── Edits ──
-    // MTL edits are library-global: NOT INodeEdit, so streaming a district out never prunes them.
 
     private sealed class TextureEdit : IEditAction
     {

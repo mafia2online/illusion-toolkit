@@ -20,7 +20,15 @@ public partial class RenderTabView : UserControl
     public RenderTabView() => InitializeComponent();
 
     /// <summary>Points the tab at the viewport its switches drive. Called once, from the scene panel.</summary>
-    public void Attach(D3DImageHost viewport) => _viewport = viewport;
+    public void Attach(D3DImageHost viewport)
+    {
+        _viewport = viewport;
+        CompiledNavigationRow.Visibility = Assets.MafiaEnvironment.Profile.ArchiveVersion == 20 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public void SetNavigationOverlay(bool on) => CompiledNavigationToggle.IsChecked = on;
+    private void CompiledNavigation_Changed(object sender, RoutedEventArgs e)
+    { if (_viewport is not null) _viewport.ShowCompiledNavigation = CompiledNavigationToggle.IsChecked == true; }
 
     /// <summary>
     /// Hides the filters that only mean something in a city district. A resource on a stage has no
@@ -37,6 +45,8 @@ public partial class RenderTabView : UserControl
     /// <summary>Drives the snow filter from the host's winter selector: winter geometry lives in its own
     /// scene folder, and showing it in summer is never what anyone wants. The switch stays interactive.</summary>
     public void SetSnowFilter(bool on) => SnowScenesToggle.IsChecked = on;
+
+    public void SetCollisionOverlay(bool on) => PartShapesToggle.IsChecked = on;
 
     /// <summary>
     /// The collision overlay, on this tab rather than behind the Layers button. It draws the whole car's

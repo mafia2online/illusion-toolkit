@@ -22,7 +22,7 @@ public static class ConvexHull
     /// The hull's vertices and its triangles (three indices each, wound so the normal points out). Null when
     /// the points do not span a volume — a flat or a thin object has no convex hull, only a box.
     /// </summary>
-    public static (Vector3[] Vertices, int[] Triangles)? Build(IReadOnlyList<Vector3> points)
+    public static (Vector3[] Vertices, int[] Triangles)? Build(IReadOnlyList<Vector3> points, bool simplify = true)
     {
         ArgumentNullException.ThrowIfNull(points);
         if (points.Count < 4) return null;
@@ -42,8 +42,10 @@ public static class ConvexHull
         var unique = new Dictionary<(long, long, long), V>();
         foreach (Vector3 p in points)
         {
-            var key = ((long)Math.Round(p.X / cell), (long)Math.Round(p.Y / cell), (long)Math.Round(p.Z / cell));
-            unique.TryAdd(key, new V(key.Item1 * cell, key.Item2 * cell, key.Item3 * cell));
+            var key = simplify
+                ? ((long)Math.Round(p.X / cell), (long)Math.Round(p.Y / cell), (long)Math.Round(p.Z / cell))
+                : ((long)BitConverter.SingleToInt32Bits(p.X == 0 ? 0 : p.X), (long)BitConverter.SingleToInt32Bits(p.Y == 0 ? 0 : p.Y), (long)BitConverter.SingleToInt32Bits(p.Z == 0 ? 0 : p.Z));
+            unique.TryAdd(key, simplify ? new V(key.Item1 * cell, key.Item2 * cell, key.Item3 * cell) : new V(p.X, p.Y, p.Z));
         }
         List<V> pts = [.. unique.Values];
         if (pts.Count < 4) return null;

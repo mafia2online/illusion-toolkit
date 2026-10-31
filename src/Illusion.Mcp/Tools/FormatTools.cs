@@ -22,7 +22,7 @@ public sealed class FormatTools
     /// <summary>
     /// Leading-byte signatures, longest first so that a prefix cannot shadow a longer match. Several
     /// carry a version dword right after the magic, which is read where it identifies the file
-    /// further (an SDS's 19 vs 20 decides whether this toolkit can open it at all).
+    /// further (SDS version 19 identifies Mafia II; version 20 includes Mafia III).
     /// </summary>
     private static readonly (byte[] Magic, string Format, string Description, bool VersionDword)[] Signatures =
     {

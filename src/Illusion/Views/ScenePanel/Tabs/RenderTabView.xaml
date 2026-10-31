@@ -37,6 +37,16 @@
                           Checked="PartShapes_Changed" Unchecked="PartShapes_Changed" />
         </Grid>
 
+        <Grid x:Name="CompiledNavigationRow" Margin="0,0,0,12" Visibility="Collapsed">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="AI navigation" Foreground="White" FontSize="12" />
+                <TextBlock Text="Walkmesh, waypoints and action markers" Foreground="{StaticResource TextDim}" FontSize="10.5" />
+            </StackPanel>
+            <ToggleButton Grid.Column="1" x:Name="CompiledNavigationToggle" Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                          Checked="CompiledNavigation_Changed" Unchecked="CompiledNavigation_Changed" />
+        </Grid>
+
         <TextBlock Text="Scene filters" Foreground="{StaticResource TextDim}"
                    FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
         <Border Height="1" Background="{StaticResource EdgeFaint}" Margin="0,0,0,2" />

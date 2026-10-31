@@ -48,25 +48,27 @@ public static class SdsBlockStream
     }
 
     /// <summary>Writes <paramref name="payload"/> as a block stream.</summary>
-    public static void Write(Stream output, ReadOnlySpan<byte> payload)
+    public static void Write(Stream output, ReadOnlySpan<byte> payload, int chunkSize = ChunkSize, bool compress = true, float compressionRatio = 1f)
     {
         ArgumentNullException.ThrowIfNull(output);
 
+        if (chunkSize is <= 0 or > 0x10000) throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
         output.Write(Signature, bigEndian: false);
-        output.Write((uint)ChunkSize, bigEndian: false);
+        output.Write((uint)chunkSize, bigEndian: false);
         output.WriteByte(StreamVersion);
 
-        for (var offset = 0; offset < payload.Length; offset += ChunkSize)
+        for (var offset = 0; offset < payload.Length; offset += chunkSize)
         {
-            var chunk = payload.Slice(offset, Math.Min(ChunkSize, payload.Length - offset));
+            var chunk = payload.Slice(offset, Math.Min(chunkSize, payload.Length - offset));
             var deflated = Deflate(chunk);
 
             // A chunk that does not get smaller is stored verbatim; the engine reads both forms.
-            if (deflated.Length + CompressedChunkHeaderSize < chunk.Length)
+            if (compress && deflated.Length < compressionRatio * chunk.Length && deflated.Length + CompressedChunkHeaderSize < chunk.Length && deflated.Length <= ushort.MaxValue)
             {
                 output.Write((uint)(deflated.Length + CompressedChunkHeaderSize), bigEndian: false);
                 output.WriteByte(1);
-                WriteCompressedChunkHeader(output, chunk.Length, deflated.Length);
+                WriteCompressedChunkHeader(output, chunk.Length, deflated.Length, chunkSize);
                 output.Write(deflated, 0, deflated.Length);
             }
             else
@@ -91,8 +93,9 @@ public static class SdsBlockStream
             throw new InvalidDataException("Not a UEzl block stream.");
         }
 
-        input.ReadUInt32(bigEndian: false);
-        input.ReadByte();
+        uint alignment = input.ReadUInt32(bigEndian: false);
+        if (input.ReadByte() != StreamVersion || alignment == 0 || alignment > 0x2000000)
+            throw new InvalidDataException("Invalid UEzl stream header.");
 
         using var payload = new MemoryStream();
         while (true)
@@ -115,12 +118,26 @@ public static class SdsBlockStream
                 var header = new byte[CompressedChunkHeaderSize];
                 input.ReadExactly(header);
 
-                var deflated = new byte[blockLength - CompressedChunkHeaderSize];
-                input.ReadExactly(deflated);
-
-                using var source = new MemoryStream(deflated);
-                using var inflater = new ZLibStream(source, CompressionMode.Decompress);
-                inflater.CopyTo(payload);
+                uint rawLength = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header);
+                uint headerSize = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
+                short count = System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(header.AsSpan(10));
+                if (headerSize != 32 || count < 1 || count > 8)
+                    throw new InvalidDataException("Unsupported UEzl compressed header.");
+                int compressedLength = 0;
+                long start = payload.Length;
+                for (int i = 0; i < count; i++)
+                {
+                    ushort length = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(16 + i * 2));
+                    compressedLength += length;
+                    if (compressedLength > blockLength - headerSize) throw new InvalidDataException("Invalid UEzl chunk sizes.");
+                    byte[] deflated = new byte[length];
+                    input.ReadExactly(deflated);
+                    using var source = new MemoryStream(deflated);
+                    using var inflater = new ZLibStream(source, CompressionMode.Decompress);
+                    inflater.CopyTo(payload);
+                }
+                if (compressedLength != blockLength - headerSize || payload.Length - start != rawLength)
+                    throw new InvalidDataException("UEzl decompressed length mismatch.");
             }
             else
             {
@@ -146,11 +163,12 @@ public static class SdsBlockStream
 
     // Constant apart from the two lengths in every archive and patch inspected; the engine reads the
     // raw length from it and ignores the rest, but it is reproduced so output matches shipped files.
-    private static void WriteCompressedChunkHeader(Stream output, int rawLength, int deflatedLength)
+    private static void WriteCompressedChunkHeader(Stream output, int rawLength, int deflatedLength, int chunkSize)
     {
         output.Write((uint)rawLength, bigEndian: false);
         output.Write(0x20u, bigEndian: false);
-        output.Write(0x14000u, bigEndian: false);
+        output.Write(unchecked((ushort)chunkSize), bigEndian: false);
+        output.Write((ushort)1, bigEndian: false);
         output.Write((ushort)0x0001, bigEndian: false);
         output.WriteByte(0x0F);
         output.WriteByte(0x08);

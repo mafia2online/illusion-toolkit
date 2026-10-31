@@ -91,7 +91,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel x:Name="TitleBlock" Grid.Column="0" HorizontalAlignment="Left">
                     <TextBlock Text="Illusion Toolkit" FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="Mafia II Toolkit" FontSize="12" Opacity="0.6" Margin="0,1,0,0" />
+                    <TextBlock Text="Mafia II / Mafia III resources" FontSize="12" Opacity="0.6" Margin="0,1,0,0" />
                 </StackPanel>
                 <!-- The negative right margin pulls the pair past the content inset, so they read as sitting in
                      the window's corner rather than in the text column. -->

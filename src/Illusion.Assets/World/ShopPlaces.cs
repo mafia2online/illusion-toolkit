@@ -500,7 +500,7 @@ public sealed class ShopPlaces
     private string ArchiveOf(CityShopsTable.Shop shop) =>
         _table.Areas.FirstOrDefault(a => Same(a.Archive, shop.Name))?.Archive ?? shop.Name.ToLowerInvariant();
 
-    private static FileInfo ArchiveFile(string archive) => new(Path.Combine(MafiaEnvironment.PcFolder, "sds", "shops", archive + ".sds"));
+    private static FileInfo ArchiveFile(string archive) => new(Path.Combine(MafiaEnvironment.ArchiveFolder, "shops", archive + ".sds"));
 
     private FrameResource? SceneOf(string archive)
     {

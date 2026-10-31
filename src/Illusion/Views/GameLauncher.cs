@@ -17,21 +17,25 @@ internal static class GameLauncher
         Path.Combine(MafiaEnvironment.GameRoot ?? "", "m2o", "client", "M2OLauncher.exe");
 
     /// <summary>Whether the multiplayer client is installed beside the game — the button is enabled by it.</summary>
-    public static bool HasMultiplayer => File.Exists(M2OLauncherPath);
+    public static bool HasMultiplayer => MafiaEnvironment.Profile.ArchiveVersion != 20 && File.Exists(M2OLauncherPath);
+
+    public static string PlayTooltip => MafiaEnvironment.Profile.ArchiveVersion == 20 ? "Launch Mafia III" : "Launch Mafia II";
 
     /// <summary>
-    /// Launches Mafia II. The executable isn't in a fixed spot across editions, so the usual names are probed
-    /// in <c>pc\</c> first (the Steam layout), then in the game root.
+    /// Launches the selected game using its edition's executable names.
     /// </summary>
     public static void Play(Window owner)
     {
-        string[] candidates =
-        {
+        string[] candidates = MafiaEnvironment.Profile.ArchiveVersion == 20
+        ? [Path.Combine(MafiaEnvironment.GameRoot ?? "", "mafia3definitiveedition.exe"),
+           Path.Combine(MafiaEnvironment.GameRoot ?? "", "mafia3.exe")]
+        :
+        [
             Path.Combine(MafiaEnvironment.PcFolder ?? "", "mafia2.exe"),
             Path.Combine(MafiaEnvironment.PcFolder ?? "", "launcher.exe"),
             Path.Combine(MafiaEnvironment.GameRoot ?? "", "mafia2.exe"),
             Path.Combine(MafiaEnvironment.GameRoot ?? "", "launcher.exe"),
-        };
+        ];
 
         string? exe = candidates.FirstOrDefault(File.Exists);
         if (exe == null)
@@ -40,7 +44,9 @@ internal static class GameLauncher
             {
                 Title = "Play",
                 Icon = DialogIcon.Warning,
-                Text = "Mafia II executable not found (looked for mafia2.exe / launcher.exe).",
+                Text = MafiaEnvironment.Profile.ArchiveVersion == 20
+                    ? "Mafia III executable not found (looked for mafia3definitiveedition.exe / mafia3.exe)."
+                    : "Mafia II executable not found (looked for mafia2.exe / launcher.exe).",
             });
             return;
         }

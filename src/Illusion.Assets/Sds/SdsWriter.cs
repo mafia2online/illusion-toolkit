@@ -380,7 +380,7 @@ public static class SdsWriter
         string? backup = null;
         try
         {
-            SdsArchive archive = SdsArchive.Pack(extracted, GameProfile.MafiaII, MemoryFor(sds, extracted));
+            SdsArchive archive = SdsArchive.Pack(extracted, MafiaEnvironment.Profile, MemoryFor(sds, extracted));
             using (FileStream output = File.Create(tmp.FullName))
             {
                 archive.Save(output, new SdsWriteOptions());

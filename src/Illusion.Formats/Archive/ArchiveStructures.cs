@@ -35,6 +35,7 @@ public sealed class ResourceEntry
 {
     public int TypeId = -1;
     public ushort Version;
+    public ulong FileHash;
     public byte[]? Data;
     public uint SlotRamRequired;
     public uint SlotVramRequired;

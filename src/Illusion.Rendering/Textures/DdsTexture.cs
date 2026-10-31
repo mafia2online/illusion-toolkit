@@ -6,12 +6,13 @@ using Silk.NET.DXGI;
 namespace Illusion.Rendering.Textures;
 
 /// <summary>
-/// Minimal DDS loader → ID3D11ShaderResourceView. Supports BC1/2/3 (DXT1/3/5),
+/// Minimal DDS loader → ID3D11ShaderResourceView. Supports BC1/2/3 (DXT1/3/5), BC4/5 (ATI1/2),
 /// the extended DX10 header and 32-bit uncompressed. Loads only mip0 (enough for the viewport).
 /// </summary>
 public static unsafe class DdsTexture
 {
     private const uint DXT1 = 0x31545844, DXT3 = 0x33545844, DXT5 = 0x35545844, DX10 = 0x30315844;
+    private const uint ATI1 = 0x31495441, ATI2 = 0x32495441;
     private const uint DDPF_FOURCC = 0x4;
 
     public static ComPtr<ID3D11ShaderResourceView> Load(GpuContext gpu, byte[] dds)
@@ -34,6 +35,8 @@ public static unsafe class DdsTexture
         if (fourCC == DXT1) { fmt = Format.FormatBC1Unorm; blockBytes = 8; }
         else if (fourCC == DXT3) { fmt = Format.FormatBC2Unorm; blockBytes = 16; }
         else if (fourCC == DXT5) { fmt = Format.FormatBC3Unorm; blockBytes = 16; }
+        else if (fourCC == ATI1) { fmt = Format.FormatBC4Unorm; blockBytes = 8; }
+        else if (fourCC == ATI2) { fmt = Format.FormatBC5Unorm; blockBytes = 16; }
         else if (fourCC == DX10)
         {
             if (dds.Length < 148) return default; // 128-byte DDS header + 20-byte DX10 extension must be present

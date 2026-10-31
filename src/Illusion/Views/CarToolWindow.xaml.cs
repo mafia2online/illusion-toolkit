@@ -84,7 +84,7 @@ public sealed partial class CarToolWindow : Window
     private static List<string> Cars()
     {
         if (!MafiaEnvironment.IsInitialized) return [];
-        string folder = Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars");
+        string folder = Path.Combine(MafiaEnvironment.ArchiveFolder, "cars");
         if (!Directory.Exists(folder)) return [];
         return [.. Directory.EnumerateFiles(folder, "*.sds")
             .Select(Path.GetFileNameWithoutExtension)

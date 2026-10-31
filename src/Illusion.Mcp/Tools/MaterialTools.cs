@@ -290,6 +290,7 @@ public sealed class MaterialTools
         {
             Material_v57 v57 => v57.Samplers,
             Material_v58 v58 => v58.Samplers,
+            Material_v63 v63 => v63.Bindings,
             _ => [],
         };
 

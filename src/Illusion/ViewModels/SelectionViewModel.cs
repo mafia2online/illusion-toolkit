@@ -78,7 +78,7 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     public bool HasTypeProperties => _typeGroups.Count > 0;
 
     /// <summary>Header/tooltip for the per-type property tab (e.g. "Light", "Single mesh").</summary>
-    public string TypeTabTitle => ObjectType;
+    public string TypeTabTitle => _node?.Source is IPropertySource source ? source.TypeName : ObjectType;
 
     private void BuildPropertyGroups()
     {

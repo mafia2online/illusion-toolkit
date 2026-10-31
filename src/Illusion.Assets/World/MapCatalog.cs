@@ -29,7 +29,18 @@ public sealed class MapCatalog
             foreach (string f in Directory.GetFiles(cityFolder, "*.sds"))
             {
                 string name = Path.GetFileNameWithoutExtension(f);
-                if (name.EndsWith("_z", StringComparison.OrdinalIgnoreCase))
+                if (MafiaEnvironment.Profile.ArchiveVersion == 20 && (name.EndsWith("_general", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith("_collisions", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith("_textures", StringComparison.OrdinalIgnoreCase)
+                    || name.StartsWith("bourbon_tex_", StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                if (MafiaEnvironment.Profile.ArchiveVersion == 20 && name.Length > 5 && name[^5..^1].Equals("_lod", StringComparison.OrdinalIgnoreCase))
+                {
+                    string district = name[..^5];
+                    if (!summer.TryGetValue(district, out var existing) || string.CompareOrdinal(name, Path.GetFileNameWithoutExtension(existing.Name)) < 0)
+                        summer[district] = new FileInfo(f);
+                }
+                else if (name.EndsWith("_z", StringComparison.OrdinalIgnoreCase))
                     winter[name[..^2]] = new FileInfo(f);
                 else
                     summer[name] = new FileInfo(f);

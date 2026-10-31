@@ -40,6 +40,10 @@ public sealed class PropertyDescriptor
 
     /// <summary>Writes a new value (boxed per <see cref="Kind"/>). Null iff <see cref="IsReadOnly"/>.</summary>
     public Action<object?>? Set { get; init; }
+
+    /// <summary>Optional compound setter. Applies the value and returns its already-applied reversible
+    /// mutation, for fields whose changes also recook buffers or alter resource registrations.</summary>
+    public Func<object?, IEditAction>? ApplyEdit { get; init; }
 }
 
 /// <summary>One named bit of a <see cref="PropertyKind.Flags"/> value.</summary>

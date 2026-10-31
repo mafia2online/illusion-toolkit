@@ -20,6 +20,8 @@ public sealed class SdsManifest
 
     public string Folder { get; }
 
+    public uint ArchiveVersion { get; private init; } = 19;
+
     /// <summary>Every single-payload entry, in manifest order — what the archive announces it carries.
     /// Container types (Script/Table) list their pieces under their own elements and are not here.</summary>
     public IReadOnlyList<(string Type, string File)> Entries => _entries;
@@ -51,7 +53,8 @@ public sealed class SdsManifest
                 }
             }
         }
-        return new SdsManifest(folder, entries);
+        string version = System.Xml.Linq.XElement.Load(path).Attribute("ArchiveVersion")?.Value ?? "19";
+        return new SdsManifest(folder, entries) { ArchiveVersion = uint.Parse(version, System.Globalization.CultureInfo.InvariantCulture) };
     }
 
     public bool HasType(string typeName)

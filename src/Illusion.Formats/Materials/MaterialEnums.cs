@@ -4,6 +4,7 @@ public enum MaterialVersion
 {
     V_57 = 57,
     V_58 = 58,
+    V_63 = 63,
 }
 
 [Flags]
