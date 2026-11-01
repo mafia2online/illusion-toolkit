@@ -12,7 +12,13 @@ namespace Illusion.Viewport;
 /// had already been collected.
 /// </para>
 /// </summary>
-internal sealed class CompositeEdit : INodeEdit
+internal interface IPreflightEdit
+{
+    void ValidateUndo();
+    void ValidateRedo();
+}
+
+internal sealed class CompositeEdit : INodeEdit, IPreflightEdit
 {
     private readonly IEditAction[] _children;
 
@@ -21,13 +27,18 @@ internal sealed class CompositeEdit : INodeEdit
     public IEnumerable<SceneNode> Nodes =>
         _children.OfType<INodeEdit>().SelectMany(c => c.Nodes).Distinct();
 
+    public void ValidateUndo() { foreach (var child in _children.OfType<IPreflightEdit>()) child.ValidateUndo(); }
+    public void ValidateRedo() { foreach (var child in _children.OfType<IPreflightEdit>()) child.ValidateRedo(); }
+
     public void Undo()
     {
+        ValidateUndo();
         for (int i = _children.Length - 1; i >= 0; i--) _children[i].Undo();
     }
 
     public void Redo()
     {
+        ValidateRedo();
         foreach (IEditAction child in _children) child.Redo();
     }
 

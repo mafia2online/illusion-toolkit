@@ -1,6 +1,6 @@
-# Linked native proxy transforms
+# Linked native proxy authoring
 
-Linked coarse/fine objects remain protected by default. Preparing a family is an explicit, undoable operation after a read-only cost preview. Preparation permits paired **whole-object transforms only**. Geometry, material slots, hierarchy, duplication/removal and authored rig/bone changes retain their independent guards. Generated far roots cannot be moved directly.
+Linked coarse/fine objects remain protected by default. Preparing a family is an explicit, undoable operation after a read-only cost preview. Preparation permits paired whole-object transforms and verified count-preserving UV, normal and color edits on unique static geometry. Positions, topology, material slots, shared storage, hierarchy, duplication/removal and authored rig/bone changes retain their independent guards. Generated far roots cannot be moved directly.
 
 ## Native replacement and eligibility
 
@@ -37,3 +37,15 @@ Copied-fixture tests include:
 All tests operate on copied files. No installed game assets are changed, and these checks do not claim an in-game playtest. The surveyed 608 fine frames have no native frame ancestors/children; hierarchy-bearing fine families remain refused rather than treated as verified transform support.
 
 Assets entry points are `InspectLinkedProxyPreparation`, `PrepareLinkedProxyTransforms`, `ValidateLinkedProxyTransform` and `GetLinkedProxyTransformTargets`. Preparation changes document roots/meshes; the host refreshes only the replaced coarse subtree and new generated roots, preserving existing fine canonical objects and GPU instances.
+
+## Count-preserving prepared geometry attributes (Source8)
+
+Prepared families now permit a narrowly scoped native attribute transaction through the ordinary compiled bridge binding. This does not authorize position, topology, material, hierarchy or rig changes. Static UV, normal and logical COLOR0 edits require original positions and corner/index/material topology exactly. Native XYZ remains bit-exact; the co-located tangent-handedness bit may change with the tangent frame.
+
+Both source and counterpart must have exactly one native visual owner and unique editable MeshSet/vertex storage. Existing unknown declaration, sparse morph, skin, shared buffer and rebuild refusals remain. The writer checks every actual changed allocation bit against known UV/COLOR/normal/tangent channels, including bytes outside the selected vertex slice. No compression, face groups, culling or native group bounds may change.
+
+For a higher fine LOD, every written storage field must be disjoint from native LOWEST and far storage. Selecting a higher LOD alone is insufficient, because the general writer can otherwise requantize shared compression. For LOWEST, matching native corner attributes are required, and near/far results are fully preflighted before applying either. Their write sets participate together in bridge conflict rejection. Scoped invariant pins accept only these validated storage writes. Save uses the existing recoverable native/mapping journal; no new game format fields are introduced.
+
+`ApplyResult.AdditionalCompiledMeshes` contains preflighted far render output for the host's same-history GPU swaps. Apply/undo retains native near/far buffers and matching GPU replacements as one action. Multi-object batches preflight every native action and allocate their main/proxy GPU replacements before writing. Composite undo/redo preflights every paired action and transform before changing any child. The independent transforms, global material-dependency and structural guards remain active.
+
+Copied French fixture acceptance covers UV/TBN, coherent authored normals, native BGRA colors, sub-quantum position/topology/material/ownership refusal, stale/conflicting results, higher-LOD isolation, fresh mapping reopen, compressed far-only geometry/TBN and complete resource/manifest undo. Durable entry points are `TestCompiledLinkedProxyGeometry` and the windowless `TestLinkedProxyGeometryHost`.

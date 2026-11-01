@@ -203,7 +203,16 @@ public sealed partial class CompiledMeshBinding
     public BridgeMeshApplier.ApplyResult? TryApply(MeshObjectPayload payload, int lod, out string? reason)
     {
         if (MutationRefusal is { } refusal)
-        { reason = refusal; return null; }
+        {
+            if ((_frame as ICompiledMeshSource)?.CanonicalFrame is CompiledSceneDocument.CompiledFrameNode { HasPreparedLinkedGeometryOwner: true } frame)
+                return frame.ApplyLinkedGeometry(this, payload, lod, out reason);
+            reason = refusal; return null;
+        }
+        return TryApplyCore(payload, lod, out reason);
+    }
+
+    internal BridgeMeshApplier.ApplyResult? TryApplyCore(MeshObjectPayload payload, int lod, out string? reason)
+    {
         try
         {
             if ((payload.BoneIndices.Length != 0 || payload.BoneWeights.Length != 0) && payload.SkeletonId is null)

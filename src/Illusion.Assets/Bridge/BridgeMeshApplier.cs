@@ -58,11 +58,22 @@ public static class BridgeMeshApplier
     /// <summary>A computed geometry change, ready to flip in and out of the live frame data.</summary>
     public sealed class ApplyResult
     {
-        internal IReadOnlyList<Formats.Compiled.CompiledElement> CompiledWriteFields { get; init; } = [];
+        /// <summary>Other native bindings changed atomically by this result; refresh these after apply and undo.</summary>
+        public IReadOnlyList<Compiled.CompiledMeshBinding> AdditionalCompiledBindings { get; internal set; } = [];
+        /// <summary>Preflighted render meshes for additional native outputs, avoiding decoding after mutation.</summary>
+        public IReadOnlyDictionary<Compiled.CompiledMeshBinding, MeshData> AdditionalCompiledMeshes { get; internal set; }
+            = new Dictionary<Compiled.CompiledMeshBinding, MeshData>();
+        internal IReadOnlyList<Formats.Compiled.CompiledElement> CompiledWriteFields { get; set; } = [];
         public bool ConflictsWithCompiledWrites(ApplyResult other) =>
             CompiledWriteFields.Count != 0 && CompiledWriteFields.Any(other.CompiledWriteFields.Contains);
         internal Action? ApplyCompiled;
         internal Action? RestoreCompiled;
+        internal Action? ValidateCompiledNew;
+        internal Action? ValidateCompiledOriginal;
+        /// <summary>Validate application without changing native data.</summary>
+        public void ValidateNew() => ValidateCompiledNew?.Invoke();
+        /// <summary>Validate restoration without changing native data.</summary>
+        public void ValidateOriginal() => ValidateCompiledOriginal?.Invoke();
         internal bool CompiledTopologyRebuilt;
         internal FrameObjectSingleMesh Frame = null!;
         internal VertexBuffer Buffer = null!;

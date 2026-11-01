@@ -36,6 +36,8 @@ internal static partial class Mafia3Probes
             TestLinkedProxyHostPreparation(Check);
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
+            TestCompiledLinkedProxyGeometry(Check);
+            TestLinkedProxyGeometryHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
             TestCompiledLinkedProxyBreadth(Check);
@@ -201,6 +203,8 @@ internal static partial class Mafia3Probes
             TestLinkedProxyHostPreparation(Check);
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
+            TestCompiledLinkedProxyGeometry(Check);
+            TestLinkedProxyGeometryHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
             TestCompiledLinkedProxyBreadth(Check);

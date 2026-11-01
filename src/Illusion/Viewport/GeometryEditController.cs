@@ -24,6 +24,14 @@ internal sealed class GeometryEditController
 
     public GeometryEditController(D3DImageHost host) => _host = host;
 
+    // Diagnostics can fail an allocation deterministically without exhausting the GPU.
+    internal Action? BeforeGeometryGpuAllocation { get; set; }
+    private GpuMesh AllocateGeometryGpu(MeshData data)
+    {
+        BeforeGeometryGpuAllocation?.Invoke();
+        return _host.Rnd!.CreateMeshGpu(data);
+    }
+
     /// <summary>One mesh whose geometry the push changed.</summary>
     public sealed record GeometryItem(SceneNode Node, BridgeMeshApplier.ApplyResult Result);
 
@@ -49,6 +57,42 @@ internal sealed class GeometryEditController
     {
         var children = new List<IEditAction>();
         var outcomes = new List<CreationOutcome>();
+        for (int i = 0; i < geometry.Count; i++)
+            for (int j = i + 1; j < geometry.Count; j++)
+                if (geometry[i].Result.ConflictsWithCompiledWrites(geometry[j].Result))
+                    throw new EditRefusedException("The geometry batch writes overlapping native storage. Apply these edits separately.");
+
+        // Validate every paired action and allocate its complete GPU replacement before any native
+        // mutation. A later stale action or allocation failure must leave the whole push untouched.
+        foreach (var item in geometry) item.Result.ValidateNew();
+        foreach (var item in transforms) ValidateTransform(item.Node, item.After);
+        var prepared = new Dictionary<GeometryItem, List<(SceneNode Row, GpuMesh? Before, GpuMesh After)>>();
+        try
+        {
+            foreach (var item in geometry)
+            {
+                var swaps = new List<(SceneNode Row, GpuMesh? Before, GpuMesh After)>();
+                prepared.Add(item, swaps);
+                var main = AllocateGeometryGpu(item.Result.NewMesh!);
+                main.Owner = item.Node;
+                swaps.Add((item.Node, item.Node.Mesh, main));
+                foreach (var counterpart in item.Result.AdditionalCompiledMeshes)
+                    foreach (var drawn in _host.Rnd!.Meshes.ToArray())
+                        if (drawn.Owner is SceneNode row && !ReferenceEquals(row, item.Node)
+                            && (row.GeometrySource ?? row.Source) is ICompiledMeshSource { GeometryBinding: { } target }
+                            && ReferenceEquals(target.Visual, counterpart.Key.Visual))
+                        {
+                            var replacement = AllocateGeometryGpu(counterpart.Value);
+                            replacement.Owner = row;
+                            swaps.Add((row, drawn, replacement));
+                        }
+            }
+        }
+        catch
+        {
+            foreach (var swap in prepared.Values.SelectMany(swaps => swaps)) swap.After.Dispose();
+            throw;
+        }
 
         // Collision edits go FIRST so that undoing the push unwinds them last: a placement must still point at
         // its hull while everything else is being taken back off it, and a new hull's placement has to come
@@ -65,22 +109,23 @@ internal sealed class GeometryEditController
         foreach (GeometryItem item in geometry)
         {
             item.Result.ApplyNew();
-            GpuMesh? oldMesh = item.Node.Mesh;
-            GpuMesh newMesh = _host.Rnd!.CreateMeshGpu(item.Result.NewMesh!);
-            newMesh.Owner = item.Node;
+            var mainSwap = prepared[item][0];
+            GpuMesh? oldMesh = mainSwap.Before;
+            GpuMesh newMesh = mainSwap.After;
             SwapMesh(item.Node, oldMesh, newMesh);
             // A crash prototype's copies live in the instance buffer, and a fresh GPU mesh comes back with
             // none — without this the prop would collapse from tens of thousands of copies to the one at the
             // prototype's own transform.
             if (oldMesh is { Instanced: true }) _host.Streamer.RefreshCrashInstances(item.Node);
-            children.Add(new GeometryEdit(this, item.Node, item.Result, oldMesh, newMesh));
+            var geometryEdit = new GeometryEdit(this, item.Node, item.Result, oldMesh, newMesh);
+            children.Add(geometryEdit);
             _host.Persistence.MarkFrameModified(item.Node);
 
             // Compiled LODs share compression coefficients. An expanded lattice re-packs their
             // buffers together, so every visible representation must follow the same undo unit.
             if (item.Result.Requantized && (item.Node.GeometrySource ?? item.Node.Source) is ICompiledMeshSource { GeometryBinding: { } binding } compiled)
             {
-                foreach (var drawn in _host.Rnd.Meshes.ToArray())
+                foreach (var drawn in _host.Rnd!.Meshes.ToArray())
                 {
                     if (drawn.Owner is not SceneNode row || ReferenceEquals(row, item.Node)
                         || !ReferenceEquals(row.GeometrySource ?? row.Source, compiled)) continue;
@@ -90,6 +135,15 @@ internal sealed class GeometryEditController
                     SwapMesh(row, drawn, replacement);
                     children.Add(new SharedMeshEdit(this, row, drawn, replacement));
                 }
+            }
+
+            // A prepared native proxy owns a separate lowest-LOD copy. The asset transaction has
+            // already changed both buffers; retain the matching GPU swaps in this same undo unit.
+            foreach (var swap in prepared[item].Skip(1))
+            {
+                SwapMesh(swap.Row, swap.Before, swap.After);
+                geometryEdit.AddCounterpart(swap.Row, swap.Before!, swap.After);
+                _host.Persistence.MarkFrameModified(swap.Row);
             }
 
             // A frame references its mesh, it does not own it: the shipped districts put ten wanted posters on
@@ -416,8 +470,10 @@ internal sealed class GeometryEditController
     // the frame's transform may have been edited between the push and an undo.
     private void SwapMesh(SceneNode node, GpuMesh? detach, GpuMesh attach)
     {
+        var order = detach is not null ? _host.Rnd?.Meshes.Select(mesh => ReferenceEquals(mesh, detach) ? attach : mesh).ToArray() : null;
         if (detach != null) _host.Rnd?.DetachMeshes(new[] { detach });
         _host.Rnd?.AttachMesh(attach);
+        if (order is not null) _host.Rnd?.RestoreMeshOrder(order);
         // AttachMesh ghosts anything outside the edit-focus set — but a swap replaces an EDITED
         // mesh, so the replacement inherits the ghost state instead (undo/redo mid-session would
         // otherwise ghost the very object being edited).
@@ -428,6 +484,14 @@ internal sealed class GeometryEditController
         _host.RaiseSceneChanged();
     }
 
+    private static void ValidateTransform(SceneNode node, Matrix4x4 local)
+    {
+        if (node.Source is not IFrameNode frame || node.OwningDocumentNode()?.Source is not CompiledSceneDocument document) return;
+        var canonical = frame is ICompiledMeshSource visual ? visual.CanonicalFrame : frame;
+        var refusal = document.ValidateLinkedProxyTransform(canonical, local) ?? document.ValidateVehiclePlacementTransform(canonical, local);
+        if (refusal is not null) throw new EditRefusedException(refusal);
+    }
+
     // Local-transform set (cascades world through the frame subtree) + GPU world resync.
     private void ApplyTransform(SceneNode node, Matrix4x4 local)
     {
@@ -436,6 +500,7 @@ internal sealed class GeometryEditController
         foreach (SceneNode leaf in node.DescendantMeshLeaves())
             if (leaf.Mesh != null && leaf.Source is IFrameNode leafFrame)
                 leaf.Mesh.SetWorld(leafFrame.WorldTransform);
+        _host.RefreshLinkedProxyMeshes(node);
         _host.Selection.UpdateSelectionHighlight();
         _host.RaiseSceneChanged();
     }
@@ -497,7 +562,7 @@ internal sealed class GeometryEditController
         }
     }
 
-    private sealed class TransformSubEdit : INodeEdit
+    private sealed class TransformSubEdit : INodeEdit, IPreflightEdit
     {
         private readonly GeometryEditController _owner;
         private readonly TransformItem _item;
@@ -509,6 +574,9 @@ internal sealed class GeometryEditController
         }
 
         public IEnumerable<SceneNode> Nodes { get { yield return _item.Node; } }
+
+        public void ValidateUndo() { if (_owner._host.Tree.IsInScene(_item.Node)) ValidateTransform(_item.Node, _item.Before); }
+        public void ValidateRedo() { if (_owner._host.Tree.IsInScene(_item.Node)) ValidateTransform(_item.Node, _item.After); }
 
         public void Undo() => Apply(_item.Before);
         public void Redo() => Apply(_item.After);
@@ -565,13 +633,14 @@ internal sealed class GeometryEditController
         }
     }
 
-    private sealed class GeometryEdit : INodeEdit
+    private sealed class GeometryEdit : INodeEdit, IPreflightEdit
     {
         private readonly GeometryEditController _owner;
         private readonly SceneNode _node;
         private readonly BridgeMeshApplier.ApplyResult _result;
         private readonly GpuMesh? _oldMesh;
         private readonly GpuMesh _newMesh;
+        private readonly List<(SceneNode Row, GpuMesh Before, GpuMesh After)> _counterparts = [];
         private bool _applied = true; // starts applied (ApplyPushBatch already performed the swap)
 
         public GeometryEdit(GeometryEditController owner, SceneNode node,
@@ -584,7 +653,12 @@ internal sealed class GeometryEditController
             _newMesh = newMesh;
         }
 
-        public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
+        public void ValidateUndo() { if (_owner._host.Tree.IsInScene(_node)) _result.ValidateOriginal(); }
+        public void ValidateRedo() { if (_owner._host.Tree.IsInScene(_node)) _result.ValidateNew(); }
+
+        public void AddCounterpart(SceneNode row, GpuMesh before, GpuMesh after) => _counterparts.Add((row, before, after));
+
+        public IEnumerable<SceneNode> Nodes => new[] { _node }.Concat(_counterparts.Select(pair => pair.Row));
 
         public void Undo()
         {
@@ -594,6 +668,8 @@ internal sealed class GeometryEditController
             {
                 _owner.SwapMesh(_node, _newMesh, _oldMesh);
             }
+            foreach (var pair in _counterparts)
+                if (_owner._host.Tree.IsInScene(pair.Row)) _owner.SwapMesh(pair.Row, pair.After, pair.Before);
             _owner._host.Persistence.MarkFrameModified(_node); // memory diverged from the last save again
             _applied = false;
         }
@@ -603,6 +679,8 @@ internal sealed class GeometryEditController
             if (!_owner._host.Tree.IsInScene(_node)) return;
             _result.ApplyNew();
             _owner.SwapMesh(_node, _oldMesh, _newMesh);
+            foreach (var pair in _counterparts)
+                if (_owner._host.Tree.IsInScene(pair.Row)) _owner.SwapMesh(pair.Row, pair.Before, pair.After);
             _owner._host.Persistence.MarkFrameModified(_node);
             _applied = true;
         }
@@ -612,6 +690,7 @@ internal sealed class GeometryEditController
         {
             if (_applied) _oldMesh?.Dispose();
             else _newMesh.Dispose();
+            foreach (var pair in _counterparts) { if (_applied) pair.Before.Dispose(); else pair.After.Dispose(); }
         }
     }
 }
