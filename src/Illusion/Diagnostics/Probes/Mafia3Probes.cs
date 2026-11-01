@@ -32,12 +32,28 @@ internal static partial class Mafia3Probes
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
+            TestCompiledNavigationTopology(Check);
+            TestCompiledNavigationSubdivision(Check);
+            TestCompiledNavigationExtrusion(Check);
             TestCompiledCollisionRemoval(Check);
             TestCompiledCollisionAttachments(Check);
             TestCompiledTriangleCollision(Check);
             TestCompiledWorldCollision(Check);
             TestNativePhysicsOracle(Check);
             TestCompiledEffects(Check);
+            TestCompiledWaterWaves(Check);
+            TestCompiledWaterWavePreview(Check);
+            TestCompiledSceneAnimation(Check);
+            TestSkinnedPreviewBounds(Check);
+            TestCompiledAnimationPreviewUi(Check);
+            TestCompiledMorphPreview(Check);
+            TestCompiledMorphAnimation(Check);
+            TestCompiledStaticEntityCreation(Check);
+            TestCompiledVegetationCreation(Check);
+            TestCompiledFrameWrapperCreation(Check);
+            TestCompiledStockFrameKit(Check);
+            TestCompiledVehicleTemplateCreation(Check);
+            TestCompiledVehicleMapImport(Check);
         }
         catch (Exception ex) { failures++; report.AppendLine("[FAIL] " + ex); }
         report.AppendLine($"Failures: {failures}");
@@ -164,12 +180,28 @@ internal static partial class Mafia3Probes
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
+            TestCompiledNavigationTopology(Check);
+            TestCompiledNavigationSubdivision(Check);
+            TestCompiledNavigationExtrusion(Check);
             TestCompiledCollisionRemoval(Check);
             TestCompiledCollisionAttachments(Check);
             TestCompiledTriangleCollision(Check);
             TestCompiledWorldCollision(Check);
             TestNativePhysicsOracle(Check);
             TestCompiledEffects(Check);
+            TestCompiledWaterWaves(Check);
+            TestCompiledWaterWavePreview(Check);
+            TestCompiledSceneAnimation(Check);
+            TestSkinnedPreviewBounds(Check);
+            TestCompiledAnimationPreviewUi(Check);
+            TestCompiledMorphPreview(Check);
+            TestCompiledMorphAnimation(Check);
+            TestCompiledStaticEntityCreation(Check);
+            TestCompiledVegetationCreation(Check);
+            TestCompiledFrameWrapperCreation(Check);
+            TestCompiledStockFrameKit(Check);
+            TestCompiledVehicleTemplateCreation(Check);
+            TestCompiledVehicleMapImport(Check);
 
         }
         catch (Exception ex)

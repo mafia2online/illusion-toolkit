@@ -759,7 +759,8 @@ internal sealed partial class AppEditorSession : IEditorSession
         // a collision placement, an actor with geometry elsewhere) and it records the one undoable edit.
         host.Selection.SetSelection([node], node);
         host.GizmoBeginDrag(GizmoMode.Move);
-        host.GizmoApplyWorldDelta(Matrix4x4.CreateTranslation(delta));
+        if (host.Editing.TryGizmoApplyWorldDelta(Matrix4x4.CreateTranslation(delta)) is { } refused)
+        { host.GizmoCancelDrag(); return refused; }
         host.GizmoEndDrag();
         return null;
     }

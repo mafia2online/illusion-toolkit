@@ -35,6 +35,12 @@ cbuffer SurfaceCB : register(b2)
     float4 SurfaceMasks;
     float4 SurfacePaintPrimary;
     float4 SurfacePaintSecondary;
+    float4 SurfaceDirtA0;
+    float4 SurfaceDirtA1;
+    float4 SurfaceDirtB0;
+    float4 SurfaceDirtB1;
+    float4 SurfaceDirtControls;
+    float4 SurfaceDirtNormalControls;
 };
 SamplerState Samp        : register(s0);
 ";
@@ -51,7 +57,7 @@ SamplerState Samp        : register(s0);
 
     /// <summary>Interpolators produced by both mesh VS and consumed by <see cref="MafiaLitPs"/>.</summary>
     public const string PsInStruct = @"
-struct PSIn { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 wpos : TEXCOORD1; float3 tan : TEXCOORD2; float3 bin : TEXCOORD3; float4 color : TEXCOORD4; };";
+struct PSIn { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 wpos : TEXCOORD1; float3 tan : TEXCOORD2; float3 bin : TEXCOORD3; float4 color : TEXCOORD4; float2 decalUv : TEXCOORD5; };";
 
     /// <summary>
     /// Shared surface-PS for meshes (regular and instanced), reproducing the Mafia II look in gamma space.
@@ -121,7 +127,23 @@ float4 PSMain(PSIn i) : SV_TARGET
         // sampling its missing albedo returns the cache's white placeholder — 1 × paint is the paint.
         albedo = tex.rgb * Tint.rgb;
         if (SurfaceMode.x < -0.5)
+        {
             albedo = SurfacePaintPrimary.rgb * i.color.r + SurfacePaintSecondary.rgb * i.color.g;
+            if (SurfaceMode.z > 0.5)
+            {
+                float4 decal = Layer3Diffuse.Sample(Samp, i.decalUv);
+                albedo = lerp(albedo, decal.rgb, decal.a * SurfaceMode.w);
+            }
+            if (SurfaceMode.y > 0.5)
+            {
+                // Native body PS5470: T045 R/B choose palettes, A/G control the sequential dirt layers.
+                float4 mask = LayerMask.Sample(Samp, i.uv);
+                float2 width = clamp(SurfaceDirtControls.zw, 0.00001, 1.0);
+                float2 coverage = saturate((mask.ag - (SurfaceDirtControls.xy - width)) / width);
+                albedo = lerp(lerp(SurfaceDirtA0.rgb, SurfaceDirtA1.rgb, mask.r), albedo, coverage.x);
+                albedo = lerp(lerp(SurfaceDirtB0.rgb, SurfaceDirtB1.rgb, mask.b), albedo, coverage.y);
+            }
+        }
     }
     else
     {
@@ -157,6 +179,29 @@ float4 PSMain(PSIn i) : SV_TARGET
         nt.x *= nt.w;
         float2 nxy = nt.xy * 2.0 - 1.0;
         float3 nTan = float3(nxy, sqrt(saturate(1.0 - dot(nxy, nxy))));
+        if (SurfaceMode.x < -0.5 && SurfaceDirtA0.a > 0.5)
+        {
+            // Native PS5470 detail-normal stage, independently checked against the copied native DXBC.
+            float4 mask = LayerMask.Sample(Samp, i.uv);
+            float4 mask2 = Layer2Specular.Sample(Samp, i.uv);
+            float width = clamp(SurfaceDirtControls.z, 0.00001, 1.0);
+            float threshold = SurfaceDirtControls.x == 0 ? 0 : min(SurfaceDirtNormalControls.y + SurfaceDirtControls.x, 1.0);
+            float keepA = min(max(mask.a - (threshold - width), 0) / width, 1.0);
+            float widthZ = clamp(SurfaceDirtNormalControls.w, 0.00001, 1.0);
+            float keepZ = SurfaceDirtNormalControls.z == 0 ? 1.0
+                : min(max(mask2.a - (SurfaceDirtNormalControls.z - widthZ), 0) / SurfaceDirtNormalControls.z, 1.0);
+            float blend = max((keepA + keepZ) * 0.5, 0);
+            float4 detailTex = Layer2Normal.Sample(Samp, i.uv * SurfaceDirtNormalControls.x);
+            detailTex.x *= detailTex.a;
+            float2 detailXY = detailTex.xy * 2 - 1;
+            float3 detailNormal = normalize(float3(detailXY, sqrt(saturate(1 - dot(detailXY, detailXY)))));
+            float3 d = float3(0, 0, 1) + blend * (1 - blend) * saturate((mask.r + mask2.r) * 0.5)
+                * (5 * detailNormal - float3(0, 0, 1));
+            nTan = normalize(nTan);
+            nTan = float3(d.z * nTan.x + d.x * nTan.z + d.y * nTan.x,
+                d.z * nTan.y + d.x * nTan.x + d.y * nTan.z,
+                d.z * nTan.z - d.x * nTan.y - d.y * nTan.y);
+        }
         float3 mapped = nTan.x * T + nTan.y * B + nTan.z * Ngeom;
         float  ml = dot(mapped, mapped);
         if (ml > 1e-8) N = mapped * rsqrt(ml);                     // guard against a collapsed mapped normal too

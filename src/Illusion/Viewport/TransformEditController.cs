@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Frames;
 using Illusion.Domain;
 using Illusion.Rendering.Gizmos;
@@ -168,13 +169,38 @@ internal sealed class TransformEditController
     /// rotates or scales rigidly about the shared pivot — and resyncs their meshes.</summary>
     public void GizmoApplyWorldDelta(Matrix4x4 totalWorldDelta)
     {
-        if (_dragGroup.Count == 0) return;
-        foreach ((SceneNode node, Matrix4x4 originalWorld, _) in _dragGroup)
+        if (TryGizmoApplyWorldDelta(totalWorldDelta) is { } refusal) _host.RaiseNotice(refusal, isError: true);
+    }
+
+    internal string? TryGizmoApplyWorldDelta(Matrix4x4 totalWorldDelta)
+    {
+        if (_dragGroup.Count == 0) return null;
+        var changes = _dragGroup.Where(g => g.Node.Source is IFrameNode).Select(g =>
         {
-            if (node.Source is not IFrameNode fn) continue;
-            fn.LocalTransform = TransformOps.WorldDeltaToLocal(originalWorld, fn.ParentWorldTransform, totalWorldDelta);
-            SyncNodeMeshes(node);
+            var frame = (IFrameNode)g.Node.Source!;
+            return (g.Node, g.OriginalWorld, Frame: frame, Before: frame.LocalTransform,
+                After: TransformOps.WorldDeltaToLocal(g.OriginalWorld, frame.ParentWorldTransform, totalWorldDelta));
+        }).ToArray();
+        foreach (var change in changes)
+            if (ValidateTransform(change.Node, change.Frame, change.After) is { } refusal) return refusal;
+        var applied = new List<(SceneNode Node, IFrameNode Frame, Matrix4x4 Before)>();
+        try
+        {
+            // Keep the original application order: a linked placement can inherit a parent moved earlier.
+            // The complete compiled group is validated first; adapters can also refuse before writing.
+            foreach (var change in changes)
+            {
+                applied.Add((change.Node, change.Frame, change.Before));
+                change.Frame.LocalTransform = TransformOps.WorldDeltaToLocal(change.OriginalWorld, change.Frame.ParentWorldTransform, totalWorldDelta);
+            }
         }
+        catch (EditRefusedException refusal)
+        {
+            for (int i = applied.Count - 1; i >= 0; i--) applied[i].Frame.LocalTransform = applied[i].Before;
+            foreach (var item in applied) SyncNodeMeshes(item.Node);
+            return refusal.Message;
+        }
+        foreach (var change in changes) SyncNodeMeshes(change.Node);
         _host.Selection.UpdateSelectionHighlight();
         _host.RaiseSelectionTransformChanged();
         // A car's collision overlay is drawn where its STUB stands, so dragging the stub has to redraw it.
@@ -190,7 +216,12 @@ internal sealed class TransformEditController
             CaptureGizmoBaseline();
             _host.RaiseGizmoEdited(_dragMode);
         }
+        return null;
     }
+
+    private static string? ValidateTransform(SceneNode node, IFrameNode frame, Matrix4x4 local)
+        => node.OwningDocumentNode()?.Source is CompiledSceneDocument document
+            ? document.ValidateVehiclePlacementTransform(frame is ICompiledMeshSource visual ? visual.CanonicalFrame : frame, local) : null;
 
     private void CaptureGizmoBaseline()
     {
@@ -317,6 +348,10 @@ internal sealed class TransformEditController
     // unload) — a defensive backstop to the history pruning.
     private void ApplyRecordedTransforms(IReadOnlyList<(SceneNode Node, Matrix4x4 Before, Matrix4x4 After)> items, bool undo)
     {
+        foreach (var item in items)
+            if (item.Node.Source is IFrameNode frame && _host.Tree.IsInScene(item.Node)
+                && ValidateTransform(item.Node, frame, undo ? item.Before : item.After) is { } refusal)
+                throw new EditRefusedException(refusal);
         var live = new List<SceneNode>(items.Count);
         foreach ((SceneNode node, Matrix4x4 before, Matrix4x4 after) in items)
         {

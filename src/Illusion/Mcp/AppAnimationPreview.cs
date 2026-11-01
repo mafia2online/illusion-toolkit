@@ -6,6 +6,37 @@ namespace Illusion.Mcp;
 
 internal sealed partial class AppEditorSession
 {
+    public string? AnimationFloats(out IReadOnlyList<AnimationFloatSlot> slots)
+    {
+        slots = [];
+        if (ResourceWindow?.AnimationPreview is not { } preview) return "Open a native animation preview first.";
+        try
+        {
+            var sampled = preview.SampleFloatSlots();
+            slots = sampled.Names.Select((name, i) => new AnimationFloatSlot(i, name, sampled.Values[i])).ToArray();
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or InvalidOperationException or ArgumentException)
+        { return ex.Message; }
+    }
+    public string? AnimationBind(string name, bool enabled, out int mappedBones, out int renderBones, bool morphs = true)
+    {
+        mappedBones = renderBones = 0;
+        var preview = ResourceWindow?.AnimationPreview;
+        if (preview is null) return "Open a native animation preview first.";
+        if (!enabled) { preview.ClearSceneBinding(); return null; }
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (host.IsLoading) return "Wait for the scene to finish loading before binding animation.";
+        if (host.BridgeEditedCount > 0) return "End the Blender edit session before binding animation.";
+        if (Resolve(host, name, out var node) is { } refusal) return refusal;
+        try
+        {
+            if (host.BindCompiledAnimation(preview, node!, morphs) is { } bindingRefusal) return bindingRefusal;
+            mappedBones = preview.BoundBones; renderBones = preview.SceneBones; return null;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+        { return "Native scene animation binding: " + ex.Message; }
+    }
     public string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result)
     {
         result = null;

@@ -43,7 +43,8 @@ internal sealed class CompiledMeshDecoder
 
     internal MeshData? Decode(CompiledElement visual, string name, Matrix4x4 world, int level,
         HashSet<int>? allowedBones = null, Matrix4x4? bindToLocal = null, ushort[]? skinPalette = null,
-        SkeletonData? skeleton = null, IReadOnlyList<Matrix4x4>? liveRest = null)
+        SkeletonData? skeleton = null, IReadOnlyList<Matrix4x4>? liveRest = null,
+        CompiledMeshBinding.MorphChannels? morphChannels = null, float[]? morphWeights = null)
     {
         var set = _graph.Resolve(_graph.Field(visual, "m_MeshSet"));
         var lods = _graph.Items(_graph.Field(set, "m_LODs"));
@@ -78,9 +79,12 @@ internal sealed class CompiledMeshDecoder
             if (layouts[stream].Position >= 0) vertexCount = count;
         }
         if (vertexCount == 0) return null;
+        if (morphChannels is not null && (morphChannels.Vertices.Length != vertexCount || morphWeights?.Length != morphChannels.TargetIds.Length))
+            throw new InvalidDataException("Morph preview channels do not match the native mesh.");
         var positions = new Vector3[vertexCount];
         var normals = new Vector3[vertexCount];
         var uvs = new Vector2[vertexCount];
+        var decalUvs = _retainVertexColors && layouts.Any(l => (l.Flags & 0x400) != 0) ? new Vector2[vertexCount] : null;
         var colors = layouts.Any(l => l.Color >= 0) ? new Vector4[vertexCount] : null;
         var tangents = new Vector3[vertexCount];
         var binormals = new Vector3[vertexCount];
@@ -109,6 +113,9 @@ internal sealed class CompiledMeshDecoder
                         BinaryPrimitives.ReadUInt16LittleEndian(data[layout.Position..]),
                         BinaryPrimitives.ReadUInt16LittleEndian(data[(layout.Position + 2)..]),
                         (layout.Flags & 1) != 0 ? (BinaryPrimitives.ReadUInt16LittleEndian(data[(layout.Position + 4)..]) & 0x7fff) : 0) * scale;
+                    if (morphChannels is not null)
+                        foreach (var influence in morphChannels.Vertices[vertex])
+                            positions[vertex] += influence.Position * morphWeights![influence.Target];
                     if (bindToLocal is { } local) positions[vertex] = Vector3.Transform(positions[vertex], local);
                 }
                 if (layout.Normal >= 0)
@@ -119,6 +126,21 @@ internal sealed class CompiledMeshDecoder
                         var tangent = new Vector3(data[layout.Normal - 2], data[layout.Normal - 1], data[layout.Normal + 3]) / 127.5f - Vector3.One;
                         var binormal = Vector3.Cross(normal, tangent);
                         if ((BinaryPrimitives.ReadUInt16LittleEndian(data[(layout.Normal - 4)..]) & 0x8000) != 0) binormal = -binormal;
+                        if (morphChannels is not null)
+                        {
+                            var originalNormal = normal; var originalTangent = tangent; var originalBinormal = binormal;
+                            foreach (var influence in morphChannels.Vertices[vertex])
+                            {
+                                float weight = morphWeights![influence.Target];
+                                normal += weight * (originalTangent * influence.Normal.X + originalBinormal * influence.Normal.Y);
+                                tangent += weight * (originalBinormal * influence.Tangent.X + originalNormal * influence.Tangent.Y);
+                            }
+                            float sign = Vector3.Dot(Vector3.Cross(originalNormal, originalTangent), originalBinormal) < 0 ? -1 : 1;
+                            if (normal.LengthSquared() < 1e-12f || tangent.LengthSquared() < 1e-12f)
+                                throw new InvalidDataException("Morph preview produces a degenerate tangent frame.");
+                            normal = Vector3.Normalize(normal); tangent = Vector3.Normalize(tangent);
+                            binormal = Vector3.Cross(normal, tangent) * sign;
+                        }
                         if (bindToLocal is { } basis)
                         { tangent = Vector3.TransformNormal(tangent, basis); binormal = Vector3.TransformNormal(binormal, basis); }
                         tangents[vertex] = tangent.LengthSquared() > 1e-12f ? Vector3.Normalize(tangent) : Vector3.UnitX;
@@ -130,6 +152,9 @@ internal sealed class CompiledMeshDecoder
                 if (layout.Uv >= 0)
                     uvs[vertex] = new Vector2((float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(data[layout.Uv..])),
                         (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(data[(layout.Uv + 2)..])));
+                if (decalUvs is not null && UvOffset(layout, 2) is >= 0 and var decalOffset)
+                    decalUvs[vertex] = new Vector2((float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(data[decalOffset..])),
+                        (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(data[(decalOffset + 2)..])));
                 if (layout.Skin >= 0)
                 {
                     int influence = 0;
@@ -206,6 +231,7 @@ internal sealed class CompiledMeshDecoder
         return new MeshData
         {
             Name = name, World = world, Positions = positions, Normals = normals, UVs = uvs,
+            DecalUVs = parts.Any(p => p.Surface?.VehicleDecal is not null) ? decalUvs : null,
             Colors = _retainVertexColors || parts.Any(p => p.Surface is { Layers: >= 2 }) ? colors : null,
             Indices = selected.ToArray(), Parts = parts.ToArray(), Lod = level,
             Tangents = tangentSpace ? tangents : null, Binormals = tangentSpace ? binormals : null,
@@ -218,10 +244,23 @@ internal sealed class CompiledMeshDecoder
     internal static float Float(ReadOnlySpan<byte> data, int offset) => BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data[offset..]));
     internal static Vector3 Vector(ReadOnlySpan<byte> data) => new(Float(data, 0), Float(data, 4), Float(data, 8));
 
-    internal sealed record VertexLayout(uint Flags, int Stride, int Position, int Normal, int Skin, int Uv, int Color);
+    internal sealed record VertexLayout(uint Flags, int Stride, int Position, int Normal, int Skin, int Uv, int Color, int Morph);
+    internal static int UvOffset(VertexLayout layout, int channel)
+    {
+        int offset = layout.Uv;
+        for (int i = 0; i < 5; i++)
+        {
+            bool alias = i == 3 && (layout.Flags & 0x1800) == 0x1000;
+            if ((layout.Flags & (256u << i)) == 0 && !alias) continue;
+            if (i == channel) return offset;
+            if (!alias) offset += 4;
+        }
+        return -1;
+    }
+
     internal static VertexLayout Layout(uint flags)
     {
-        int size = 0, position = -1, normal = -1, skin = -1, uv = -1, color = -1;
+        int size = 0, position = -1, normal = -1, skin = -1, uv = -1, color = -1, morph = -1;
         if ((flags & 1) != 0) { position = size; size += 8; }
         else if ((flags & 2) != 0) { position = size; size += 4; }
         else if ((flags & 0x10) != 0) size += 4;
@@ -232,7 +271,7 @@ internal sealed class CompiledMeshDecoder
         if ((flags & 0x2000000) != 0) size += 4;
         if ((flags & 0x40000) != 0) size += 12;
         if ((flags & 0x100000) != 0) size += 4;
-        if ((flags & 0x200000) != 0) size += 4;
+        if ((flags & 0x200000) != 0) { morph = size; size += 4; }
         if ((flags & 0x4000000) != 0) size += 4;
         for (int i = 0; i < 5; i++)
         {
@@ -244,6 +283,6 @@ internal sealed class CompiledMeshDecoder
         if ((flags & 0x40000000) != 0) size += 16;
         if ((flags & 0x10000000) != 0) size += 64;
         if ((flags & 0x8000000) != 0) size += 12;
-        return new VertexLayout(flags, size, position, normal, skin, uv, color);
+        return new VertexLayout(flags, size, position, normal, skin, uv, color, morph);
     }
 }

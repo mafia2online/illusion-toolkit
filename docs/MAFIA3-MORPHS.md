@@ -1,0 +1,22 @@
+# Mafia III sparse morph atlas
+
+`CompiledMorphAtlas` reads the actual PC sparse morph texture and evaluates its additive position term before skinning. The scene API, expression preview window, and MCP `morph_channels` / `morph_preview` tools expose transient expression preview with native position and tangent-frame deformation before skinning. They do not rewrite morph textures, change expression weights in native scene objects, or enable topology edits on morph meshes.
+
+The native vertex declaration `C_RenderDevice::CreateVertexFormatDescriptionComplete` (`0x1026D3830`) adds four bytes for declaration flag `0x200000`. The declaration is PSIZE1, `R8G8B8A8_UINT`; it is neither a texture coordinate nor another skin channel. The native DX11 vertex shaders in copied `shaders_binaries_[dx11].sc` establish the following layout:
+
+* Byte 1 is the influence count. Bytes 2–3 are a little-endian offset multiplied by the mesh set's pixel alignment. Byte 0 is unused by the examined shader variants.
+* Each influence occupies two adjacent RGBA16F pixels. The atlas width is 512; the shader uses a literal nine-bit row shift.
+* The first texel contains XYZ position deltas and a floating target index truncated to an integer. Position deltas are multiplied by `m_MorphPrecisionStepMultiplier * 3.2768` and the target weight.
+* The second texel contains two normal-frame coefficients and two tangent-frame coefficients. These depend on the original tangent basis; preserving the texture while regenerating arbitrary base tangents is not sufficient proof of correct expression shading.
+
+`C_MeshSet::Synchronize` (`0x1023FCAB0`) copies the precision multiplier and alignment to render-mesh-set offsets 928/932. `C_RenderParamsCtx::UpdateObjectParams` (`0x102854DB0`, relevant instructions `0x102855676`) uploads these values to the shader parameters. `C_MeshSet::GetMorphTargetIdsByIndex` (`0x1023FD9A0`) obtains target IDs from offset 32 of each 48-byte correction record. The other record fields are bone ID, cone angle/cosine, exponent, cone axis, and parent bone ID.
+
+External morph texture fields are resource-local explicit dependency tokens, not GUIDs. `CompiledDependencyToken.ResolveName` resolves them against their own GENR header. A token key copied without its header entry is unresolved even when an editor happens to find the texture by another route.
+
+Copied Cassandra LOD0 validation decoded all 9,500 packed vertices against the real 512×740 atlas: 7,991 vertices have sparse data, totaling 133,142 influences. All texel ranges, finite half values, and target indices passed validation. An intentionally out-of-range sparse span was refused. Formats builds with zero warnings/errors. The scratch runner is `.scratch/morph-atlas-check`.
+
+Target slot 84 at weight 1 moves 122 vertices while retaining the rig, skin channels and triangle topology. All referenced target slots at weight 1 produce finite positions and tangent frames. Empty weights restore exact decoded position, normal, tangent and binormal arrays. The windowless GPU test `.scratch/morph-gpu-check` changes 28,266 pixels and restores the original image byte-exactly when its temporary vertex-buffer lease is cleared; every GENR remains byte-identical. The lease also restores picking positions and local bounds, retains the existing GPU object/material/history identity, and is cleared before undo/redo, Blender editing, deletion, scene reset/unload and viewport disposal.
+
+`CompiledSceneDocument.MorphChannels(binding,lod)` reports native target IDs, texture name and sparse per-vertex data. `PreviewMorph(binding,lod,weights)` returns a decoded mesh without modifying resources. Target indices are correction-table slots, including native zero-ID holes, and preview weights are explicitly limited to finite [0,1] values. The host updates every uploaded LOD of the selected visual atomically; an unavailable atlas dependency refuses the preview. Empty-array MCP weights clear without requiring those dependencies. Only one expression preview is active per viewport.
+
+The reader strictly rejects other DDS formats, dimensions, mip chains, truncated payloads, non-finite texels/weights, target-table overflow, and sparse range overflow. Position evaluation supports finite additive weights without imposing an unproven expression clamp. Native morph authoring still needs independent atlas ownership, morph-envelope culling/bone bounds, and correct tangent-frame conversion before its existing editing restrictions can be relaxed.

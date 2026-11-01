@@ -24,6 +24,22 @@ internal sealed partial class AppEditorSession
         return host.MakeCompiledMeshUnique(node!);
     }
 
+    public string? PlaceVehicle(string parent, string archive, string? name, float[]? position, float? yaw, out string? path)
+    {
+        path = null;
+        if (position is not null && (position.Length != 3 || position.Any(v => !float.IsFinite(v))) || yaw is { } angle && !float.IsFinite(angle))
+            return "Vehicle position and yaw must be finite.";
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (Resolve(host, parent, out var row) is { } refusal) return refusal;
+        string source = Path.IsPathRooted(archive) ? archive : Path.Combine(Assets.MafiaEnvironment.ArchiveFolder,
+            archive.Contains('/') || archive.Contains('\\') ? archive : Path.Combine("cars", archive));
+        if (!source.EndsWith(".sds", StringComparison.OrdinalIgnoreCase)) source += ".sds";
+        Vector3? at = position is null ? null : new(position[0], position[1], position[2]);
+        refusal = host.ObjectImporting.ImportVehicle(row!, new FileInfo(source), name, at, yaw, out var created);
+        if (refusal is null) path = PathOf(created!);
+        return refusal;
+    }
+
     public string? AddCollision(string parent, string kind, float[] size, float[]? position, float[][]? points,
         ushort material, ushort bone, out string? path)
     {
@@ -127,12 +143,73 @@ internal sealed partial class AppEditorSession
         return host.DeformCompiledNavigationAsync(node!,section,edits,executable);
     }
 
+    public Task<string?> DeformNavigationStreamingAsync(string name, int section, int peer, int[] vertices, float[][] positions, string? executable, bool moveRepresentatives = false)
+    {
+        if (section < 0 || peer < 0 || section == peer || vertices is null || positions is null || vertices.Length != positions.Length
+            || vertices.Length is < 1 or > 100000 || vertices.Any(i => i < 0) || vertices.Distinct().Count() != vertices.Length
+            || positions.Any(p => p is not { Length: 3 } || p.Any(v => !float.IsFinite(v))))
+            return Task.FromResult<string?>("Select distinct nonnegative section indices and unique vertices with matching finite [x,y,z] positions.");
+        if (TargetHost is not { } host) return Task.FromResult<string?>(TargetNotOpen);
+        if (Resolve(host, name, out var node) is { } refusal) return Task.FromResult<string?>(refusal);
+        var edits = vertices.Select((index, i) => (index, position: new Vector3(positions[i][0], positions[i][1], positions[i][2])))
+            .ToDictionary(p => p.index, p => p.position);
+        return host.DeformCompiledNavigationStreamingAsync(node!, section, peer, edits, executable, moveRepresentatives);
+    }
+
+    public Task<string?> SplitNavigationStreamingAsync(string name, int section, int peer, int edge, float[]? position, string? executable, bool moveRepresentatives = false)
+    {
+        if (section < 0 || peer < 0 || section == peer || edge < 0 || position is not null && (position.Length != 3 || position.Any(v => !float.IsFinite(v))))
+            return Task.FromResult<string?>("Select distinct nonnegative sections and edge; position requires three finite coordinates.");
+        if (TargetHost is not { } host) return Task.FromResult<string?>(TargetNotOpen);
+        if (Resolve(host, name, out var node) is { } refusal) return Task.FromResult<string?>(refusal);
+        Vector3? point = position is null ? null : new(position[0], position[1], position[2]);
+        return host.SplitCompiledNavigationStreamingAsync(node!, section, peer, edge, point, executable, moveRepresentatives);
+    }
+
+    public string? NavigationStreamingCandidates(string name, int section, int peer, int limit, out int[] edges)
+    {
+        edges = [];
+        if (TargetHost is not { } host) return TargetNotOpen;
+        if (Resolve(host, name, out var node) is { } refusal) return refusal;
+        var document = node!.Source as CompiledSceneDocument ?? node.OwningDocumentNode()?.Source as CompiledSceneDocument;
+        if (document is null || (uint)section >= document.NavigationMeshes.Count || (uint)peer >= document.NavigationMeshes.Count || section == peer)
+            return "Select two distinct navigation sections in an open Mafia III document.";
+        try { edges = document.NavigationMeshes[section].StreamingEdgeSplitCandidates(document.NavigationMeshes[peer], limit).ToArray(); return null; }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException) { return ex.Message; }
+    }
+
     public string? TranslateNavigation(string name, int section, float[] offset)
     {
         if (offset is not { Length: 3 } || offset.Any(value => !float.IsFinite(value))) return "offset needs three finite numbers";
         if (TargetHost is not { } host) return TargetNotOpen;
         if (Resolve(host, name, out var node) is { } unresolved) return unresolved;
         return host.TranslateCompiledNavigation(node!, section, new Vector3(offset[0], offset[1], offset[2]));
+    }
+
+    public Task<string?> FlipNavigationEdgeAsync(string name, int section, int edge, string? executable)
+    {
+        if (section < 0 || edge < 0) return Task.FromResult<string?>("Section and edge indices must be nonnegative.");
+        if (TargetHost is not { } host) return Task.FromResult<string?>(TargetNotOpen);
+        if (Resolve(host, name, out var node) is { } refusal) return Task.FromResult<string?>(refusal);
+        return host.FlipCompiledNavigationEdgeAsync(node!, section, edge, executable);
+    }
+    public Task<string?> SubdivideNavigationFaceAsync(string name, int section, int face, float[]? position, string? executable)
+    {
+        if (section < 0 || face < 0 || position is not null && (position.Length != 3 || position.Any(v => !float.IsFinite(v))))
+            return Task.FromResult<string?>("Section and face indices must be nonnegative; position needs three finite coordinates.");
+        if (TargetHost is not { } host) return Task.FromResult<string?>(TargetNotOpen);
+        if (Resolve(host, name, out var node) is { } refusal) return Task.FromResult<string?>(refusal);
+        Vector3? point = position is null ? null : new(position[0], position[1], position[2]);
+        return host.SubdivideCompiledNavigationFaceAsync(node!, section, face, point, executable);
+    }
+    public Task<string?> ExtrudeNavigationBoundaryAsync(string name, int section, int edge, float[]? position, string? executable)
+    {
+        if (section < 0 || edge < 0 || position is not null && (position.Length != 3 || position.Any(v => !float.IsFinite(v))))
+            return Task.FromResult<string?>("Section and edge indices must be nonnegative; position needs three finite coordinates.");
+        if (TargetHost is not { } host) return Task.FromResult<string?>(TargetNotOpen);
+        if (Resolve(host, name, out var node) is { } refusal) return Task.FromResult<string?>(refusal);
+        Vector3? point = position is null ? null : new(position[0], position[1], position[2]);
+        return host.ExtrudeCompiledNavigationBoundaryAsync(node!, section, edge, point, executable);
     }
 
     public string? RecookCollision(string name, float[][] positions)

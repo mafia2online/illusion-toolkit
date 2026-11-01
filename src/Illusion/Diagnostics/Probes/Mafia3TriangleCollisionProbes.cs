@@ -115,15 +115,21 @@ internal static partial class Mafia3Probes
             {
                 if(!meshes[i].Name.StartsWith("World collision",StringComparison.Ordinal))continue;
                 var positions=meshes[i].Positions;var min=positions.Aggregate(new Vector3(float.PositiveInfinity),Vector3.Min);var max=positions.Aggregate(new Vector3(float.NegativeInfinity),Vector3.Max);var center=(min+max)/2;
-                action=document.ReplaceWorldCollisionPositions(i,positions.Select(p=>Vector3.Lerp(p,center,.02f)).ToArray(),out _);
+                action=document.ReplaceWorldCollisionPositions(i,positions.Select(p=>center+(p-center)*1.1f).ToArray(),out _);
                 if(action is null)continue;selected=i;applied=true;break;
             }
             if(action is null)throw new InvalidOperationException("No triangle-only world collision variant is editable.");
             var changed=meshes[selected];check("world collision replacement increments shared revision",document.WorldCollisionRevision==revision+1&&cached.WorldCollisionRevision==revision+1);
+            var originalGeometry = new CompiledWorldCollisionArchive(worldArchive).Meshes[selected];
+            var originalMin = originalGeometry.Positions.Aggregate(new Vector3(float.PositiveInfinity), Vector3.Min);
+            var originalMax = originalGeometry.Positions.Aggregate(new Vector3(float.NegativeInfinity), Vector3.Max);
+            check("world collision expansion crosses original bounds with refitted baked compounds", changed.Positions.Any(p =>
+                p.X < originalMin.X || p.Y < originalMin.Y || p.Z < originalMin.Z || p.X > originalMax.X || p.Y > originalMax.Y || p.Z > originalMax.Z));
             document.SaveWorkingCopy();
             check("world collision save queues dedicated companion archive",document.CompanionArchives.Any(a=>a.FullName.Equals(worldArchive.FullName,StringComparison.OrdinalIgnoreCase)));
             var reload=new CompiledWorldCollisionArchive(worldArchive);
             check("world collision save independently reloads exact recooked positions",reload.Meshes[selected].Positions.SequenceEqual(changed.Positions));
+            check("world collision canonical normals match fresh geometry decoding",reload.Meshes[selected].Normals.SequenceEqual(changed.Normals));
             var packed=SdsArchive.Pack(folder,MafiaEnvironment.Profile);
             using(var stream=new MemoryStream())
             {packed.Save(stream,new SdsWriteOptions{Compress=true});stream.Position=0;SdsArchive.Load(stream).Extract(folder);}

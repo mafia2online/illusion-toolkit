@@ -165,14 +165,18 @@ background test automation; set `ILLUSION_BACKGROUND=1` to suppress activation d
 `collision_remove` removes a compiled volume and its native helper allocation while preserving shared assets.
 `world_collision_meshes` pages the dedicated district collision assets; `world_collision_mesh` returns local
 positions/triangles and one instance matrix. `world_collision_recook` edits a fixed-topology triangle asset
-for ALL its instances, within original world asset bounds, with native compression/BVH recooking and
+for ALL its instances, with native compression/BVH recooking and verified dynamic-compound bound refitting, plus
 companion Save/Build. Unsafe custom variants, aliases and topology changes are explicitly refused.
 `navigation_translate` moves an entire isolated NAV_PATH section and preserves graph costs; sections with
 external streaming boundaries are refused. Both paths use the normal editor history.
 
-`navigation_deform` edits verified interior vertices in their original face planes and recooks native graph
+`navigation_deform` edits verified interior vertices with native height/planarity/slope guards and recooks native graph
 positions/costs through the isolated cook helper. It requires an exact supported copied executable and a
-source graph that reproduces exactly; boundary/streaming changes and new topology are refused.
+source graph that reproduces exactly. `navigation_flip`, `navigation_subdivide` and `navigation_extrude` support verified topology changes, native graph recooking and bidirectional native path checks. Streaming topology changes and unsupported cluster changes are refused.
+
+`navigation_stream_deform` edits one loaded reciprocal section pair atomically. Default mode propagates shared seam vertices while retaining cluster representatives and streaming costs. Set `moveRepresentatives=true` to also edit interior vertices and rebuild moved representative positions and reciprocal half costs using the original native offline builder. Every external connection of a moved cluster must lead to the selected loaded peer. Both original connected graphs and all affected original streaming costs must reproduce exactly; open/blocked boundaries, third-section contacts and unsupported topology remain protected. Normal Undo/Redo, Save and compressed Build cover both resources.
+
+`navigation_stream_candidates` lists geometric shared-edge candidates for an explicit source/peer section pair. `navigation_stream_split` inserts a common midpoint (or a supplied strictly interior edge point), retains the original streaming edge IDs and appends one vertex, one triangle, three edges and one reciprocal mesh connection in **each** section. Both adjacent patches must be strictly convex and planar, locally closed and free of other streaming edges. Original and new graphs must reproduce natively, the original offline builder must emit the exact reciprocal IDs, and native pathfinding must traverse each half in both directions while all other seams are blocked in scratch memory. Normal Undo/Redo and compressed Save/Build include both RAM allocation budgets. `moveRepresentatives` is an optional explicit opt-in with the same loaded-peer guards as joint deformation.
 `decode_resource` reports candidate/protected vertices and the limits. The native vertex editor exposes the same operation.
 
 `collision_add` also accepts indexed triangle points for new concave collision meshes. Native tree cooking
@@ -191,3 +195,17 @@ an explicit helper-only preview description: actual vehicle spawning is performe
 constant-source summaries. The resource tree exposes reflected editable parameters through
 `object_properties`/`object_set_property`; shared constant sources are labeled with their user counts.
 This is resource authoring, without runtime particle simulation.
+
+
+`car_place` imports an independent native vehicle under a city Kit, including owned geometry, rig, collision, wheel templates and texture/memory resources. It accepts a copied car archive, an optional placement name, world position and Z yaw. Normal editor undo/redo and Save/Build apply; this creates a native Car10 entity.
+
+`animation_bind` binds the selected native clip to a compatible selected scene rig. Native name-hash mappings drive the actual skinned mesh and bone overlay. Matching facial float slots drive morph targets at native value/100, retaining negative values and overshoot; `morphs:false` selects skeletal playback alone. `animation_floats` reports every named float slot at the current time. Unbinding and closing the preview restore the authored pose; playback does not serialize animated transforms or expression weights.
+
+`effect_sample` evaluates verified scalar/vector constant, native linear and Bezier emission/age interpolators from a copied archive. `effect_preview` plots current editor values, including unsaved parameter changes; `effect_preview_screenshot` captures that plot without activation. Unsupported interpolators return a refusal. These tools inspect curves, without particle spawning simulation.
+
+
+`effect_point_sample` evaluates verified stationary native point bursts at local ages. `effect_point_timeline` replays an exact integer number of native ordered frames with a specified step and seed. `effect_point_preview` uses burst mode by default; set `timeline=true`, `frames`, `step` and `seed` for ordered replay. The integer frame slider avoids partial-step differences. `plane` (`xz`, `xy`, `yz`) and `zoom` affect only visualization. `effect_point_screenshot` captures the offscreen GPU image. Returned data includes actual native float clock, random state, birth times, lifetime, normalized age, positions, velocity, size, color, atlas UV and emissivity. Unsupported operator combinations are refused; the renderer uses toolkit unlit atlas/alpha shading and reports `nativeShaderParity:false`.
+
+`morph_channels` reads native sparse expression target IDs and atlas counts for a selected visual/LOD. `morph_preview` applies transient weights with matching `targetIndices` and `weights` arrays; empty arrays clear it exactly. It evaluates native position and tangent-frame deltas before skinning. Weights are not serialized into a guessed expression field, and no undo entry is created. The authoring window exposes the same preview in both editors.
+
+`water_wave_preview` displays the verified analytical water field using `edit/config/render_config.xml` and `edit/maps/engine/sincos.dds` from the current root. Specify seconds, four explicit unnormalized template weights, world XY center, vertical world span and `normals`/`displacement` mode. `water_wave_screenshot` saves its GPU image. Inputs are read-only. This isolated preview reproduces the analytical stage, with the native lookup mips and sampler; it does not implement the engine's ocean grid, world mask projection, ripples, depth or reflections.

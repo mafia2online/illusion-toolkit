@@ -376,6 +376,13 @@ public sealed partial class CompiledMeshBinding
                 w.Stream.Original.AsSpan(w.Stream.Offset + v * w.Stream.Layout.Stride, w.Stream.Layout.Stride))));
         var activeWrites = writes.Where(w => !w.Bytes.AsSpan().SequenceEqual(w.Stream.Original)).DistinctBy(w => w.Stream.Data).ToArray();
         var activeSubdivisions = subdivisions.Where(c => !c.Before.AsSpan().SequenceEqual(c.After)).ToArray();
+        if (context.Streams.Any(stream => stream.Layout.Morph >= 0))
+            foreach (var (stream, bytes) in activeWrites)
+                foreach (var (offset, length) in new[] { (stream.Layout.Position, 8), (stream.Layout.Normal, 4), (stream.Layout.Skin, 8) })
+                    if (offset >= 0 && Enumerable.Range(0, stream.Count).Any(vertex => !bytes.AsSpan(
+                        stream.Offset + vertex * stream.Layout.Stride + offset, length).SequenceEqual(stream.Original.AsSpan(
+                            stream.Offset + vertex * stream.Layout.Stride + offset, length))))
+                        throw new InvalidDataException("Sparse morph base geometry, tangent frames and skin edits require matching atlas-frame and morph-envelope updates; use expression preview instead.");
         return new BridgeMeshApplier.ApplyResult
         {
             OldVertexData = writes.SelectMany(w => w.Stream.Original).ToArray(), NewVertexData = writes.SelectMany(w => w.Bytes).ToArray(),
@@ -386,7 +393,7 @@ public sealed partial class CompiledMeshBinding
                 .Concat(touched == 0 ? [] : new[] { context.NativeMesh }).Distinct().ToArray(),
             NewDecompressionOffset = context.Origin, NewDecompressionFactor = context.Scale,
             NewMesh = RenderMesh(context, new MeshData { Name = original.Name, World = original.World, Positions = positions,
-                Normals = normals, UVs = uvs, Colors = attributes.Colors(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Indices = original.Indices, Parts = original.Parts, Lod = original.Lod,
+                Normals = normals, UVs = uvs, DecalUVs = attributes.DecalUvs(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Colors = attributes.Colors(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Indices = original.Indices, Parts = original.Parts, Lod = original.Lod,
                 Tangents = renderTangents, Binormals = renderBinormals,
                 BoneIndices = context.Skin?.GlobalIds ?? original.BoneIndices, BoneWeights = context.Skin?.GlobalWeights ?? original.BoneWeights, Skeleton = original.Skeleton,
                 LiveRest = original.LiveRest, Instances = original.Instances, InstanceDrawDistances = original.InstanceDrawDistances }),
@@ -394,16 +401,23 @@ public sealed partial class CompiledMeshBinding
             {
                 foreach (var w in activeWrites) _graph.Owner(w.Stream.Data).Replace(w.Stream.Data, w.Bytes);
                 foreach (var change in activeSubdivisions) _graph.Owner(change.Field).ReplaceVariable(change.Field, change.After);
+                InvalidatePlacementBounds();
             },
             RestoreCompiled = () =>
             {
                 foreach (var w in activeWrites) _graph.Owner(w.Stream.Data).Replace(w.Stream.Data, w.Stream.Original);
                 foreach (var change in activeSubdivisions) _graph.Owner(change.Field).ReplaceVariable(change.Field, change.Before);
+                InvalidatePlacementBounds();
             }
         };
     }
 
     private static bool Finite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+    private void InvalidatePlacementBounds()
+    {
+        if ((_frame as ICompiledMeshSource)?.CanonicalFrame is CompiledSceneDocument.CompiledFrameNode frame)
+            frame.InvalidatePlacementGeometry();
+    }
     private static bool DegenerateTriangle(MeshObjectPayload payload, int corner)
     {
         int first = corner / 3 * 3;

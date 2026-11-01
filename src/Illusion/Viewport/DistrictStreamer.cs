@@ -1515,6 +1515,7 @@ internal sealed class DistrictStreamer
 
     private void UnloadDistrict(string name)
     {
+        _host.ClearMorphPreview();
         if (!_loadedDistricts.TryGetValue(name, out DistrictLoad? load)) return;
         // A still-loading district: stop the background pipeline early (it releases its own meshes);
         // the district-gone checks in BeginBuild/AttachStep discard whatever still slips through.
@@ -1580,6 +1581,7 @@ internal sealed class DistrictStreamer
     // Clears the current scene: discards an in-flight background load and empties the queue, tree, folders and counters.
     private void ResetScene()
     {
+        _host.ClearMorphPreview();
         _host.Selection.Select(null); // the selected node is about to disappear — drop it and its highlight box
         _host.Editing.History.Clear(); // the nodes the undo/redo entries reference are being unloaded
         _host.Persistence.Reset();

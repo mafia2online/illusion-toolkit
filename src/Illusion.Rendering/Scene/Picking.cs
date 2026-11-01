@@ -110,6 +110,7 @@ public static class Picking
         foreach (GpuMesh m in meshes)
         {
             if (!m.Visible || m.Instanced || m.PickPositions == null || m.PickIndices == null) continue;
+            m.RefreshPose();
             if (IntersectAabb(origin, dir, m.BoundsMin, m.BoundsMax, out float tEnter))
             {
                 candidates.Add((m, tEnter));

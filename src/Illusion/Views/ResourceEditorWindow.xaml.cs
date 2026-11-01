@@ -42,6 +42,8 @@ public partial class ResourceEditorWindow : Window
     {
         InitializeComponent();
         InitializeAnimationPreview();
+        InitializeEffectCurvePreview();
+        InitializeWaterWavePreview();
         Mafia3AuthoringItem.Visibility = MafiaEnvironment.Profile.ArchiveVersion == 20 ? Visibility.Visible : Visibility.Collapsed;
         WindowFit.ToWorkArea(this);
         if (App.BackgroundLaunch) { ShowActivated = false; WindowState = WindowState.Normal; }
@@ -245,6 +247,10 @@ public partial class ResourceEditorWindow : Window
 
         if (Stage.HasUnsavedEdits) SaveEdits();
 
+        AnimationPreview?.ClearSceneBinding();
+        EffectCurvePreview?.Close();
+        EffectPointPreview?.Close();
+        WaterWavePreview?.Close();
         _staged = entry;
         ClearTexture();     // a scene and a picture are the same surface — one replaces the other
         Stage.Start();      // first thing to draw: bring the render pipeline up (see the XAML)
@@ -641,6 +647,10 @@ public partial class ResourceEditorWindow : Window
 
     private void ReloadStage()
     {
+        AnimationPreview?.ClearSceneBinding();
+        EffectCurvePreview?.Close();
+        EffectPointPreview?.Close();
+        WaterWavePreview?.Close();
         // Same rule as every other way a scene reaches the stage: a scene and a picture are the same
         // surface. Without this a restore reloads the archive BEHIND a texture that is still on top and now
         // shows bytes the archive no longer has.

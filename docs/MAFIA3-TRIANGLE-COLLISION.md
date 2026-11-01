@@ -54,7 +54,7 @@ The copied Bayou archive produces 1450 concave triangle geometries with 2666 ins
 
 ## World geometry editing
 
-`ReplaceMeshPositions(mesh, positions, out refusal)` changes a triangle geometry asset and **all its instances**. It returns an already-applied `IEditAction`. Topology and native storage aliases follow the fixed-topology writer contract. Primitive geometry and custom-containing selected variants are refused. World replacements must remain inside the original geometry AABB until external baked compound proxy bounds can be refitted; standalone packfile recooking supports bounds expansion separately.
+`ReplaceMeshPositions(mesh, positions, out refusal)` changes a triangle geometry asset and **all its instances**. It returns an already-applied `IEditAction`. Topology and native storage aliases follow the fixed-topology writer contract. Primitive geometry and custom-containing selected variants are refused. World replacements may grow beyond their original geometry AABB. The fixed-layout dynamic-compound refit below updates every containing baked proxy; unsupported shape ownership refuses before mutation.
 
 The action replaces only the same-size physics payload and updates the shared CPU position array. `Revision` increments on apply/undo/redo so the host can reupload GPU data. The action checks its expected resource bytes before applying, refusing an out-of-order external overwrite. `IsDirty`, `HasSavedChanges`, and `SaveWorkingCopy` support document save and companion archive rebuilds, including undo after an earlier save.
 
@@ -149,3 +149,11 @@ original native binary routines; it does not claim a running-game simulation tes
 Durable `TestNativePhysicsOracle` probes run when `ILLUSION_MAFIA3_COOK_EXE` names the supported
 copied executable and `ILLUSION_MAFIA3_PHYSICS_FIXTURES` names the copied `mesh-*.hkx` fixture folder.
 Their JSON physics report includes counts, exact-coordinate components and all measured errors.
+
+### World bounds expansion and baked dynamic compounds
+
+`HavokCompoundBoundsWriter.Refit` walks the Win64 packet's named dynamic compounds after a fixed-topology compressed-mesh recook. Its checked 128-byte instances identify child shapes at +80 and 16-bit BVH leaf indices at +60. The 32-byte float-AABB nodes retain their parent (+12), left (+28) and right (+30) links and instance leaf IDs. Only XYZ bounds change. Each affected leaf conservatively encloses its old bounds and the newly transformed child bounds; ancestor unions and enabled-child compound cached AABBs grow accordingly. Nested compounds propagate bottom-up. Material maps, keys, transforms, variant ordering, fixups and storage sizes remain exact. Unknown root shape classes, malformed ownership/link maps and unsupported convex scale corrections refuse.
+
+Native evidence: Mac `hknpDynamicCompoundShape::updateInstancesInBoundingVolume` (`1045628C0`), `updateAabb` (`104562A30`), and `hknpShapeInstance::calculateAabb` (`1045EEE20`). The original PC pure `hkAabbUtil::calcAabb` (`143C74EA0`) is called only inside the isolated SHA-gated helper through `compound_validate`; no entrypoint or shape constructor executes. All 2,392 supported composite instance transforms in copied Bayou match the managed transform bit-exactly. With `Variant` selected, validation additionally checks affected native child bounds against refitted leaves, ancestor chains and enabled-child cached bounds.
+
+Copied Bayou acceptance expands the first 96-vertex triangle asset by 10%, affecting two compounds and three child instances. Save/new loader, compressed rebuild/fresh extraction, redo, byte-exact resource undo and unchanged input SDS pass. The durable world probe now performs outward expansion rather than shrinking inside the old box. These checks consume the original PC math routines and packfile readers; they do not run a game simulation.

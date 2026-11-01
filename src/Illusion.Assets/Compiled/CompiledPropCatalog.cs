@@ -33,22 +33,29 @@ public static class CompiledPropCatalog
                 .OfType<CompiledElement>().ToHashSet();
             foreach (var frame in graph.Nodes.Where(n => n.TypeId == 0x4403597e && n.ObjectId != 0))
             {
-                if (children.Contains(frame) || !models.Contains(frame)) continue;
+                bool frameEntity = CompiledFrameWrapperSupport.Supported(graph, frame, validateGeometry: false);
+                // A verified render-only frame wrapper has no parent-scene references: it can be
+                // imported independently even when its stock owner is a composite model Kit.
+                if ((children.Contains(frame) || !models.Contains(frame)) && !frameEntity) continue;
                 var components = graph.Items(graph.Field(frame, "m_Components")).Select(graph.Resolve).ToArray();
                 bool actor = CompiledActorCatalogSupport.Tree(frame).Any(c => c.Event==2 && c.TypeId == 0xdeb11995 && graph.Field(c, "m_EntityType") is { } type && graph.Integer(type) == 12);
                 bool kit = components.Any(c => c?.TypeId == 0x360b668d);
+                bool treeEntity = CompiledTreeEntitySupport.Supported(graph, frame, validateGeometry: false);
+                bool staticEntity = CompiledStaticEntitySupport.Supported(graph, frame) || treeEntity || frameEntity;
                 if(CompiledTranslocatedCarSupport.Supported(graph,frame))
                 {
                     entries.Add(new CompiledPropEntry(Path.GetRelativePath(MafiaEnvironment.ArchiveFolder,archive.FullName),path,frame.ObjectId,
                         graph.Text(graph.Field(frame,"m_Name")!)+" (traffic spawn marker)","Traffic vehicle markers",0,new Vector3(1.2f,1.7f,0),IsVehicleMarker:true));
                     continue;
                 }
-                if (actor || kit)
+                if (actor || kit || staticEntity)
                 {
                     string candidateName = graph.Text(graph.Field(frame, "m_Name")!);
+                    bool frameWrapper = CompiledActorCatalogSupport.Tree(frame).Any(node => node.TypeId == 0xdeb11995
+                        && graph.Field(node, "m_EntityType") is { } type && graph.Integer(type) == 35);
                     bool physics = CompiledActorCatalogSupport.Tree(frame).Any(n => n.TypeId == 0x2b7b4775 && graph.Items(graph.Field(n, "m_ElementDefs")).Count > 0);
                     var candidate = new CompiledPropEntry(Path.GetRelativePath(MafiaEnvironment.ArchiveFolder, archive.FullName), path,
-                        frame.ObjectId, candidateName, actor ? "Breakable props" : PropCatalog.CategoryOf(candidateName), 0, Vector3.Zero, actor, physics);
+                        frame.ObjectId, candidateName, actor ? "Breakable props" : frameWrapper ? frameEntity ? "Native frame entities" : "Native frame groups" : treeEntity ? "Native vegetation" : staticEntity ? "Static entities" : PropCatalog.CategoryOf(candidateName), 0, Vector3.Zero, actor, physics);
                     try
                     {
                         var preview = previews.Load(candidate, cancel);

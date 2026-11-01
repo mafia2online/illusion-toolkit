@@ -98,6 +98,7 @@ internal sealed partial class ObjectImportController
             owner._host.Persistence.MarkFrameModified(row);
             owner._host.Selection.SetSelection([row], row);
             _attached = true;
+            owner._host.CarCollisionEditing.RefreshOverlay();
             owner._host.RaiseSceneChanged();
         }
         public void Undo()
@@ -109,6 +110,7 @@ internal sealed partial class ObjectImportController
             imported.Detach();
             owner._host.Persistence.MarkFrameModified(parent);
             _attached = false;
+            owner._host.CarCollisionEditing.RefreshOverlay();
             owner._host.RaiseSceneChanged();
         }
         public void Discard() { if (!_attached) foreach (var mesh in meshes) mesh.Dispose(); }

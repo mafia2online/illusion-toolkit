@@ -21,6 +21,11 @@ internal static partial class Mafia3Probes
         try
         {
             var document = new CompiledSceneDocument(archive);
+            VerifyCompiledEffectCurves(document, check);
+            VerifyCompiledEffectPoints(document, check);
+            VerifyCompiledEffectTimeline(document, check);
+            VerifyCompiledEffectPointGpu(document, check);
+            VerifyEffectPointPreviewModes(document, check);
             var library = new CompiledEffectLibraryData(document.Graph);
             var generations = library.Effects.SelectMany(library.Generations).ToArray();
             check("M3 native effects library counts", library.Effects.Count == 1196 && generations.Length == 4535

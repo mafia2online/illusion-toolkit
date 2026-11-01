@@ -212,8 +212,10 @@ isometry implementation; they do not establish a managed equivalent of the nativ
 `CompiledSceneDocument.DeformNavigationInteriorAsync(sectionIndex, vertices, copiedExecutablePath)`
 supports bounded fixed-topology interior edits through a separate `Illusion.NativeCookHost` process.
 `Mafia3NavMeshFile.PrepareInteriorDeformation` validates the geometry before launch. Every vertex
-touching a boundary, blocked edge or streaming connection stays exact. Affected faces retain their
-original planes, strict convexity and winding, and all positions remain inside existing section bounds.
+touching a boundary, blocked edge or streaming connection stays exact. Affected faces remain planar
+and strictly convex with preserved winding; face planes may change for interior elevation edits.
+A slope guard refuses newly steeper-than-45-degree faces and never worsens an already steeper
+authored face. All positions remain inside existing section bounds.
 Existing face clusters and representative face identities are retained.
 
 The worker maps a copied Win64 PE as bytes at its reviewed preferred base. It does not call the PE
@@ -242,5 +244,192 @@ byte-exact no-op, real planar interior edits, canonical refresh, save/fresh relo
 boundary refusal. Quarry also passes document transport, compressed SDS build/re-extraction and fresh
 document reload. Bridge's 3-cluster/4-edge baseline matches, but the examined geometry has no eligible
 planar interior vertex. Train Depot fails its baseline on five undirected pairs and refuses unchanged.
-Arbitrary height deformation, new topology, boundary reconnection and other executable ABIs remain
+Non-planar polygons, new topology, boundary reconnection and other executable ABIs remain
 unsupported.
+
+Interior elevation acceptance additionally covers Quarry vertex462 and Sammy's club vertex1330, each raised by0.02 game units. Both pass the original graph baseline gate and original PC native graph recook, canonical reload and exact undo/redo. Native `hkaiNavMeshUtils::calcFaceNormal` (`103CDEDC0`) and `calcFacePlane` (`103CE5E70`) derive planes from current face vertices; there is no serialized face-normal cache to preserve. The worker already uses the corresponding PC current-geometry normal routine (`143BB7630`) during every graph build. Boundary vertices, polygon coplanarity, strict convexity, section bounds and graph adjacency remain guarded. The committed cook probe runs both planar and elevation cases through save/compressed extraction/new document/exact undo.
+
+### Bounded diagonal topology authoring
+
+`Mafia3NavMeshFile.EdgeFlipCandidates(limit)` returns up to128 read-only compatible edge IDs, using one layout parse and edge-owner table. `CompiledSceneDocument.FlipNavigationEdgeAsync(section, edge, copiedExecutablePath)` flips one internal diagonal between two coplanar triangles forming a strictly convex quadrilateral in the same cluster. Faces must have matching flags/user data; all six edges must have compatible base-edge flags and equal user data. Native reflection (`103CB56F0`, enum `1056E34F8`) identifies `EDGE_ORIGINAL=4`, `EDGE_RETRIANGULATED=2`, `EDGE_USER=16`, blocked32 and external64. This offline base-mesh edit preserves the original-edge policy and refuses runtime cutting/user-edge flags.
+
+The six contiguous face-edge slots are reassigned together, and every affected reciprocal neighbor edge/face reference is remapped. Strict loop, reciprocal link and endpoint checks run before serialization. Vertices, counts, allocations, cluster identities, resource IDs and streaming records remain unchanged. `hkaiStreamingSet` native reflection (`103C50B36`) establishes56-byte records with mesh connections at+8 and graph connections at+24; their16-byte records explicitly identify local face/edge and cluster IDs. A patch touching any streamed face/edge or externally connected cluster refuses. Other streamed regions remain exact.
+
+The isolated PC helper first reproduces the entire original graph, then recomputes current face normals, representative positions and costs for the new triangulation. Graph adjacency must remain exact. Result application independently whitelists the exact planned edge rewrite plus graph positions/costs and accelerator-root truncation; other bytes refuse. Undo/redo updates existing canonical triangle-index adapters and restores all original bytes.
+
+Real copied Quarry edge1359 and Sammy's club edge1250 pass native baseline/cook, changed canonical topology with unchanged positions, save/fresh document, compressed SDS rebuild/fresh extraction, byte-exact undo/redo, invalid-index refusal and metadata tamper refusal. Native graph cooking is required even though the planar surface outline is unchanged. This is a diagonal flip, not arbitrary new regions or streamed-boundary reconnection.
+
+### Native triangle subdivision with array growth
+
+`FaceSubdivisionCandidates(limit)` lists compatible centroid insertions without mutation. `SubdivideNavigationFaceAsync(section, face, position?, copiedExecutablePath)` inserts a finite point strictly inside an existing triangle's plane (default: centroid), producing three triangles in the same cluster: one new vertex, two appended faces and six appended directed edges. Existing face user data is copied to both new faces; compatible edge user data is copied to the new spokes. Unsupported flags, user edges, welded/nonreciprocal neighbors, streamed faces/edges and externally connected clusters refuse. Every new face loop, reciprocal neighbor endpoint/edge/face and edge ownership range is independently checked.
+
+A native face requires a contiguous edge range, so two original local boundary-edge slots change roles; their local neighbors are remapped to the relocated outer edges. Actual streamed face/edge identities elsewhere remain byte-exact. Section geometry bounds remain valid because the inserted point stays inside the existing triangle. This operation does not reconnect external section boundaries.
+
+`NavigationPackAppend` copies the active vertex/face/edge/user-data arrays into aligned storage appended to the final Win64 `__data__` section. Existing object addresses and unrelated arrays remain stable. It retargets only the replaced array pointers, rebuilds local/global/virtual fixup tables, updates their section extents and the NAV resource length wrapper, and retains source class metadata. Old unreachable array storage remains available for byte-exact undo; bounded source/output sizes refuse excessive accumulation. The root retains only mesh and graph, excluding old geometric accelerators through the proven native fallback.
+
+The separate native helper runs the source baseline with the original layout, then cooks the expanded layout while retaining original representative face identities and cluster membership. Adjacency must remain exact. Application compares every output byte with the exact planned expanded resource, allowing only native graph positions and finite nonnegative graph costs to differ. Canonical mesh identities remain stable; arrays, user-data offsets and property pages refresh on apply/undo/redo. Whole-resource history checks expected bytes before replacement.
+
+Native RAM accounting is explicit. PC `C_SDSLoadingContext::LoadResource` (`142D6F030`, Mac `1037C3C70`) reads the leading payload length and allocates exactly one RAM buffer with `(payloadLength+16, alignment16)` for the default path distributor. The save hook adjusts each NAV entry and archive SlotRam by the difference of those aligned requests, preserving original allocation overhead and other manifest changes. No fixed speculative allowance is added. Undo restores the original manifest bytes whenever its content returns to baseline.
+
+Copied Quarry face2 grows134260 to233412bytes; Sammy's club face1 grows173044 to301940bytes. Both pass native old-graph baseline, expanded graph cook, and independent NEW-graph baseline/no-op reproduction. The durable tests cover exact count growth, canonical identity, protected vertex IDs, every old face/edge user-data value, metadata/position refusal, per-entry/archive RAM, compressed SDS/fresh extraction/new document, byte-exact resource+manifest undo/redo and unchanged input SDS. The combined copied planar/height/diagonal/subdivision CPU suite passes84checks.
+
+### Open-boundary area extrusion
+
+`BoundaryExtrusionCandidates(limit)` reports edge/position suggestions without mutation; `ExtrudeNavigationBoundaryAsync(section, edge, position?, copiedExecutablePath)` adds one connected triangle across an ordinary open boundary. The default position extends outward by the smaller of0.25 game units and one quarter of the edge length. The point must be finite, coplanar with the source face, strictly outside its selected edge and inside the existing section AABB. Source slope is limited to45degrees. Streamed faces/edges and externally connected clusters refuse.
+
+The edit appends one vertex, one face and three edges, retaining every original face/edge ID. The old open edge gains a reciprocal link to the appended triangle; its other two edges remain open. Existing triangles and their user data stay exact. Conservative double-precision XY polygon separation rejects any overlap, including projected overpasses. Additional contact/crossing checks refuse unconnected boundary junctions, duplicate geometric seams and touches that would require a real neighbor reconnection. This is deliberate area extension within a section, not automatic cross-section stitching.
+
+The existing append/fixup, strict output whitelist, native graph recook, canonical refresh, RAM accounting and whole-resource undo apply. Native PC pathfinder143C34F40 additionally finds a finite path in BOTH directions between each newly authored face and its source face. Subdivision and diagonal flips now run the same explicit connection proof, beyond merely reproducing cluster graphs.
+
+Copied Quarry edge41 and Sammy's club edge8 pass actual area increase, +1vertex/+1face/+3edges, unchanged original triangle indices, a rejected overlapping0.5-unit extrusion, native bidirectional path queries, NEW-graph baseline reproduction, save/compressed rebuild/fresh extraction/new document, strict metadata refusal and byte-exact resource+manifest undo/redo. The combined planar/elevation/diagonal/subdivision/extrusion copied CPU suite passes106checks; original SDS files remain untouched. Actual streaming-boundary reconnection remains unsupported; isolated AABB expansion is described below.
+
+Outside the original AABB is now supported for **fully isolated sections only**: both mesh and graph streaming sets must be empty. The planned edit grows mesh AABB minimum/maximum by exact union with the new point. Native `C_StreamingManager::LoadDataFromResource` (`100035630`, PC `140660CD0`) copies those mesh fields directly into loaded package bounds, then builds the absent spatial tree from current faces. Existing streamed sections still refuse bounds expansion. The point remains coplanar, overlap/contact guards remain active, and no external links are fabricated.
+
+Real copied East Highland edge41 at(2700.2498,681.6772,-324.06537) and Magnolia church edge70 at(1171.2325,471.82602,34.130882) cross the original AABB. Both pass exact AABB union, native bidirectional path queries/new graph baseline, save/compressed fresh extraction/new document and exact resource+manifest undo/redo. These two growth cases join the durable suite, now130passed/0failed. `decode_resource` reports bounded edge/position candidates and whether isolated bounds expansion is available; map/resource navigation geometry UI and MCP `navigation_extrude` expose the same validated operation.
+
+## Joint streamed boundary deformation
+
+The editor now offers a reciprocal peer in the navigation vertex window and MCP
+`navigation_stream_deform(name, section, peer, vertices, positions, executable?)`.
+It moves shared seam vertices in both loaded sections as one reversible edit.
+The source and peer must be in the same document. This is fixed topology within
+existing section AABBs. Every incident protected edge must belong to the selected
+reciprocal pair: open boundaries, blocked edges and contacts with third sections
+remain protected. Planarity, convex winding and slope checks also apply.
+
+The isolated copied-PE worker loads both native instances, assigns runtime section
+keys (`section << 22 | localIndex`) and links only exact reciprocal, reversed,
+coincident edges. Both original local cluster graphs, including positions,
+adjacency and every cost, must reproduce before editing. The native graph builder
+itself takes a local face-cluster array and must not enumerate packed external
+keys against it. Joint cooking therefore ports its local adjacency enumeration
+and invokes the same reviewed native `143C34F40` cost routine for each first-seen
+local cluster pair with the connected collection. It preserves native half-cost
+rounding and verifies both original graphs exactly. No executable entrypoint,
+Steam, game process or initialization is invoked.
+
+By default all cluster representative positions remain byte-exact. Moving one
+is refused, so serialized external graph costs remain valid and unchanged. Native
+`hkaiStreamingManager::loadGraphInstance` (`103C736B0`, symbolized Mac) uses each
+nonnegative stored cross-graph cost; only a negative sentinel selects transformed
+Euclidean distance. Those costs are not local pathfinding distances. In the North
+fixture all 16 directed stored costs match rounded direct representative distance,
+while actual native paths can be longer. They must not be replaced with local
+pathfinding costs indiscriminately.
+
+In default strict mode only vertex XYZ, local graph cost halfwords and the root variant count may change.
+Both optional geometric accelerators are excluded for native loader rebuild.
+Streaming IDs, reciprocal links, face/edge indices, user data, cluster assignments,
+representatives and external graph costs stay byte-exact. The document rejects a
+result if either canonical resource changed while the worker ran. Normal Undo,
+Redo, Save and compressed Build cover both sections atomically.
+
+Copied regression: `bc_easthighland_south_general.sds` (710 KB), resource
+`A98D32E0` and peer `A98D32E3`, source vertex 1 moved +0.01 on X. Ten separate seam
+vertices passed the native pair cooker. The durable document test passes 16 checks
+including non-seam refusal, both resources changing, compressed fresh extraction,
+coincident seam, byte-exact resource/manifest undo, redo and untouched source SDS.
+Thirteen real South pairs pass the original connected native baseline; some
+other pairs fail it and remain refused. The North pair has 14 mutual mesh links
+and eight mutual graph links with exact endpoints, but fails original local cost
+reproduction. Loading all South sections can introduce shortcuts, so it is not a
+substitute for validating the exact selected pair. Broader multi-section topology
+remains unsupported.
+
+### Opt-in representative and streaming-cost recook
+
+Set MCP `moveRepresentatives=true` or enable **Recook moved cluster representatives
+and their peer costs** in the navigation window. Source interior vertices can then
+be edited alongside shared seam vertices. Every external graph connection of each
+moved cluster must lead to the selected loaded peer. A moved cluster connected to
+any third section refuses the entire edit, before canonical resources change.
+
+The original offline streaming builder is PC `143C37A90`. It appends reciprocal
+mesh/graph records and obtains cross-graph half costs from the distance between
+cluster representative positions, using SSE reciprocal-square-root refinement,
+the native `1.00390625` half-rounding factor and high-word truncation. The worker
+calls that original routine with synthetic one-face graphs and bounded,
+preallocated one-record streaming arrays. Its allocation branches are not taken;
+reviewed callees only initialize scratch records and scan empty scratch arrays.
+The same worker verifies all original selected-pair costs before allowing opt-in
+recooking and verifies the complete resulting pair against the native builder.
+It reproduced all 306 directed stock costs in the small copied North/South corpus;
+the isolated random oracle additionally checked 100,000 representative pairs.
+
+The output whitelist additionally permits only changed representative XYZ slots
+and exact two-byte streaming cost fields whose source or target representative
+moved. IDs, indices, links, padding, unrelated representatives and unrelated costs
+remain exact. Local cluster costs still execute the original connected native
+pathfinder. The standalone deformation/topology cooker refuses any streamed
+representative move, preventing stale cross-graph costs outside this paired path.
+
+Actual copied opt-in case: South source `A98D32E0` (document section 12), peer
+`A98D32E3` (section 11), vertex 4 moves from
+`(1468.476,-2529.3281,0.49358368)` to
+`(1473.476,-2529.3281,0.49358368)`. One representative and six reciprocal cost
+halfwords change. Compressed fresh extraction retains the geometry and exact
+new costs; undo restores every compiled resource and the manifest byte-exact.
+The representative and strict-mode streaming suite passes **28 checks**, including strict-mode
+and standalone refusal, native original-cost mismatch, a real moved cluster with
+an unloaded third peer (`AA8D3455`, vertex 592), metadata tampering, redo and
+untouched source SDS files.
+
+### Reciprocal seam topology split
+
+`StreamingEdgeSplitCandidates(peer)` and MCP `navigation_stream_candidates` list
+bounded geometric candidates. The navigation window's **Compatible shared edge**
+selector and **Split reciprocal seam** button, document
+`SplitNavigationStreamingEdgeAsync`, and MCP `navigation_stream_split` share the
+same implementation. A supplied point must lie strictly inside the original
+shared edge; omission uses its midpoint. Invalid points and unsupported patches
+refuse without mutating either canonical resource.
+
+For each strictly convex planar source polygon, the operation clips the corner
+adjacent to the shared edge into an appended triangle. The old polygon retains
+its original edge span and number of edges, replacing one corner with the new
+midpoint. Its original streamed edge becomes one half with the same ID. One
+ordinary adjacent boundary edge moves into the appended triangle and its local
+opposite edge is updated. The peer uses the opposite clipping orientation, so
+both old streamed IDs still identify exactly reversed matching halves; a new
+reciprocal mesh connection joins the other halves. This works for triangles and
+larger convex polygons. The small copied corpus has only one triangle/triangle
+seam, whose original native graph fails baseline reproduction, so actual accepted
+South fixtures exercise the general convex-polygon case.
+
+Each section gains exactly one vertex, one face and three edges. Every original
+face/edge ID, cluster membership, user-data value and streaming connection record
+is retained except the explicitly planned ordinary local opposite-edge updates.
+The new triangle inherits the original face's user data and cluster. All polygon
+edge flags and user data must agree; user edges, open or blocked surrounding
+edges, other actual streaming edges on either patch, missing exact reciprocal
+cluster connections and unsupported volume metadata refuse. No unconnected
+regions or guessed third-section links are introduced.
+
+Flat arrays and the selected set's mesh-connection array are appended into the
+native data section with new local fixups, counts and non-owning capacities.
+Original object addresses, global/class fixups, resource UID and graph node IDs
+remain stable. Native payload lengths and both entry/archive RAM budgets grow
+using the proven aligned allocation request. The output whitelist allows only
+the exact planned arrays/records plus native graph cost slots and explicitly
+permitted representative/cross-cost fields. Both resources use one atomic
+reversible action; canonical mesh adapters and editor metadata rows survive.
+
+The isolated worker requires exact original **and new** connected cluster graph
+reproduction. It invokes the original offline `143C37A90` against actual mapped
+mesh/graph arrays and preallocated one-record sets: all four emitted face/edge IDs
+in each direction and the reciprocal cluster IDs must equal the planned records.
+Four additional original-PC path queries test old and new halves in both
+directions. For each half, every OTHER streaming edge between the two scratch
+instances is blocked, so a finite cross-section path must use the half under
+test. New-triangle/local-polygon connections also receive native bidirectional
+queries. None of these proof-only flags are written into serialized resources.
+
+Actual copied South pair: source `AA8D3450` (document section 5, originally
+1214 vertices/656 faces/3395 edges), peer `AA8D3451` (section 4, originally
+804 vertices/459 faces/2321 edges). Edges **730** and **2733** both pass native
+proofs. The durable test uses edge 730, verifies all original link records and
+strict-mode graph stream records, one added reciprocal link each, canonical
+identity, invalid-point and metadata-tamper refusal, both allocation budgets,
+compressed fresh extraction of both exact resources, redo, and byte-exact undo
+of every resource/manifest with source SDS untouched. The complete copied
+streaming suite now passes **42 checks**.

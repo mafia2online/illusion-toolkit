@@ -18,6 +18,8 @@ public sealed partial class CompiledResource
     public List<CompiledElement> Roots { get; } = [];
     public List<CompiledElement> Elements { get; } = [];
     public bool IsDirty { get; private set; }
+    /// <summary>Monotonic typed-value revision; undo also advances it, so transient consumers cannot retain stale values.</summary>
+    public long Revision { get; private set; }
 
     private CompiledResource(string path, byte[] bytes, bool metadataOnly = false)
     {
@@ -125,7 +127,7 @@ public sealed partial class CompiledResource
             else _variableValues[element] = value.ToArray();
         }
         element.DataSize = value.Length;
-        IsDirty = true;
+        IsDirty = true; Revision++;
     }
 
     public void Replace(CompiledElement element, ReadOnlySpan<byte> value)
@@ -136,7 +138,7 @@ public sealed partial class CompiledResource
         if (_variableValues.ContainsKey(element)) { ReplaceVariable(element, value); return; }
         if (_cloneValues.TryGetValue(element, out var data)) value.CopyTo(data);
         else value.CopyTo(_bytes.AsSpan(element.DataOffset, element.DataSize));
-        IsDirty = true;
+        IsDirty = true; Revision++;
     }
 
     public void Save()

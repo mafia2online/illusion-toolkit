@@ -13,6 +13,8 @@ internal static class CompiledActorCatalogSupport
     }
     internal static bool Supported(CompiledGraph graph, CompiledElement root, bool actor)
     {
+        if (!actor && (CompiledStaticEntitySupport.Supported(graph, root) || CompiledTreeEntitySupport.Supported(graph, root)
+            || CompiledFrameWrapperSupport.Supported(graph, root) || CompiledFrameWrapperSupport.SupportedKit(graph, root))) return true;
         var owned = Tree(root).ToHashSet();
         var scenes = owned.Where(n => n.Event == 2 && n.TypeId == 0x4403597e).ToArray();
         if (scenes.Length is < 1 or > 128) return false;
@@ -45,7 +47,7 @@ internal static class CompiledActorCatalogSupport
         foreach (var entry in components.SelectMany(c => graph.Items(graph.Field(c, "m_ElementDefs"))))
         {
             if (graph.Field(entry, "m_ItemDesc") is not { DataSize: 8 or 12 } field || !graph.Objects.TryGetValue(graph.Integer(field), out var shape) ||
-                shape.TypeId is not (0x48430eeb or 0x63ee7798 or 0x4fd32ee0)) return false;
+                shape.TypeId is not (0x48430eeb or 0x63ee7798 or 0x4fd32ee0 or 0x7a0b5196)) return false;
             ulong hash = graph.Field(shape, "m_DataHash") is { } h ? graph.Integer(h) : 0;
             if (!graph.Nodes.Any(n => n.TypeId == 0xaf6549f7 && graph.Field(n, "m_Platform") is { } platform && graph.Integer(platform) == 0 &&
                 (hash == 0 ? ReferenceEquals(graph.Owner(n), graph.Owner(shape)) : graph.Field(n, "m_Id") is { } id && graph.Integer(id) == hash))) return false;

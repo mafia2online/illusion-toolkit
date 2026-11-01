@@ -10,7 +10,8 @@ public sealed partial class HavokAnimationClip
     {
         var decoder = new SplineDecoder(bytes, animation, pointer, tracks);
         return new HavokAnimationClip(name, duration, tracks, mapping, decoder.Frames,
-            seconds => decoder.Sample(seconds / duration * (decoder.Frames - 1)));
+            seconds => decoder.Sample(seconds / duration * (decoder.Frames - 1)))
+        { _floatSampler = seconds => decoder.SampleFloats(seconds / duration * (decoder.Frames - 1)) };
     }
 
     /// <summary>Native packed NURBS track layout. Native signed rotations support 32/40/48/24/16/128-bit modes; scalars support 8/16-bit quantization.</summary>
@@ -19,6 +20,8 @@ public sealed partial class HavokAnimationClip
         private readonly byte[] _bytes;
         private readonly int _tracks, _blocks, _maxFrames, _data, _dataEnd, _offsets, _trackOffsets, _maskSize;
         private readonly Dictionary<int, Track[]> _decoded = [];
+        private readonly Dictionary<int, Curve[]> _decodedFloats = [];
+        private readonly int _floatTracks, _floatOffsets;
         public int Frames { get; }
         private sealed record Curve(Vector4[] Points, byte[] Knots, int Degree)
         {
@@ -47,7 +50,12 @@ public sealed partial class HavokAnimationClip
         private sealed record Track(Curve Translation, Curve Rotation, Curve Scale);
         public SplineDecoder(byte[] bytes, int animation, Func<int, int> pointer, int tracks)
         {
-            _bytes = bytes; _tracks = tracks;
+            _bytes = bytes; _tracks = tracks; _floatTracks = I(animation + 28);
+            int floatOffsetsCount = I(animation + 144);
+            _floatOffsets = floatOffsetsCount == 0 ? 0 : pointer(animation + 136);
+            if (_floatTracks < 0 || floatOffsetsCount != checked(I(animation + 60) * _floatTracks))
+                throw new InvalidDataException("Inconsistent native scalar spline offsets.");
+            if (_floatOffsets != 0) Check(_floatOffsets, checked(floatOffsetsCount * 4));
             Frames = I(animation + 56); _blocks = I(animation + 60); _maxFrames = I(animation + 64);
             _maskSize = I(animation + 68);
             _data = pointer(animation + 152); int length = I(animation + 160);
@@ -58,7 +66,7 @@ public sealed partial class HavokAnimationClip
             int trackOffsetCount = I(animation + 128);
             _trackOffsets = trackOffsetCount == 0 ? 0 : pointer(animation + 120);
             if (I(animation + 96) != _blocks || trackOffsetCount != 0 && trackOffsetCount != checked(_blocks * tracks)
-                || _maskSize < tracks * 4)
+                || _maskSize < checked(tracks * 4 + _floatTracks))
                 throw new InvalidDataException("Inconsistent native spline offset arrays.");
             Check(_offsets, checked(_blocks * 4));
             if (_trackOffsets != 0) Check(_trackOffsets, checked(_blocks * tracks * 4));
@@ -184,6 +192,28 @@ public sealed partial class HavokAnimationClip
                 result[i] = new Track(translation, rotation, scale);
             }
             _decoded.Add(block, result); return result;
+        }
+        public float[] SampleFloats(float frame)
+        {
+            int block = Math.Min((int)(frame / (_maxFrames - 1)), _blocks - 1);
+            float local = frame - block * (_maxFrames - 1);
+            if (!_decodedFloats.TryGetValue(block, out var curves))
+            {
+                int begin = checked(_data + I(_offsets + block * 4));
+                DataCheck(begin, checked(_tracks * 4 + _floatTracks));
+                curves = new Curve[_floatTracks];
+                for (int i = 0; i < curves.Length; i++)
+                {
+                    byte mask = _bytes[begin + _tracks * 4 + i];
+                    // Bits 1..2 select scalar quantization; all other bits are the native XYZ curve mask.
+                    if ((mask & 0xE8) != 0) throw new NotSupportedException("Unsupported native float curve component mask.");
+                    int at = checked(begin + (I(_floatOffsets + (block * _floatTracks + i) * 4) & int.MaxValue));
+                    DataCheck(at, 0);
+                    curves[i] = Vector(ref at, (byte)(mask & 0xF9), (mask >> 1) & 3, false);
+                }
+                _decodedFloats.Add(block, curves);
+            }
+            return curves.Select(curve => curve.Sample(local).X).ToArray();
         }
         public Matrix4x4[] Sample(float frame)
         {

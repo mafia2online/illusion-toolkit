@@ -31,7 +31,17 @@ public sealed class AnimationPreviewWindow : Window
     private SceneRenderer? _renderer;
     private SharedRenderTarget? _target;
     private IReadOnlyList<HavokAnimationSkeleton>? _skeletons;
-    private bool _updating;
+    private bool _updating, _closed;
+    private string? _drawRefusal;
+    private CompiledVehicleRig? _sceneRig;
+    private CompiledAnimationBinding? _sceneBinding;
+    private Action? _sceneChanged;
+    private Func<bool>? _sceneValid;
+    private Action<HavokAnimationPreview, float>? _sceneMorph;
+    private Action? _sceneMorphClear;
+    public int BoundBones => _sceneBinding?.MappedBones ?? 0;
+    public int SceneBones => _sceneBinding?.RenderBones ?? 0;
+    public string Status => _status.Text;
     private DateTime _lastTick;
     public bool IsPlaying { get; private set; }
     public float CurrentTime => (float)_seek.Value;
@@ -39,6 +49,23 @@ public sealed class AnimationPreviewWindow : Window
     public float Duration => (float)_seek.Maximum;
     public string? ArchivePath { get; private set; }
     public IReadOnlyList<string> ClipNames => _previews.Select(p => p.Label).ToArray();
+    public (string[] Names, float[] Values) SampleFloatSlots()
+    {
+        if ((uint)_clips.SelectedIndex >= _previews.Count) throw new InvalidOperationException("Select a native clip first.");
+        var preview = _previews[_clips.SelectedIndex].Preview;
+        if (preview.Clip.BlendHint != 0)
+            throw new NotSupportedException("Additive float poses require a native animation blend stack.");
+        var names = preview.NativeSkeleton.FloatSlotNames.ToArray();
+        var values = new float[names.Length]; // Native reference pose zeros the float slots.
+        var tracks = preview.Clip.SampleFloats(CurrentTime);
+        for (int i = 0; i < tracks.Length; i++)
+            if (preview.Clip.FloatTrackToSlot[i] is >= 0 and var slot)
+            {
+                if ((uint)slot >= values.Length) throw new InvalidDataException("Float track exceeds the named skeleton slots.");
+                values[slot] = tracks[i];
+            }
+        return (names, values);
+    }
 
     public AnimationPreviewWindow()
     {
@@ -74,9 +101,26 @@ public sealed class AnimationPreviewWindow : Window
             }
             catch (Exception ex) { _status.Text = "Animation preview could not initialize: " + ex.Message; }
         };
-        Closed += (_, _) => { _timer.Stop(); _target?.Dispose(); _renderer?.Dispose(); _gpu?.Dispose(); };
+        Closed += (_, _) => { _closed = true; ClearSceneBinding(); _timer.Stop(); _target?.Dispose(); _renderer?.Dispose(); _gpu?.Dispose(); };
     }
 
+    /// <summary>Drive the selected compiled render rig without changing any authored resource.</summary>
+    public void BindToSceneRig(CompiledVehicleRig rig, Action? sceneChanged = null, Func<bool>? sceneValid = null,
+        Action<HavokAnimationPreview, float>? morphSample = null, Action? morphClear = null)
+    {
+        if ((uint)_clips.SelectedIndex >= _previews.Count) throw new InvalidOperationException("Select a native clip first.");
+        var binding = new CompiledAnimationBinding(rig, _previews[_clips.SelectedIndex].Preview);
+        _sceneBinding?.Dispose(); _sceneMorphClear?.Invoke(); _sceneChanged?.Invoke();
+        _sceneRig = rig; _sceneBinding = binding; _sceneChanged = sceneChanged; _sceneValid = sceneValid;
+        _sceneMorph = morphSample; _sceneMorphClear = morphClear;
+        Draw();
+    }
+    public void ClearSceneBinding()
+    {
+        _sceneBinding?.Dispose(); _sceneBinding = null; _sceneRig = null;
+        _sceneMorphClear?.Invoke(); _sceneMorph = null; _sceneMorphClear = null;
+        _sceneChanged?.Invoke(); _sceneChanged = null; _sceneValid = null;
+    }
     public void SetPlaying(bool playing) { IsPlaying = playing && _previews.Count != 0; _lastTick = DateTime.UtcNow; _play.Content = IsPlaying ? "Pause" : "Play"; }
     public void Seek(float seconds)
     {
@@ -90,7 +134,9 @@ public sealed class AnimationPreviewWindow : Window
     }
     public void SaveFrame(string path)
     {
+        if (_closed) throw new InvalidOperationException("The animation preview is closed.");
         Draw();
+        if (_drawRefusal is { } refusal) throw new InvalidOperationException(refusal);
         if (_image.Source is not BitmapSource frame) throw new InvalidOperationException("No native animation frame is loaded.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(frame));
@@ -106,19 +152,19 @@ public sealed class AnimationPreviewWindow : Window
             _skeletons = manifest.GetFiles("hkAnimation").SelectMany(p => HavokAnimationClip.ReadSkeletons(File.ReadAllBytes(p))).ToArray();
         }
         var files = SdsManifest.Load(SdsMeshLoader.EnsureExtracted(archive)).GetFiles("hkAnimation");
-        _previews.Clear(); _clips.Items.Clear(); int unsupported = 0;
+        ClearSceneBinding(); _previews.Clear(); _clips.Items.Clear(); int unsupported = 0;
         foreach (string path in files)
         {
             IReadOnlyList<HavokAnimationClip> decoded;
             try { decoded = HavokAnimationClip.Read(File.ReadAllBytes(path)); }
-            catch (NotSupportedException) { unsupported++; continue; }
+            catch (Exception ex) when (ex is NotSupportedException or InvalidDataException) { unsupported++; continue; }
             if (decoded.Count == 0) unsupported++;
             foreach (var clip in decoded)
             {
                 var skeleton = _skeletons.FirstOrDefault(s => s.Name == clip.SkeletonName);
                 if (skeleton is null) { unsupported++; continue; }
                 try { _ = clip.Sample(0); }
-                catch (NotSupportedException) { unsupported++; continue; }
+                catch (Exception ex) when (ex is NotSupportedException or InvalidDataException) { unsupported++; continue; }
                 string label = Path.GetFileNameWithoutExtension(path) + " / " + clip.SkeletonName;
                 _previews.Add((label, new HavokAnimationPreview(clip, skeleton))); _clips.Items.Add(label);
             }
@@ -138,15 +184,35 @@ public sealed class AnimationPreviewWindow : Window
     private void SelectCurrent()
     {
         if ((uint)_clips.SelectedIndex >= _previews.Count) return;
+        _sceneBinding?.Dispose(); _sceneBinding = null;
+        _sceneMorphClear?.Invoke();
+        if (_sceneRig is { } rig)
+        {
+            try { _sceneBinding = new CompiledAnimationBinding(rig, _previews[_clips.SelectedIndex].Preview); }
+            catch (NotSupportedException ex) { _sceneRig = null; _status.Text = ex.Message; }
+        }
         _seek.Maximum = _previews[_clips.SelectedIndex].Preview.Clip.Duration; _seek.IsEnabled = true; Seek(0);
     }
     private void Draw()
     {
+        if (_closed) return;
         if (_gpu is null || _renderer is null || _target is null || (uint)_clips.SelectedIndex >= _previews.Count) return;
         var preview = _previews[_clips.SelectedIndex].Preview;
-        try { _renderer.SetSkeletonDistrict(this, HelperGlyphBuilder.BuildRig([preview.Sample(CurrentTime)])); }
+        _drawRefusal = null;
+        try
+        {
+            if (_sceneValid is not null && !_sceneValid()) ClearSceneBinding();
+            _sceneBinding?.Seek(CurrentTime);
+            if (_sceneBinding is not null) _sceneMorph?.Invoke(preview, CurrentTime);
+            _sceneChanged?.Invoke();
+            _renderer.SetSkeletonDistrict(this, HelperGlyphBuilder.BuildRig([preview.Sample(CurrentTime)]));
+            if (_sceneBinding is { } binding) _status.Text = $"Native scene playback: {binding.MappedBones}/{binding.RenderBones} mapped render bones. Transient pose; source files unchanged.";
+        }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException)
-        { SetPlaying(false); _status.Text = "Native clip playback: " + ex.Message; return; }
+        {
+            ClearSceneBinding(); SetPlaying(false); _image.Source = null;
+            _drawRefusal = "Native clip playback: " + ex.Message; _status.Text = _drawRefusal; return;
+        }
         _renderer.Render(_target);
         byte[] pixels = RenderTargetReadback.Read(_gpu, _target);
         _image.Source = BitmapSource.Create(720, 480, 96, 96, PixelFormats.Bgra32, null, pixels, 720 * 4);

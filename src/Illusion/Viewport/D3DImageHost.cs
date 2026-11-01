@@ -276,6 +276,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
         }
         try
         {
+            ClearMorphPreview();
             step();
             return null;
         }
@@ -309,6 +310,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
         }
         // An object carried in from another archive takes the collision it was given along — those hulls
         // stand where it stood and are nothing without it.
+        ClearMorphPreview();
         List<SceneNode> selected = [.. Selection.Selected];
         var held = new HashSet<SceneNode>(selected);
         List<SceneNode> linked = [.. LinkedCollision(selected).Values.SelectMany(hulls => hulls).Where(n => !held.Contains(n)).Distinct()];
@@ -1494,6 +1496,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
 
     public override void Dispose()
     {
+        ClearMorphPreview();
         BridgeSession.Dispose(); // says bye to Blender; the Blender process itself stays up
         MaterialThumbnails.Dispose(); // its own GPU stack, independent of the (possibly deferred) main one
         History.Clear(); // release any still-applied delete's detached-but-held meshes (base.Dispose only frees attached ones)

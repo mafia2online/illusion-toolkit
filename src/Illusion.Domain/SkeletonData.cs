@@ -18,6 +18,11 @@ public sealed class SkeletonData
 
     public required IReadOnlyList<BoneData> Bones { get; init; }
 
+    /// <summary>Optional transient/current model-space pose for overlays, matching the renderer's live skin pose.</summary>
+    public IReadOnlyList<Matrix4x4>? LiveRest { get; init; }
+    /// <summary>Canonical owner transform for a live pose; avoids capturing a stale placement matrix.</summary>
+    public IFrameNode? OwnerFrame { get; init; }
+
     /// <summary>The model's own world matrix — the bones' rest transforms are relative to it.</summary>
     public required Matrix4x4 World { get; init; }
 

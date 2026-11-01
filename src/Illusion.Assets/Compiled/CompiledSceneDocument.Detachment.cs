@@ -81,7 +81,8 @@ public sealed partial class CompiledSceneDocument : IFrameDetachmentProvider
             localIds.TryGetValue(Graph.Owner(value), out var set) && set.Contains(Graph.Integer(value));
         var frameIds = sceneElements.Select(e => e.ObjectId).ToHashSet();
         var tocValues = new HashSet<CompiledElement>();
-        foreach (var toc in Graph.Nodes.Select(n => Graph.Field(n, "m_ToC")).OfType<CompiledElement>()) Collect(toc, tocValues);
+        var tocContainers = Graph.Nodes.Select(n => Graph.Field(n, "m_ToC")).OfType<CompiledElement>().ToHashSet();
+        foreach (var toc in tocContainers) Collect(toc, tocValues);
         var active = new HashSet<CompiledElement>();
         foreach (var resource in Graph.Resources)
             foreach (var root in resource.Roots) Collect(root, active);
@@ -104,7 +105,11 @@ public sealed partial class CompiledSceneDocument : IFrameDetachmentProvider
             var keep = items.Where(e =>
                 !(Graph.Resolve(e) is { } target && definitions.Contains(target)) &&
                 !(e.Event == 4 && e.DataSize is 8 or 12 && RemovedId(e))).ToArray();
-            if (keep.Length != items.Count) SetItems(container, keep, For(container));
+            if (keep.Length != items.Count)
+            {
+                if (tocContainers.Contains(container)) SetGuidTableItems(container, keep, For(container));
+                else SetItems(container, keep, For(container));
+            }
         }
         return result.Where(p => p.Value.Children.Count != 0 || p.Value.Values.Count != 0).ToDictionary();
 

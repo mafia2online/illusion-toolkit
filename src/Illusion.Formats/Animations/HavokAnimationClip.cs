@@ -4,7 +4,13 @@ using System.Text;
 
 namespace Illusion.Formats.Animations;
 
-public sealed record HavokAnimationSkeleton(string Name, string[] BoneNames, short[] Parents, Matrix4x4[] ReferenceLocal);
+public sealed record HavokAnimationSkeleton(string Name, string[] BoneNames, short[] Parents, Matrix4x4[] ReferenceLocal)
+{
+    /// <summary>Native hkaBone.lockTranslation flags; absent only for callers constructing an explicit skeleton.</summary>
+    public bool[] TranslationLocked { get; init; } = [];
+    public string[] FloatSlotNames { get; init; } = [];
+    public float[] ReferenceFloats { get; init; } = [];
+}
 
 /// <summary>A native Mafia III Havok 2014.2 interleaved or packed spline clip with its explicit track-to-bone binding.</summary>
 public sealed partial class HavokAnimationClip
@@ -12,6 +18,15 @@ public sealed partial class HavokAnimationClip
     private readonly Transform[] _samples;
     private readonly Func<float, Matrix4x4[]>? _sampler;
     private readonly int _frameCount;
+    private Func<float, float[]>? _floatSampler;
+    public int FloatTrackCount => FloatTrackToSlot.Count;
+    public IReadOnlyList<short> FloatTrackToSlot { get; private set; } = [];
+    /// <summary>Native scalar values, before the game morph updater divides them by 100.</summary>
+    public float[] SampleFloats(float seconds)
+    {
+        if (!float.IsFinite(seconds)) throw new ArgumentOutOfRangeException(nameof(seconds));
+        return _floatSampler?.Invoke(Math.Clamp(seconds, 0, Duration)) ?? [];
+    }
     public string SkeletonName { get; }
     public float Duration { get; }
     /// <summary>Native binding: 0 normal, 1 deprecated additive order, 2 additive.</summary>
@@ -123,7 +138,7 @@ public sealed partial class HavokAnimationClip
             foreach (var (skeleton, type) in classes)
             {
                 if (type != "hkaSkeleton") continue;
-                Check(skeleton, 72);
+                Check(skeleton, 100);
                 int count = I(skeleton + 32);
                 if (count is < 1 or > 4096 || I(skeleton + 48) != count || I(skeleton + 64) != count)
                     throw new InvalidDataException("Inconsistent native skeleton tables.");
@@ -139,7 +154,15 @@ public sealed partial class HavokAnimationClip
                     local[i] = Matrix4x4.CreateScale(transform.Scale) * Matrix4x4.CreateFromQuaternion(transform.Rotation)
                         * Matrix4x4.CreateTranslation(transform.Translation);
                 }
-                skeletons.Add(new HavokAnimationSkeleton(Text(Pointer(skeleton + 16)), names, parents, local));
+                int floatCount = I(skeleton + 96), referenceFloatCount = I(skeleton + 80);
+                if (floatCount is < 0 or > 65536 || referenceFloatCount is < 0 or > 65536)
+                    throw new InvalidDataException("Inconsistent native skeleton float tables.");
+                int floatNames = floatCount == 0 ? 0 : Pointer(skeleton + 88), floatValues = referenceFloatCount == 0 ? 0 : Pointer(skeleton + 72);
+                Check(floatNames, checked(floatCount * 8)); Check(floatValues, checked(referenceFloatCount * 4));
+                skeletons.Add(new HavokAnimationSkeleton(Text(Pointer(skeleton + 16)), names, parents, local)
+                { TranslationLocked = Enumerable.Range(0, count).Select(i => bytes[bones + i * 16 + 8] != 0).ToArray(),
+                    FloatSlotNames = Enumerable.Range(0, floatCount).Select(i => Text(Pointer(floatNames + 8 * i))).ToArray(),
+                    ReferenceFloats = Enumerable.Range(0, referenceFloatCount).Select(i => F(floatValues + 4 * i)).ToArray() });
             }
         if (skeletons is not null) return [];
         var result = new List<HavokAnimationClip>();
@@ -157,6 +180,14 @@ public sealed partial class HavokAnimationClip
             int tracks = I(animation + 24), transformCount = I(animation + 64), mappingCount = I(binding + 40);
             if (duration <= 0 || tracks is < 1 or > 255
                 || mappingCount != 0 && mappingCount != tracks) throw new InvalidDataException("Invalid native animation track counts.");
+            int floatTracks = I(animation + 28), floatMapCount = I(binding + 56);
+            if (floatTracks is < 0 or > 65536 || floatMapCount != 0 && floatMapCount != floatTracks)
+                throw new InvalidDataException("Invalid native float track counts.");
+            var floatMapping = new short[floatTracks];
+            int floatMap = floatMapCount == 0 ? 0 : Pointer(binding + 48);
+            if (floatMapCount != 0) Check(floatMap, checked(floatTracks * 2));
+            for (int i = 0; i < floatTracks; i++)
+                floatMapping[i] = floatMapCount == 0 ? checked((short)i) : BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(floatMap + 2 * i));
             var mapping = new short[tracks];
             int map = mappingCount == 0 ? 0 : Pointer(binding + 32);
             if (mappingCount != 0) Check(map, checked(tracks * 2));
@@ -165,7 +196,7 @@ public sealed partial class HavokAnimationClip
             if (animationType == "hkaSplineCompressedAnimation")
             {
                 var clip = ReadSpline(bytes, animation, Pointer, Text(Pointer(binding + 16)), duration, tracks, mapping);
-                clip.BlendHint = blendHint; result.Add(clip);
+                clip.BlendHint = blendHint; clip.FloatTrackToSlot = floatMapping; result.Add(clip);
                 continue;
             }
             if (transformCount < tracks || transformCount % tracks != 0 || transformCount > 10000000)
@@ -176,7 +207,20 @@ public sealed partial class HavokAnimationClip
             {
                 transforms[i] = ReadTransform(samples + 48 * i);
             }
-            result.Add(new HavokAnimationClip(Text(Pointer(binding + 16)), duration, tracks, mapping, transforms) { BlendHint = blendHint });
+            int frames = transformCount / tracks, floatSampleCount = I(animation + 80);
+            if (floatSampleCount != checked(frames * floatTracks)) throw new InvalidDataException("Inconsistent interleaved float samples.");
+            int floatData = floatSampleCount == 0 ? 0 : Pointer(animation + 72);
+            Check(floatData, checked(floatSampleCount * 4));
+            float[] scalars = Enumerable.Range(0, floatSampleCount).Select(i => F(floatData + 4 * i)).ToArray();
+            var interleaved = new HavokAnimationClip(Text(Pointer(binding + 16)), duration, tracks, mapping, transforms)
+                { BlendHint = blendHint, FloatTrackToSlot = floatMapping };
+            interleaved._floatSampler = seconds =>
+            {
+                float position = seconds / duration * (frames - 1); int first = Math.Min((int)position, frames - 1), next = Math.Min(first + 1, frames - 1);
+                return Enumerable.Range(0, floatTracks).Select(i => scalars[first * floatTracks + i]
+                    + (scalars[next * floatTracks + i] - scalars[first * floatTracks + i]) * (position - first)).ToArray();
+            };
+            result.Add(interleaved);
         }
         return result;
     }

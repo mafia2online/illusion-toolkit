@@ -77,7 +77,9 @@ public sealed class CompiledPropPreview
             if(!CompiledTranslocatedCarSupport.Supported(graph,frame))throw new InvalidDataException("The stock traffic-spawner marker contract is unsupported.");
             return CompiledTranslocatedCarSupport.Preview(entry);
         }
-        if (entry.IsActor || CompiledActorCatalogSupport.Tree(frame).Any(n => n.Event == 2 && n.TypeId == 0x360b668d))
+        if (entry.IsActor || CompiledStaticEntitySupport.Supported(graph, frame) || CompiledTreeEntitySupport.Supported(graph, frame)
+            || CompiledFrameWrapperSupport.Supported(graph, frame)
+            || CompiledActorCatalogSupport.Tree(frame).Any(n => n.Event == 2 && n.TypeId == 0x360b668d))
         {
             if (!CompiledActorCatalogSupport.Supported(graph, frame, entry.IsActor))
                 throw new InvalidDataException("The prototype has an unsupported actor/ownership contract.");

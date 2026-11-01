@@ -6,7 +6,7 @@ using Illusion.Formats.Compiled;
 
 namespace Illusion.Assets.Compiled;
 
-/// <summary>Read-only collision placements from the game's dedicated district _collisions archives.</summary>
+/// <summary>Native collision placements and reversible geometry edits for district _collisions archives.</summary>
 public sealed partial class CompiledWorldCollisionArchive
 {
     public FileInfo Archive { get; }
@@ -63,14 +63,7 @@ public sealed partial class CompiledWorldCollisionArchive
                 foreach(var(index,placements)in instances)
                 {
                     if(shapes[first+index]is not{} shape)continue;
-                    var normals=new Vector3[shape.Vertices.Length];
-                    for(int t=0;t<shape.Indices.Length;t+=3)
-                    {
-                        int a=(int)shape.Indices[t],b=(int)shape.Indices[t+1],c=(int)shape.Indices[t+2];
-                        var normal=Vector3.Cross(shape.Vertices[b]-shape.Vertices[a],shape.Vertices[c]-shape.Vertices[a]);
-                        normals[a]+=normal;normals[b]+=normal;normals[c]+=normal;
-                    }
-                    for(int n=0;n<normals.Length;n++)normals[n]=normals[n].LengthSquared()>1e-12f?Vector3.Normalize(normals[n]):Vector3.UnitZ;
+                    var normals=WorldCollisionNormals(shape.Vertices,shape.Indices);
                     var mesh=new MeshData
                     {
                         Name=$"World collision {archive.Name}:{index}",World=Matrix4x4.Identity,

@@ -136,6 +136,14 @@ public sealed partial class CompiledMeshBinding
             foreach (var slot in _slots.Where(s => ReferenceEquals(s.Stream, stream)))
                 Encode(slot, corner, donor).CopyTo(target[slot.Offset..]);
         }
+        public Vector2[]? DecalUvs(IReadOnlyList<int> corners, IReadOnlyList<int> donors)
+        {
+            if (_context.Mesh.DecalUVs is null) return null;
+            var slot = AttributeSlots(_context).FirstOrDefault(s => !s.Color && (s.Stream.Layout.Flags & 0x400) != 0
+                && CompiledMeshDecoder.UvOffset(s.Stream.Layout, 2) == s.Offset);
+            return slot is null ? null : Enumerable.Range(0, donors.Count)
+                .Select(i => AttributeUv(Encode(slot, corners[i], donors[i]))).ToArray();
+        }
         public Vector4[]? Colors(IReadOnlyList<int> corners, IReadOnlyList<int> donors)
         {
             var color = _slots.FirstOrDefault(s => s.Color);

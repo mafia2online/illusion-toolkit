@@ -44,7 +44,7 @@ internal sealed class CompiledWorldCollisionWindow : Window
         Title="Mafia III world collision assets";Width=1120;Height=760;MinWidth=800;MinHeight=500;
         WindowStartupLocation=WindowStartupLocation.CenterOwner;
         var root=new DockPanel{Margin=new Thickness(16)};
-        var heading=new TextBlock{Text="Edits affect ALL world instances of the selected collision asset. Triangle topology and original bounds are retained. Custom compound proxies and primitive assets are read-only. Use the editor's Undo/Redo and Save/Build.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};
+        var heading=new TextBlock{Text="Edits affect ALL world instances of the selected collision asset. Triangle topology is retained; supported containing compound bounds are rebuilt when geometry expands. Custom primitive assets and unsupported compound layouts remain read-only. Use the editor's Undo/Redo and Save/Build.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};
         DockPanel.SetDock(heading,Dock.Top);root.Children.Add(heading);
         DockPanel.SetDock(_status,Dock.Bottom);root.Children.Add(_status);
         var columns=new Grid();columns.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1.15,GridUnitType.Star)});columns.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1.0,GridUnitType.Star)});

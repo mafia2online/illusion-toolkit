@@ -236,11 +236,19 @@ public sealed partial class CompiledSceneDocument
             return id;
         }
 
-        private Dictionary<ulong, ulong> Prepare(CompiledElement source)
+        private static IEnumerable<CompiledElement> SelectedDescendants(CompiledElement source, CompiledRewrite? selection)
+        {
+            if (source.Event == 0) yield break;
+            yield return source;
+            foreach (var child in selection?.Children.GetValueOrDefault(source) ?? source.Children)
+                foreach (var nested in SelectedDescendants(child, selection)) yield return nested;
+        }
+
+        private Dictionary<ulong, ulong> Prepare(CompiledElement source, CompiledRewrite? selection = null)
         {
             var resource = Graph.Owner(source);
             if (!_locals.TryGetValue(resource, out var locals)) _locals.Add(resource, locals = []);
-            foreach (var node in Descendants(source))
+            foreach (var node in SelectedDescendants(source, selection))
             {
                 if (node.Event != 2) continue;
                 if (node.ObjectId != 0)
@@ -261,24 +269,31 @@ public sealed partial class CompiledSceneDocument
             return ids;
         }
 
-        private CompiledElement CloneTree(CompiledElement source)
+        private CompiledElement CloneTree(CompiledElement source, CompiledRewrite? selection = null)
         {
             var origin = Graph.Owner(source);
             var resource = destination ?? origin;
-            var clone = destination is null ? resource.CloneSubtree(source, Prepare(source)) : resource.CopySubtree(origin,source,Prepare(source));
+            var clone = destination is null ? resource.CloneSubtree(source, Prepare(source, selection), selection) : resource.CopySubtree(origin,source,Prepare(source, selection), selection);
             if(destination is not null)
             {
                 foreach(var(type,bytes)in Graph.ValidateCopySubtree(resource,clone))
                     _schemas.TryAdd((resource,type),bytes);
             }
             Graph.RegisterSubtree(resource, clone);
-            foreach (var pair in Descendants(source).Zip(Descendants(clone))) _elements.Add(pair.First, pair.Second);
+            foreach (var pair in SelectedDescendants(source, selection).Zip(Descendants(clone))) _elements.Add(pair.First, pair.Second);
             return clone;
         }
 
         public IReadOnlyDictionary<ulong, ulong> GlobalIds => _guids;
 
-        public CompiledElement CloneDefinition(CompiledElement source, bool followDependencies)
+        public void RemapAlias(ulong original, ulong replacement)
+        {
+            if (original == 0 || replacement == 0 || _guids.TryGetValue(original, out var existing) && existing != replacement)
+                throw new NotSupportedException($"Native asset identity {original:X16} has conflicting remapping roles ({_guids.GetValueOrDefault(original):X16}, {replacement:X16}).");
+            _guids[original] = replacement;
+        }
+
+        public CompiledElement CloneDefinition(CompiledElement source, bool followDependencies, CompiledRewrite? selection = null)
         {
             if(destination is not null&&followDependencies)
                 throw new NotSupportedException("Destination-owned copying currently supports independent definitions without dependency traversal.");
@@ -290,7 +305,7 @@ public sealed partial class CompiledSceneDocument
                 ?? throw new NotSupportedException("Geometry owner has no object registration container.");
             var prototype = document.CurrentItems(container).First(e => Descendants(e).Any(n => Graph.Kind(n) == 173 && n.Values.Count() > 1));
             if(destination is not null)_schemaStreams.TryAdd(resource,resource.StreamIndex(container));
-            var clone = CloneTree(source);
+            var clone = CloneTree(source, selection);
             byte[] pointerId = new byte[8];
             BinaryPrimitives.WriteUInt64LittleEndian(pointerId, Fresh(true));
             var registration = document.OwnershipShell(resource, prototype, clone, pointerId);
@@ -406,7 +421,7 @@ public sealed partial class CompiledSceneDocument
             var ids = removed.Where(n => n.Event == 2 && n.ObjectId != 0).Select(n => n.ObjectId).ToHashSet();
             foreach (var table in _tables.Where(t => ids.Contains(Graph.Integer(t.Value))).ToArray())
             {
-                if (_attached) document.SetItems(table.Container, document.CurrentItems(table.Container).Where(e => !ReferenceEquals(e, table.Value)).ToArray());
+                if (_attached) document.SetGuidTableItems(table.Container, document.CurrentItems(table.Container).Where(e => !ReferenceEquals(e, table.Value)).ToArray());
                 _tables.Remove(table);
             }
             foreach (var source in _allocated.Where(s => _elements.TryGetValue(s, out var clone) && removed.Contains(clone)).ToArray())
@@ -430,7 +445,7 @@ public sealed partial class CompiledSceneDocument
             }
             if (!_attached) return;
             foreach (var (_, container, value) in _tables)
-                document.SetItems(container, document.CurrentItems(container).Where(e => !ReferenceEquals(e, value)).ToArray());
+                document.SetGuidTableItems(container, document.CurrentItems(container).Where(e => !ReferenceEquals(e, value)).ToArray());
             foreach (var group in _allocated.GroupBy(AllocationOwner))
                 foreach (var types in group.GroupBy(n => n.TypeId))
                 {

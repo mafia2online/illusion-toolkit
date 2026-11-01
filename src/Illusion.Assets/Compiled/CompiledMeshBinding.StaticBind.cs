@@ -16,6 +16,7 @@ public sealed partial class CompiledMeshBinding
         int bone = BinaryPrimitives.ReadUInt16LittleEndian(graph.Data(data)[46..]);
         if (bone == 0) return true;
         var components = graph.Items(graph.Field(scene, "m_Components")).Select(graph.Resolve).ToArray();
+        if (CompiledStaticEntitySupport.Supported(graph, scene) || CompiledTreeEntitySupport.Supported(graph, scene)) components = components.Where(c => c!.TypeId != 0xdeb11995).ToArray();
         if (components.Length != 2 || components.Any(c => c is null || c.TypeId is not (0x0fa73185 or 0x2da22400))
             || components.Count(c => c!.TypeId == 0x0fa73185) != 1 || components.Count(c => c!.TypeId == 0x2da22400) != 1) return false;
         var skeleton = components.SingleOrDefault(c => c!.TypeId == 0x0fa73185);
@@ -83,7 +84,7 @@ public sealed partial class CompiledMeshBinding
     private static MeshData TransformMesh(MeshData mesh, Matrix4x4 transform) => new()
     {
         Name = mesh.Name, World = mesh.World, Positions = mesh.Positions.Select(p => Vector3.Transform(p, transform)).ToArray(),
-        Normals = mesh.Normals.Select(n => Vector3.TransformNormal(n, transform)).ToArray(), UVs = mesh.UVs, Colors = mesh.Colors,
+        Normals = mesh.Normals.Select(n => Vector3.TransformNormal(n, transform)).ToArray(), UVs = mesh.UVs, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs,
         Tangents = mesh.Tangents?.Select(n => Vector3.TransformNormal(n, transform)).ToArray(),
         Binormals = mesh.Binormals?.Select(n => Vector3.TransformNormal(n, transform)).ToArray(),
         Indices = mesh.Indices, Parts = mesh.Parts, Lod = mesh.Lod,

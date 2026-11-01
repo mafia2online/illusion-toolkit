@@ -42,33 +42,36 @@ Implemented:
   cameras and viewport screenshots.
 
 The renderer uses toolkit shading. Verified native two/three-layer terrain inputs and blend equations are
-supported. Water-definition previews retain color and avoid interpreting flow as a normal map; runtime
-screen-space reflections and water simulation are not reproduced. See [surface evidence](MAFIA3-SURFACES.md).
+supported. Water-definition previews retain color and avoid interpreting flow as a normal map. A separate
+analytical wave preview uses the native configuration, lookup texture, mip filtering and four template weights;
+the runtime ocean grid, ripples, depth and screen-space reflections remain separate unimplemented passes.
+See [surface evidence](MAFIA3-SURFACES.md).
 
 Additional authoring includes native vehicle cloning/registration, rig bones and poses, paint choices and
 material metadata, exact primary/secondary body paint through native vertex colors, traffic eligibility and
-UTF-8 localized clone names, native light/beacon and bone-attached collision authoring, plus native transform animation clips in a named-skeleton preview. Actual
+UTF-8 localized clone names, native light/beacon and bone-attached collision authoring, plus native transform and facial-float animation clips driving the scene rig and morph geometry. Playback remains transient. See [facial animation evidence](MAFIA3-FACIAL-ANIMATION.md). Actual
 Blender import/edit/push, all three vehicle LODs, save/build/fresh extraction and byte-exact undo were tested.
 See [vehicle authoring evidence](MAFIA3-VEHICLE-AUTHORING-EVIDENCE.md).
 
 Native AI objects support position/direction/active/property edits and overlays. NAV_PATH walkmeshes render
 and expose native user-data fields. Isolated sections can translate, and verified interior vertices can deform
-within their original face planes. Interior edits reproduce and recook the native graph through an isolated helper using
-a fingerprint-checked copied executable. Boundary, streaming and unsupported baseline changes are refused. See [navigation details](MAFIA3-NAVIGATION.md).
+with verified height, planarity and slope checks. Interior edits, diagonal flips, face subdivision and guarded boundary extrusion reproduce and recook the native graph through an isolated helper using
+a fingerprint-checked copied executable. Verified paired streaming sections support reciprocal seam deformation, native representative/cross-cost rebuilding and guarded shared-edge splitting. Uncovered peers and unsupported original baselines are refused. See [navigation details](MAFIA3-NAVIGATION.md).
 
 Dedicated district collision companions render true concave triangles and native primitive instances.
 Fixed-topology triangle assets can be recooked with native compression/BVH rebuilding, save/build and exact
-undo. World asset edits affect every instance and remain within original bounds until external compound
-proxies can also be rebuilt. See [triangle collision details](MAFIA3-TRIANGLE-COLLISION.md).
+undo. World asset edits affect every instance; verified dynamic compound bounds are refitted when geometry expands beyond its original bounds. See [triangle collision details](MAFIA3-TRIANGLE-COLLISION.md).
 
 Compiled particle libraries expose effect/generation/operator trees and verified reflected parameters, including shared
-constant sources. Save/build/reload preserves opaque operator data; runtime particle simulation is not implemented.
+constant sources. Native scalar/vector linear and Bezier emission/age curves can be sampled and plotted in the editor, including unsaved edits. Save/build/reload preserves opaque operator data. Verified stationary point generations support native burst snapshots and deterministic ordered frame replay, including birth, lifetime, size, color, atlas and supported acceleration/damping/culling. The preview uses toolkit unlit atlas shading; full effect scheduling and native particle pixel shaders remain unsupported.
 See [effects evidence](MAFIA3-EFFECTS-EVIDENCE.md). Verified stock traffic markers can also be imported with an explicit editor helper preview;
 their vehicle spawning remains game runtime behavior. See [actor evidence](MAFIA3-NESTED-ACTORS.md).
 
-Still under investigation: world-collision bound expansion, arbitrary entity
-families and nested actor wrappers, unrestricted morph/opaque geometry variants, runtime particles,
-reflection/decal/dirt shader parity, and new navigation topology with cluster/streaming rebuilding. Mafia II-specific winter mirroring
+Additional support includes independent native Car10 placements into city Kits, carrying vehicle/wheel definitions, textures and native resource budgets into the destination archives. Verified StaticEntity32, native Tree22 vegetation and triangle-collision actors can also be duplicated. Animation clips can bind transiently to the selected scene rig and mesh, with exact rewind/restoration and no animation writes to GENR. Native vehicle decal, dirt albedo and dirt-normal stages use verified shader inputs.
+
+Native sparse facial morph targets support transient position/TBN preview before skinning through the editors and MCP, with exact restoration and unchanged native resources. Base-frame, skin and topology edits that would invalidate native morph coefficients/envelopes remain guarded. Placed city vehicles remain within the original static district visual footprint; this gate does not rewrite district streaming ownership.
+
+Still under investigation: additional entity/wrapper families, unrestricted opaque geometry authoring, persistent facial expression/float animation bindings, full particle effect scheduling/operator coverage, reflection/water shader parity, and navigation region stitching beyond the verified paired-section operations. Mafia II-specific winter mirroring
 and M2Online conversion remain unsupported for Mafia III. Reparenting requires a compatible hierarchy
 container; deletion refuses externally shared inline definitions. Rebuilt files are validated by fresh toolkit
 extraction and reload; no game was launched for these tests.
@@ -142,3 +145,13 @@ native allocation/subdivision evidence, vehicle layouts and individual test scen
   GPU rendering remains unchanged. See [Microsoft's D3DImage interop documentation](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/wpf-and-direct3d9-interoperation).
 - All 43 copied input archives and the material library match the installed originals by SHA-256.
   Tests write only copied working resources; their save/build scenarios restore the original copied archives.
+
+## Extended authoring validation (2026-11-01)
+
+The extended-authoring checkpoint passes 1,699 copied-file assertions with zero failures across 48 copied retail archives. This covers native curve and particle playback, morph preview, streamed navigation topology and representative costs, compound collision growth, native vehicle placement and nested component imports. The bridge payload probe passes 19 checks and the existing Mafia II export probe passes 46. The final dependency-order and reciprocal-cost validation changes pass 641 focused editing checks and 204 real HTTP MCP checks, with zero failures. Live MCP native point-timeline sampling, GPU expiration and byte-exact rewind also pass in the final build. All 48 copied SDS inputs and the material library still match their installed originals by SHA-256.
+
+The subsequent facial/water preview build passes 1,753 copied-file assertions and 209 real HTTP MCP checks with zero failures across 49 archives. This adds real facial float-track playback, posed GPU bounds/picking, the analytical water window and animation-window failure cleanup. Live MCP facial playback, exact GPU rewind/unbind and resource preservation pass; analytical water time/mode/weight changes and exact restoration pass. All 49 copied archives still match the installed originals; native rendering oracles and proprietary inputs remain outside the repository.
+
+Actual background resource-editor/MCP tests cover native edge flips, count-growing face subdivision and boundary extrusion: candidate discovery, live tree count refresh, GPU overlay changes, Save/Build, compressed fresh parsing and exact working-file/manifest/PNG undo. World-collision growth crosses the previous bounds, refits native dynamic compounds and survives an independent fresh compressed load.
+
+Actual `car_place` acceptance places and renders a native vehicle, packs all modified district LOD archives, restores every destination working file on undo, removes carried resources and restores the row on redo. The editor's packed output loads independently in a fixture with no car archives: ten owned frames, four native wheel rows, a 118-bone rig, three body LODs and eleven decoded collision volumes. Wheel templates stay outside world roots and no foreign car GENR dependency remains. Original game files are never test outputs.

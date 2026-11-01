@@ -837,6 +837,11 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             _viewport.CommitNodeTransform(_node);
             _viewport.RecordTransform(_node, before, fn.LocalTransform);
         }
+        catch (EditRefusedException refusal)
+        {
+            ReadTransform();
+            _viewport.RaiseNotice(refusal.Message, isError: true);
+        }
         finally { _applyingField = false; }
 
         // Notify the fields from the cached values (no lossy re-read) so a second editor bound to the same

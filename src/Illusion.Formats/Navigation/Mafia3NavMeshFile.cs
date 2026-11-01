@@ -9,7 +9,7 @@ namespace Illusion.Formats.Navigation;
 /// invalidating spatial trees, streaming connections or clearance-cache geometry.</summary>
 public sealed partial class Mafia3NavMeshFile
 {
-    private readonly byte[] _bytes;
+    private byte[] _bytes;
     private readonly List<Mafia3NavigationMesh> _meshes = [];
     public IReadOnlyList<Mafia3NavigationMesh> Meshes => _meshes;
     public uint ResourceId => BinaryPrimitives.ReadUInt32LittleEndian(_bytes.AsSpan(4));
@@ -138,23 +138,32 @@ public sealed partial class Mafia3NavMeshFile
 public sealed class Mafia3NavigationMesh
 {
     private readonly Mafia3NavMeshFile _file;
-    private readonly int _faceData, _edgeData;
+    private int _faceData, _edgeData;
     internal Mafia3NavigationMesh(Mafia3NavMeshFile file, Vector3[] vertices, uint[] triangles, Vector3[] lines,
         int faces, int edges, int faceData, int edgeData, int faceStride, int edgeStride)
         => (_file, Vertices, TriangleIndices, EdgeLines, FaceCount, EdgeCount, _faceData, _edgeData, FaceDataStride, EdgeDataStride) =
             (file, vertices, triangles, lines, faces, edges, faceData, edgeData, faceStride, edgeStride);
-    public IReadOnlyList<Vector3> Vertices { get; }
-    public IReadOnlyList<uint> TriangleIndices { get; }
-    public IReadOnlyList<Vector3> EdgeLines { get; }
-    internal void RefreshGeometry(Mafia3NavigationMesh source)
+    public IReadOnlyList<Vector3> Vertices { get; private set; }
+    public IReadOnlyList<uint> TriangleIndices { get; private set; }
+    public IReadOnlyList<Vector3> EdgeLines { get; private set; }
+    internal void RefreshGeometry(Mafia3NavigationMesh source, bool topology = false, bool resize = false)
     {
-        if (source.Vertices.Count != Vertices.Count || !source.TriangleIndices.SequenceEqual(TriangleIndices) || source.EdgeLines.Count != EdgeLines.Count)
+        if (resize)
+        {
+            if (source.FaceDataStride != FaceDataStride || source.EdgeDataStride != EdgeDataStride) throw new InvalidDataException("Navigation user data strides changed.");
+            Vertices = source.Vertices.ToArray(); TriangleIndices = source.TriangleIndices.ToArray(); EdgeLines = source.EdgeLines.ToArray();
+            FaceCount = source.FaceCount; EdgeCount = source.EdgeCount; _faceData = source._faceData; _edgeData = source._edgeData;
+            return;
+        }
+        if (source.Vertices.Count != Vertices.Count || source.TriangleIndices.Count != TriangleIndices.Count ||
+            (!topology && !source.TriangleIndices.SequenceEqual(TriangleIndices)) || source.EdgeLines.Count != EdgeLines.Count)
             throw new InvalidDataException("Navigation translation changed topology.");
         source.Vertices.ToArray().CopyTo((Vector3[])Vertices, 0);
+        if (topology) source.TriangleIndices.ToArray().CopyTo((uint[])TriangleIndices, 0);
         source.EdgeLines.ToArray().CopyTo((Vector3[])EdgeLines, 0);
     }
-    public int FaceCount { get; }
-    public int EdgeCount { get; }
+    public int FaceCount { get; private set; }
+    public int EdgeCount { get; private set; }
     public int FaceDataStride { get; }
     public int EdgeDataStride { get; }
     private static int Slot(int index, int channel, int count, int stride)

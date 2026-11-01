@@ -13,6 +13,31 @@ public partial class ResourceEditorWindow
         if (MafiaEnvironment.Profile.ArchiveVersion != 20 || Mafia3AuthoringItem.Parent is not MenuItem tools) return;
         var item = new MenuItem { Header = "Native animation preview…" };
         item.Click += (_, _) => OpenAnimationPreview(); tools.Items.Add(item);
+        var bind = new MenuItem { Header = "Bind native animation to selected rig" };
+        bind.Click += (_, _) =>
+        {
+            if (Stage.IsLoading || Stage.BridgeEditedCount > 0)
+            {
+                MessageBox.Show(this, "Finish loading and end the Blender edit session before binding animation.", "Native scene animation", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var selected = Stage.SelectedNode;
+            if (selected is null)
+            {
+                MessageBox.Show(this, "Select a compiled object with a render skeleton.", "Native scene animation", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            try
+            {
+                if (Stage.BindCompiledAnimation(OpenAnimationPreview(), selected) is { } refusal)
+                    MessageBox.Show(this, refusal, "Native scene animation", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+            { MessageBox.Show(this, ex.Message, "Native scene animation", MessageBoxButton.OK, MessageBoxImage.Information); }
+        };
+        tools.Items.Add(bind);
+        var clear = new MenuItem { Header = "Restore authored scene pose" };
+        clear.Click += (_, _) => AnimationPreview?.ClearSceneBinding(); tools.Items.Add(clear);
     }
     public AnimationPreviewWindow OpenAnimationPreview(FileInfo? archive = null, bool activate = true)
     {

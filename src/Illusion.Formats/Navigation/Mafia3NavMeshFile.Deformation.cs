@@ -5,9 +5,12 @@ namespace Illusion.Formats.Navigation;
 
 public sealed partial class Mafia3NavMeshFile
 {
-    /// <summary>Validates fixed-plane, fixed-topology interior edits before an isolated native cook.
+    /// <summary>Validates planar-face, fixed-topology interior edits before an isolated native cook.
     /// Boundary, streaming, cluster membership and all connectivity records remain unchanged.</summary>
     public Mafia3NavigationCookPlan PrepareInteriorDeformation(IReadOnlyDictionary<int, Vector3> edits)
+        => PrepareDeformation(edits, null);
+
+    private Mafia3NavigationCookPlan PrepareDeformation(IReadOnlyDictionary<int, Vector3> edits, IReadOnlySet<int>? pairedBoundary)
     {
         ArgumentNullException.ThrowIfNull(edits);
         var layout = new TranslationLayout(_bytes);
@@ -40,7 +43,7 @@ public sealed partial class Mafia3NavMeshFile
             { boundary.Add(a); boundary.Add(b); }
         }
         foreach (int id in boundary)
-            if (changed[id] != original[id]) throw new NotSupportedException($"Vertex {id} touches a boundary, blocked edge or streaming connection.");
+            if (changed[id] != original[id] && pairedBoundary?.Contains(id) != true) throw new NotSupportedException($"Vertex {id} touches a boundary, blocked edge or streaming connection.");
         Vector3 minimum = Read(mesh.Object + 128), maximum = Read(mesh.Object + 144);
         foreach (var value in changed)
             if (value.X < minimum.X || value.Y < minimum.Y || value.Z < minimum.Z || value.X > maximum.X || value.Y > maximum.Y || value.Z > maximum.Z)
@@ -57,12 +60,21 @@ public sealed partial class Mafia3NavMeshFile
             for (int i = 1; i < count - 1; i++) normal += Vector3.Cross(original[ids[i]] - origin, original[ids[i + 1]] - origin);
             if (!Mafia3AiWorldFile.Finite(normal) || normal.LengthSquared() < 1e-12f) throw new InvalidDataException("Degenerate original navigation face.");
             normal = Vector3.Normalize(normal);
+            var changedOrigin = changed[ids[0]]; var changedNormal = Vector3.Zero;
+            for (int i = 1; i < count - 1; i++) changedNormal += Vector3.Cross(changed[ids[i]] - changedOrigin, changed[ids[i + 1]] - changedOrigin);
+            if (!Mafia3AiWorldFile.Finite(changedNormal) || changedNormal.LengthSquared() < 1e-12f)
+                throw new NotSupportedException("Deformation would collapse a navigation face.");
+            changedNormal = Vector3.Normalize(changedNormal);
+            // Mafia III's navigation is Z-up. Preserve orientation and never introduce a
+            // steeper-than-45-degree surface (or worsen an already steeper authored face).
+            if (Vector3.Dot(normal, changedNormal) <= 0 || MathF.Abs(changedNormal.Z) + 1e-6f < MathF.Min(MathF.Abs(normal.Z), .70710677f))
+                throw new NotSupportedException("Deformation would reverse or excessively steepen a navigation face.");
             for (int i = 0; i < count; i++)
             {
                 Vector3 a = changed[ids[i]], b = changed[ids[(i + 1) % count]], c = changed[ids[(i + 2) % count]];
-                if (MathF.Abs(Vector3.Dot(a - origin, normal)) > .001f)
-                    throw new NotSupportedException("Interior deformation currently preserves each affected face's original plane.");
-                if (Vector3.Dot(Vector3.Cross(b - a, c - b), normal) <= 1e-8f)
+                if (MathF.Abs(Vector3.Dot(a - changedOrigin, changedNormal)) > .001f)
+                    throw new NotSupportedException("Deformation would make a navigation polygon non-planar.");
+                if (Vector3.Dot(Vector3.Cross(b - a, c - b), changedNormal) <= 1e-8f)
                     throw new NotSupportedException("Deformation would collapse, reverse or make a navigation face concave.");
             }
         }
@@ -97,6 +109,9 @@ public sealed partial class Mafia3NavMeshFile
                 BinaryPrimitives.ReadSingleLittleEndian(cooked[(address + 4)..]), BinaryPrimitives.ReadSingleLittleEndian(cooked[(address + 8)..])));
         }
         var validated = PrepareInteriorDeformation(edits);
+        foreach (var link in ReadStreaming().Graph)
+            if (!_bytes.AsSpan(initial.GraphPositions + link.Node * 16, 12).SequenceEqual(cooked.Slice(initial.GraphPositions + link.Node * 16, 12)))
+                throw new NotSupportedException("Moving a streamed cluster representative requires joint peer cost recooking.");
         var allowed = new bool[_bytes.Length];
         void Allow(int address, int size) => Array.Fill(allowed, true, address, size);
         for (int v = 0; v < initial.VertexCount; v++) Allow(initial.Vertices + v * 16, 12);
@@ -124,4 +139,8 @@ public sealed partial class Mafia3NavMeshFile
 public sealed record Mafia3NavigationCookPlan(byte[] Baseline, byte[] Modified, int MeshObject, int GraphObject,
     int Vertices, int VertexCount, int Faces, int FaceCount, int Edges, int EdgeCount,
     int GraphPositions, int GraphNodes, int ClusterCount, int GraphEdges, int GraphEdgeCount,
-    int RootCount, int[] BoundaryVertices);
+    int RootCount, int[] BoundaryVertices)
+{
+    public Mafia3NavigationCookPlan? ModifiedLayout { get; init; }
+    public int[]? RequiredFaceConnections { get; init; }
+}

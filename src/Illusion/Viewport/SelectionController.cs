@@ -116,7 +116,7 @@ internal sealed class SelectionController
         max = new Vector3(float.MinValue);
         foreach (SceneNode n in _selected)
         {
-            if (n.TryGetWorldBounds(out Vector3 lo, out Vector3 hi))
+            if (TryGetVisibleGeometryBounds(n, out Vector3 lo, out Vector3 hi) || n.TryGetWorldBounds(out lo, out hi))
             {
                 min = Vector3.Min(min, lo);
                 max = Vector3.Max(max, hi);
@@ -135,6 +135,22 @@ internal sealed class SelectionController
                 min = Vector3.Min(min, p - new Vector3(ActorMarkerBuilder.Radius));
                 max = Vector3.Max(max, p + new Vector3(ActorMarkerBuilder.Radius));
             }
+        }
+        return min.X <= max.X;
+    }
+
+    private static bool TryGetVisibleGeometryBounds(SceneNode node, out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue); max = new Vector3(float.MinValue);
+        var stack = new Stack<SceneNode>(); stack.Push(node);
+        while (stack.TryPop(out var current))
+        {
+            if (current.Mesh is { Visible: true } mesh)
+            {
+                mesh.RefreshPose();
+                min = Vector3.Min(min, mesh.BoundsMin); max = Vector3.Max(max, mesh.BoundsMax);
+            }
+            foreach (var child in current.Children) stack.Push(child);
         }
         return min.X <= max.X;
     }

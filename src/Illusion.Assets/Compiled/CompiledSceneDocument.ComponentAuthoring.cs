@@ -109,7 +109,7 @@ public sealed partial class CompiledSceneDocument
         {
             if (!_applied) return;
             document.SetItems(container, document.CurrentItems(container).Where(i => !ReferenceEquals(i, entry)).ToArray());
-            document.SetItems(toc, document.CurrentItems(toc).Except(tables).ToArray());
+            document.SetGuidTableItems(toc, document.CurrentItems(toc).Except(tables).ToArray());
             var plan = document.Plan(resource);
             foreach (var (type, count) in counts)
             {

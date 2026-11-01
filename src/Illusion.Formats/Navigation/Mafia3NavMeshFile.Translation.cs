@@ -82,13 +82,13 @@ public sealed partial class Mafia3NavMeshFile
         return edit;
     }
 
-    internal void ApplyTranslation(IReadOnlyList<NavigationBytePatch> patches, bool forward)
+    internal void ApplyTranslation(IReadOnlyList<NavigationBytePatch> patches, bool forward, bool topology = false)
     {
         byte[] next = (byte[])_bytes.Clone();
         foreach (var patch in patches) (forward ? patch.After : patch.Before).CopyTo(next, patch.Address);
         var parsed = Read(next);
         if (parsed.Meshes.Count != _meshes.Count) throw new InvalidDataException("Navigation translation changed section count.");
-        for (int i = 0; i < _meshes.Count; i++) _meshes[i].RefreshGeometry(parsed.Meshes[i]);
+        for (int i = 0; i < _meshes.Count; i++) _meshes[i].RefreshGeometry(parsed.Meshes[i], topology);
         next.CopyTo(_bytes, 0);
     }
 
@@ -115,6 +115,12 @@ public sealed partial class Mafia3NavMeshFile
             int size = Int(owner.Object + offset + 8);
             if (size is < 0 or > 10_000_000) throw new InvalidDataException("Invalid translation array count.");
             return size == 0 ? (0, 0) : (Address(Pointer(owner.Section, owner.Offset + offset), checked(size * stride)), size);
+        }
+        public (int Address, int Count) ArrayAt(int header, int stride)
+        {
+            int section = _sections.FindIndex(s => header >= s.Start && header <= s.Start + s.Local - 16);
+            if (section < 0) throw new InvalidDataException("Navigation nested array exceeds its data section.");
+            return Array(new Variant("", header, 0, section, header - _sections[section].Start), 0, stride);
         }
         public TranslationLayout(byte[] bytes)
         {
@@ -163,7 +169,8 @@ public sealed class Mafia3NavigationTranslation
 {
     private readonly Mafia3NavMeshFile _file;
     private readonly IReadOnlyList<NavigationBytePatch> _patches;
-    internal Mafia3NavigationTranslation(Mafia3NavMeshFile file, IReadOnlyList<NavigationBytePatch> patches) => (_file, _patches) = (file, patches);
-    public void Undo() => _file.ApplyTranslation(_patches, false);
-    public void Redo() => _file.ApplyTranslation(_patches, true);
+    private readonly bool _topology;
+    internal Mafia3NavigationTranslation(Mafia3NavMeshFile file, IReadOnlyList<NavigationBytePatch> patches, bool topology = false) => (_file, _patches, _topology) = (file, patches, topology);
+    public void Undo() => _file.ApplyTranslation(_patches, false, _topology);
+    public void Redo() => _file.ApplyTranslation(_patches, true, _topology);
 }

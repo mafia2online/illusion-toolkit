@@ -10,7 +10,7 @@ public sealed partial class CompiledSceneDocument
 {
     public sealed record NavigationDeformationResult(IEditAction? Edit, string? Refusal);
 
-    /// <summary>Cooks fixed-plane interior vertex edits in a separate process. The source graph must
+    /// <summary>Cooks planar-face interior vertex edits in a separate process. The source graph must
     /// first be reproduced exactly by the reviewed native ABI. Returned edits are already applied.</summary>
     public async Task<NavigationDeformationResult> DeformNavigationInteriorAsync(int sectionIndex,
         IReadOnlyDictionary<int, Vector3> vertices, string? copiedExecutablePath = null, CancellationToken cancellationToken = default)
@@ -32,14 +32,17 @@ public sealed partial class CompiledSceneDocument
 }
 
 /// <summary>JSON transport only. Native PE bytes are mapped exclusively by the isolated child.</summary>
-public static class NativeNavigationCooker
+public static partial class NativeNavigationCooker
 {
     private sealed record Vertex(int Index, float X, float Y, float Z);
-    private sealed record Request(string ExecutablePath, byte[] Resource, Vertex[] Edits);
+    private sealed record Request(string ExecutablePath, byte[] Resource, Vertex[] Edits, string? Operation = null, int? Edge = null, int? Face = null, Vertex? Position = null);
     private sealed record Response(bool Success, byte[]? Resource, string? Error);
     public static async Task<byte[]> CookAsync(byte[] resource, IReadOnlyDictionary<int, Vector3> vertices,
-        string? copiedExecutablePath = null, CancellationToken cancellationToken = default, string? helperPath = null)
+        string? copiedExecutablePath = null, CancellationToken cancellationToken = default, string? helperPath = null, int? flipEdge = null,
+        int? subdivideFace = null, Vector3? subdivisionPosition = null, int? extrudeEdge = null, Vector3? extrusionPosition = null)
     {
+        if ((flipEdge is not null ? 1 : 0) + (subdivideFace is not null ? 1 : 0) + (extrudeEdge is not null ? 1 : 0) > 1)
+            throw new ArgumentException("One native navigation topology operation is allowed per request.");
         string executable;
         if (copiedExecutablePath is not null) executable = Path.GetFullPath(copiedExecutablePath);
         else
@@ -71,7 +74,9 @@ public static class NativeNavigationCooker
         Task<string> output = process.StandardOutput.ReadToEndAsync(timeout.Token), error = process.StandardError.ReadToEndAsync(timeout.Token);
         try
         {
-            var request = new Request(executable, resource, vertices.Select(v => new Vertex(v.Key, v.Value.X, v.Value.Y, v.Value.Z)).ToArray());
+            var request = new Request(executable, resource, vertices.Select(v => new Vertex(v.Key, v.Value.X, v.Value.Y, v.Value.Z)).ToArray(),
+                extrudeEdge is not null ? "navigation_extrude" : subdivideFace is not null ? "navigation_subdivide" : flipEdge is null ? null : "navigation_flip", extrudeEdge ?? flipEdge,
+                subdivideFace, (extrusionPosition ?? subdivisionPosition) is { } position ? new Vertex(0, position.X, position.Y, position.Z) : null);
             await process.StandardInput.WriteAsync(JsonSerializer.Serialize(request).AsMemory(), timeout.Token);
             process.StandardInput.Close();
             await process.WaitForExitAsync(timeout.Token);

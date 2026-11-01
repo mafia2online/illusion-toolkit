@@ -14,6 +14,8 @@ public sealed class MeshData
     public Vector3[] Normals { get; init; } = null!;
     public Vector2[]? UVs { get; init; }
     public Vector4[]? Colors { get; init; }
+    /// <summary>Optional native TEXCOORD2 used by verified vehicle T018 decals.</summary>
+    public Vector2[]? DecalUVs { get; init; }
     /// <summary>Per-vertex tangent/binormal (world of the local frame) for normal mapping; null when the
     /// source mesh has no tangent channel — then the shader falls back to the vertex normal.</summary>
     public Vector3[]? Tangents { get; init; }

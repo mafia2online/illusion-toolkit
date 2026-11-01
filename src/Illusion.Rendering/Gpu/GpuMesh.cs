@@ -80,6 +80,8 @@ public sealed unsafe class GpuMesh : IDisposable
     public ComPtr<ID3D11Buffer> SkinBuffer;
     public ComPtr<ID3D11Buffer> ColorBuffer;
     public bool HasVertexColors => ColorBuffer.Handle != null;
+    public ComPtr<ID3D11Buffer> DecalUvBuffer;
+    public bool HasDecalUvs => DecalUvBuffer.Handle != null;
 
     /// <summary>
     /// What each bone does to the mesh right now: the matrix from the pose the geometry was authored in to
@@ -112,6 +114,13 @@ public sealed unsafe class GpuMesh : IDisposable
     // but so the crash-placement picker can test a ray against this prototype at one copy's matrix.
     public Vector3[]? PickPositions;
     public uint[]? PickIndices;
+    private Vector3[]? _bindPositions;
+    private byte[]? _skinIndices;
+    private float[]? _skinWeights;
+    private Matrix4x4[]? _cpuPose;
+    private Vector3[]? _posedPositions;
+    private VertexPreviewLease? _vertexPreview;
+
 
     /// <summary>Local-space AABB of the prototype geometry — the crash-placement picker's broad phase transforms
     /// its corners by a single copy's matrix.</summary>
@@ -203,6 +212,7 @@ public sealed unsafe class GpuMesh : IDisposable
             InstanceCount = instanced ? mesh.Instances!.Length : 1,
             InstanceCells = cells,
             PickPositions = mesh.Positions,
+            _bindPositions = mesh.Positions,
             PickIndices = mesh.Indices,
         };
 
@@ -244,6 +254,12 @@ public sealed unsafe class GpuMesh : IDisposable
             fixed (Vector4* data = colors) result.ColorBuffer = GpuBuffers.CreateImmutable(gpu, data, (uint)(n * sizeof(Vector4)), BindFlag.VertexBuffer);
         }
 
+        if (mesh.DecalUVs is { } decalUvs)
+        {
+            if (decalUvs.Length != n) throw new InvalidDataException("Decal UVs do not match the mesh allocation.");
+            fixed (Vector2* data = decalUvs) result.DecalUvBuffer = GpuBuffers.CreateImmutable(gpu, data, (uint)(n * sizeof(Vector2)), BindFlag.VertexBuffer);
+        }
+
         // The skin, when the mesh has one and its rig fits the palette. A rig too big to address is simply not
         // skinned: drawing it with wrapped-around bone indices would tear the model apart.
         if (!instanced && mesh.IsSkinned && mesh.Skeleton!.Bones.Count <= BonePalette.MaxBones)
@@ -281,6 +297,7 @@ public sealed unsafe class GpuMesh : IDisposable
                 bindInverse[i] = Matrix4x4.Invert(rest, out Matrix4x4 inverse) ? inverse : Matrix4x4.Identity;
             }
             result.BindInverse = bindInverse;
+            result._skinIndices = ids; result._skinWeights = weights;
             result.LiveRest = mesh.LiveRest;
             // Start in the pose the rest transforms describe rather than at the identity. For a file nobody
             // has edited the two are the same thing; for one saved with a bone moved they are not, and the
@@ -299,10 +316,44 @@ public sealed unsafe class GpuMesh : IDisposable
     public void SetPose(IReadOnlyList<Matrix4x4> currentRest)
     {
         if (BindInverse is not { } bind) return;
+        bool changed = _cpuPose is null || _cpuPose.Length != bind.Length;
+        if (changed) _cpuPose = new Matrix4x4[bind.Length];
         for (int i = 0; i < bind.Length; i++)
         {
-            Palette.Set(i, i < currentRest.Count ? bind[i] * Affine(currentRest[i]) : Matrix4x4.Identity);
+            var matrix = i < currentRest.Count ? bind[i] * Affine(currentRest[i]) : Matrix4x4.Identity;
+            changed |= _cpuPose![i] != matrix;
+            _cpuPose![i] = matrix;
+            Palette.Set(i, matrix);
         }
+        if (changed) RefreshPickGeometry();
+    }
+
+    // Use the same four weighted affine transforms as SkinnedMeshShader.VSMain. Native packed
+    // weights need not sum to one; normalizing here would make picking disagree with the GPU.
+    private void RefreshPickGeometry()
+    {
+        if (_bindPositions is not { } positions) return;
+        if (_skinIndices is { } indices && _skinWeights is { } weights && _cpuPose is not null)
+        {
+            if (_posedPositions?.Length != positions.Length) _posedPositions = new Vector3[positions.Length];
+            for (int vertex = 0; vertex < positions.Length; vertex++)
+            {
+                Vector3 posed = default;
+                for (int influence = 0; influence < 4; influence++)
+                {
+                    int index = vertex * 4 + influence;
+                    if (index >= indices.Length || index >= weights.Length) continue;
+                    posed += Vector3.Transform(positions[vertex], Palette.Get(indices[index])) * weights[index];
+                }
+                _posedPositions[vertex] = posed;
+            }
+            PickPositions = _posedPositions;
+        }
+        else PickPositions = positions;
+        _localMin = new Vector3(float.MaxValue); _localMax = new Vector3(float.MinValue);
+        foreach (var position in PickPositions)
+        { _localMin = Vector3.Min(_localMin, position); _localMax = Vector3.Max(_localMax, position); }
+        RecomputeBounds();
     }
 
     // A frame matrix rides as 4x3, so its fourth column is not (0,0,0,1) and neither inversion nor
@@ -365,14 +416,31 @@ public sealed unsafe class GpuMesh : IDisposable
         return true;
     }
 
-    private static ComPtr<ID3D11ShaderResourceView>[]? AcquireSurface(TextureLibrary textures, SurfaceMaterial? surface, List<TextureLease> leases) =>
-        surface is null || surface.Layers < 2 ? null : new[]
+    private static ComPtr<ID3D11ShaderResourceView>[]? AcquireSurface(TextureLibrary textures, SurfaceMaterial? surface, List<TextureLease> leases)
+    {
+        if (surface is { Layers: < 0 } && (surface.VehicleDirt is not null || surface.VehicleDecal is not null))
+        {
+            var result = new ComPtr<ID3D11ShaderResourceView>[8];
+            if (surface.VehicleDirt is { } dirt)
+            {
+                result[3] = textures.Acquire(dirt.MaskTexture, leases);
+                if (dirt.Normal is { } normal)
+                {
+                    result[1] = textures.AcquireNormalOrFlat(normal.Texture, leases);
+                    result[2] = textures.Acquire(normal.SecondaryMask, leases);
+                }
+            }
+            if (surface.VehicleDecal is { } decal) result[4] = textures.Acquire(decal.Texture, leases);
+            return result;
+        }
+        return surface is null || surface.Layers < 2 ? null : new[]
         {
             textures.Acquire(surface.Layer2Diffuse, leases), textures.AcquireNormalOrFlat(surface.Layer2Normal, leases),
             textures.Acquire(surface.Layer2Specular, leases), textures.Acquire(surface.BlendMask, leases),
             textures.Acquire(surface.Layer3Diffuse, leases), textures.AcquireNormalOrFlat(surface.Layer3Normal, leases),
             textures.Acquire(surface.Layer3Specular, leases), textures.Acquire(surface.BlendMask2, leases)
         };
+    }
 
     // The new leases are taken BEFORE the old ones go back: a part rebound to the texture it already has must
     // not drop that texture's last reference on the way.
@@ -416,6 +484,37 @@ public sealed unsafe class GpuMesh : IDisposable
         }
         BoundsMin = bmin;
         BoundsMax = bmax;
+    }
+
+    /// <summary>Temporarily substitutes vertex geometry while preserving this mesh's history and material identity.</summary>
+    public IDisposable OverrideVertexGeometry(GpuMesh preview)
+    {
+        if (Instanced || preview.Instanced || preview.TriangleCount != TriangleCount)
+            throw new InvalidOperationException("Vertex preview requires unchanged non-instanced topology.");
+        if (_disposed || _vertexPreview is not null)
+            throw new InvalidOperationException("Restore the current vertex preview before replacing it.");
+        if (preview._bindPositions?.Length != _bindPositions?.Length)
+            throw new InvalidOperationException("Vertex preview requires an unchanged vertex allocation.");
+        var original = VertexBuffer; var positions = _bindPositions;
+        VertexBuffer = preview.VertexBuffer; preview.VertexBuffer = default;
+        _bindPositions = preview._bindPositions;
+        RefreshPickGeometry();
+        return _vertexPreview = new VertexPreviewLease(this, original, positions);
+    }
+
+    private sealed class VertexPreviewLease(GpuMesh mesh, ComPtr<ID3D11Buffer> original, Vector3[]? positions) : IDisposable
+    {
+        private bool _active = true;
+        public void Dispose()
+        {
+            if (!_active) return;
+            _active = false;
+            mesh.VertexBuffer.Dispose(); mesh.VertexBuffer = original;
+            mesh._bindPositions = positions; mesh._vertexPreview = null;
+            // A bone may have moved while the lease was active. Restore the authored base in the
+            // current pose, rather than resurrecting a captured old posed array or old bounds.
+            mesh.RefreshPickGeometry();
+        }
     }
 
     /// <summary>
@@ -465,12 +564,14 @@ public sealed unsafe class GpuMesh : IDisposable
     public void Dispose()
     {
         if (_disposed) return; // several owners may dispose (render list, delete edit, stale load) — once only
+        _vertexPreview?.Dispose();
         _disposed = true;
         VertexBuffer.Dispose();
         IndexBuffer.Dispose();
         if (Instanced) InstanceBuffer.Dispose();
         if (IsSkinned) SkinBuffer.Dispose();
         if (ColorBuffer.Handle != null) ColorBuffer.Dispose();
+        if (DecalUvBuffer.Handle != null) DecalUvBuffer.Dispose();
         // SRVs belong to TextureLibrary — returning the leases lets it evict entries with no users left.
         foreach (List<TextureLease> leases in _partLeases) _textures?.Release(leases);
         _textures?.Release(_textureLeases);

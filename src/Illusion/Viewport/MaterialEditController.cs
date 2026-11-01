@@ -380,7 +380,11 @@ internal sealed class MaterialEditController
         var part = new MeshPart(start, count, textures.Diffuse, textures.Normal, textures.Specular,
             hash, textures.Tint, textures.Blended, Surface(hash));
         if (node?.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document)
-            part = document.ApplyVehiclePaint(new MeshData { Parts = [part], Colors = hasColors ? [System.Numerics.Vector4.One] : null }).Parts[0];
+        {
+            var source = node.GeometrySource ?? node.Source;
+            var owner = source is Assets.Compiled.ICompiledMeshSource compiled ? compiled.CanonicalFrame : source as IFrameNode;
+            part = document.ApplyVehiclePaint(new MeshData { Parts = [part], Colors = hasColors ? [System.Numerics.Vector4.One] : null }, owner).Parts[0];
+        }
         return part;
     }
 

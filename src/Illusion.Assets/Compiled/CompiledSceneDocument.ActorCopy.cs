@@ -27,7 +27,7 @@ public sealed partial class CompiledSceneDocument
             if (!actorParts.Contains(scene))
             {
                 copies.AddRange(CopyActorAssets(scene, ids));
-                if (ActorContract(scene)) actorParts.UnionWith(Descendants(scene).Where(n => n.TypeId == 0x4403597e));
+                if (ActorContract(scene) || CompiledVehiclePlacementSupport.Supported(Graph, scene)) actorParts.UnionWith(Descendants(scene).Where(n => n.TypeId == 0x4403597e));
             }
             copies.AddRange(CopyGeometry(scene));
         }
@@ -66,11 +66,13 @@ public sealed partial class CompiledSceneDocument
 
     private List<GeometryCopy> CopyActorAssets(CompiledElement scene, IReadOnlyDictionary<ulong, ulong> sceneIds)
     {
-        if(CompiledTranslocatedCarSupport.Supported(Graph,scene))return [];
+        if(CompiledTranslocatedCarSupport.Supported(Graph,scene) || CompiledStaticEntitySupport.Supported(Graph,scene)
+            || CompiledTreeEntitySupport.Supported(Graph,scene, explicitEntries: CurrentExplicitDependencyEntries) || CompiledFrameWrapperSupport.Supported(Graph,scene))return [];
         var entity = Components(scene).FirstOrDefault(c => c.TypeId == 0xdeb11995);
         bool actor = entity is not null;
+        bool vehicle = actor && CompiledVehiclePlacementSupport.Supported(Graph, scene);
         if (!actor && !Components(scene).Any(c => c.TypeId == 0x2b7b4775)) return [];
-        if (actor && !ActorContract(scene)) throw new NotSupportedException("Only verified type-12 actor/prefab ownership contracts can be copied.");
+        if (actor && !vehicle && !ActorContract(scene)) throw new NotSupportedException("Only verified actor or vehicle prefab ownership contracts can be copied.");
         var globalSceneIds = sceneIds.Where(p => Graph.Objects.ContainsKey(p.Key)).ToDictionary(p => p.Key, p => p.Value);
         var copy = new GeometryCopy(this, globalSceneIds);
         void Guard(CompiledElement source)
@@ -89,24 +91,35 @@ public sealed partial class CompiledSceneDocument
         }
         var subtreeComponents = actor ? Descendants(scene).Where(n => n.Event == 2 && n.TypeId == 0x4403597e).SelectMany(Components).ToArray() : Components(scene).ToArray();
         foreach (var component in subtreeComponents)
+        {
+            if (vehicle && component.TypeId == 0x30501f8d)
+            {
+                var init = Graph.Resolve(Graph.Field(component, "m_InitData"))!;
+                Guard(init);
+                copy.CloneDefinition(init, followDependencies: false);
+            }
             if (Graph.Resolve(Graph.Field(component, "m_HierarchyDataPtr")) is { } hierarchy)
             {
                 if (hierarchy.TypeId != 0xc772e406) throw new NotSupportedException("Unknown actor deformation hierarchy schema.");
                 Guard(hierarchy);
                 copy.CloneDefinition(hierarchy, followDependencies: false);
             }
+        }
         var physicsShapes = new List<(CompiledElement Shape, CompiledElement Physics)>();
+        var physicsAliases = new Dictionary<ulong, ulong>();
         foreach (var component in subtreeComponents)
             foreach (var entry in Graph.Items(Graph.Field(component, "m_ElementDefs")))
                 {
                     if (Graph.Field(entry, "m_ItemDesc") is not { DataSize: 8 or 12 } field ||
                         !Graph.Objects.TryGetValue(Graph.Integer(field), out var shape))
                         throw new NotSupportedException("Actor collision descriptor is unresolved or has an unknown reference layout.");
-                    if (shape.TypeId is not (0x48430eeb or 0x63ee7798 or 0x4fd32ee0)) throw new NotSupportedException("Unknown actor collision descriptor.");
+                    if (shape.TypeId is not (0x48430eeb or 0x63ee7798 or 0x4fd32ee0 or 0x7a0b5196)) throw new NotSupportedException("Unknown actor collision descriptor.");
                     var physics = CollisionPhysics(shape) ?? throw new NotSupportedException("Actor collision has no resolved PC physics data.");
                     Guard(shape); Guard(physics);
                     var clonedShape = copy.CloneDefinition(shape, followDependencies: false);
                     var clonedPhysics = copy.CloneDefinition(physics, followDependencies: false);
+                    ulong oldHash = Graph.Integer(Graph.Field(shape, "m_DataHash")!);
+                    if (oldHash != 0) { copy.RemapAlias(oldHash, clonedPhysics.ObjectId); physicsAliases[oldHash] = clonedPhysics.ObjectId; }
                     physicsShapes.Add((clonedShape, clonedPhysics));
                 }
         copy.Finish();
@@ -129,6 +142,17 @@ public sealed partial class CompiledSceneDocument
                 byte[] bytes = Graph.Data(field).ToArray();
                 BinaryPrimitives.WriteUInt64LittleEndian(bytes, id);
                 Graph.Owner(field).Replace(field, bytes);
+            }
+        foreach (var component in subtreeComponents)
+            if (Graph.Field(component, "m_DataDependencies") is { Event: 4 } dependencies)
+            {
+                byte[] bytes = Graph.Data(dependencies).ToArray();
+                if (bytes.Length < 4 || bytes.Length != 4L + BinaryPrimitives.ReadUInt32LittleEndian(bytes) * 8L)
+                    throw new NotSupportedException("Unknown actor collision dependency-array layout.");
+                for (int offset = 4; offset < bytes.Length; offset += 8)
+                    if (physicsAliases.TryGetValue(BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset)), out ulong hash))
+                        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(offset), hash);
+                Graph.Owner(dependencies).Replace(dependencies, bytes);
             }
         return [copy];
     }

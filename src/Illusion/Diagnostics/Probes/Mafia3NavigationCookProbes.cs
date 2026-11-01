@@ -15,7 +15,11 @@ internal static partial class Mafia3Probes
         if (string.IsNullOrWhiteSpace(copiedExecutable) || !File.Exists(copiedExecutable)) return;
         Task.Run(async () =>
         {
-            foreach (var (name, vertex) in new[] { ("bc_loc_quarry_dummy_general.sds", 0), ("bc_loc_sammys_club_dummy_general.sds", 19) })
+            foreach (var (name, vertex, offset) in new[] {
+                ("bc_loc_quarry_dummy_general.sds", 0, new Vector3(.05f, 0, 0)),
+                ("bc_loc_sammys_club_dummy_general.sds", 19, new Vector3(.05f, 0, 0)),
+                ("bc_loc_quarry_dummy_general.sds", 462, new Vector3(0, 0, .02f)),
+                ("bc_loc_sammys_club_dummy_general.sds", 1330, new Vector3(0, 0, .02f)) })
             {
                 var archive = new FileInfo(Path.Combine(MafiaEnvironment.CityFolder, name));
                 if (!archive.Exists) continue;
@@ -27,12 +31,13 @@ internal static partial class Mafia3Probes
                 {
                     var nav = document.NavigationMeshes.Single();
                     byte[] before = nav.ToBytes(); var original = nav.Meshes.Single().Vertices[vertex];
-                    var vertices = new Dictionary<int, Vector3> { [vertex] = original + new Vector3(.05f, 0, 0) };
+                    var vertices = new Dictionary<int, Vector3> { [vertex] = original + offset };
                     var noop = await document.DeformNavigationInteriorAsync(0, new Dictionary<int, Vector3>(), copiedExecutable);
                     check(name + " native exact stock graph/no-op", noop.Edit is not null && nav.ToBytes().SequenceEqual(before));
                     var result = await document.DeformNavigationInteriorAsync(0, vertices, copiedExecutable);
                     var edit = result.Edit ?? throw new InvalidOperationException(result.Refusal);
                     check(name + " native canonical interior edit", nav.Meshes.Single().Vertices[vertex] == vertices[vertex]);
+                    if (offset.Z != 0) check(name + " native interior elevation changes face planes", nav.Meshes.Single().Vertices[vertex].Z != original.Z);
                     document.SaveWorkingCopy();
                     check(name + " native interior fresh document", new CompiledSceneDocument(archive).NavigationMeshes.Single().Meshes.Single().Vertices[vertex] == vertices[vertex]);
                     var packed = SdsArchive.Pack(folder, MafiaEnvironment.Profile);

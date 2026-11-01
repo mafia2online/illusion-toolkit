@@ -128,7 +128,8 @@ public static class HelperGlyphBuilder
             {
                 // A dragged bone draws where it now is; the rest transform captured at load is the fallback
                 // for a scene built without a document.
-                world[i] = rig.Bones[i].Source is IFrameNode live ? live.WorldTransform : rig.Bones[i].Rest * rig.World;
+                world[i] = rig.LiveRest is { } pose ? pose[i] * (rig.OwnerFrame?.WorldTransform ?? rig.World)
+                    : rig.Bones[i].Source is IFrameNode live ? live.WorldTransform : rig.Bones[i].Rest * rig.World;
             }
 
             // Which bones have exactly one child — those get a glyph that spans the joint it drives.

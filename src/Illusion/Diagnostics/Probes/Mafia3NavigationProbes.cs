@@ -11,6 +11,7 @@ internal static partial class Mafia3Probes
 {
     private static void TestCompiledNavigation(Action<string, bool> check)
     {
+        TestCompiledNavigationStreaming(check);
         foreach (string name in new[] { "bc_easthighland_general.sds", "bc_magnolia_unique_church_a_general.sds" })
         {
             var archive = new FileInfo(Path.Combine(MafiaEnvironment.CityFolder, name));

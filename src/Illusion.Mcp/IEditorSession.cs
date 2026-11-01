@@ -121,10 +121,36 @@ public interface IEditorSession
     string? MaterialParameter(string material, string parameter, float[]? values, out float[] current) { current = []; return "material parameter editing is unavailable"; }
     string? RemoveCollision(string name) => "collision removal is unavailable";
     Task<string?> DeformNavigationAsync(string name, int section, int[] vertices, float[][] positions, string? executable) => Task.FromResult<string?>("native navigation deformation is unavailable");
+    Task<string?> FlipNavigationEdgeAsync(string name, int section, int edge, string? executable) => Task.FromResult<string?>("native navigation topology editing is unavailable");
+    Task<string?> SubdivideNavigationFaceAsync(string name, int section, int face, float[]? position, string? executable) => Task.FromResult<string?>("native navigation subdivision is unavailable");
+    Task<string?> ExtrudeNavigationBoundaryAsync(string name, int section, int edge, float[]? position, string? executable) => Task.FromResult<string?>("native navigation boundary extrusion is unavailable");
+    Task<string?> DeformNavigationStreamingAsync(string name, int section, int peer, int[] vertices, float[][] positions, string? executable, bool moveRepresentatives = false) => Task.FromResult<string?>("joint native navigation deformation is unavailable");
+    Task<string?> SplitNavigationStreamingAsync(string name, int section, int peer, int edge, float[]? position, string? executable, bool moveRepresentatives = false) => Task.FromResult<string?>("native navigation stream splitting is unavailable");
+    string? NavigationStreamingCandidates(string name, int section, int peer, int limit, out int[] edges) { edges = []; return "native navigation stream candidates are unavailable"; }
     string? TranslateNavigation(string name, int section, float[] offset) => "navigation translation is unavailable";
     string? RecookCollision(string name, float[][] positions) => "compiled collision recooking is unavailable";
     string? MakeMeshUnique(string name) => "compiled geometry isolation is unavailable";
     string? AnimationScreenshot(string path) => "native animation preview is unavailable";
+    string? PlaceVehicle(string parent, string archive, string? name, float[]? position, float? yaw, out string? path)
+    { path = null; return "native vehicle placement is unavailable"; }
+    string? EffectPreview(int effect, int generation, int parameter, float time, float age, bool ageAxis,
+        out string? description, out IReadOnlyList<string> parameters)
+    { description = null; parameters = []; return "native effect preview is unavailable"; }
+    Task<EffectPointViewResult> EffectPointPreviewAsync(ulong generation, float time, bool timeline, int frames, float step, uint seed, string plane, float zoom)
+        => Task.FromResult(new EffectPointViewResult(null, null, "native point-generation preview is unavailable"));
+    string? EffectPointScreenshot(string path) => "native point-burst preview is unavailable";
+    string? WaterWavePreview(float time, float[] weights, float[] center, float span, string mode,
+        float displacementScale, out string? description)
+    { description = null; return "analytical water preview is unavailable"; }
+    string? WaterWaveScreenshot(string path) => "analytical water preview is unavailable";
+    string? EffectPreviewScreenshot(string path) => "native effect preview is unavailable";
+    string? MorphChannels(string name, int lod, out MorphInfo? result)
+    { result = null; return "native morph preview is unavailable"; }
+    string? MorphPreview(string name, IReadOnlyDictionary<int, float> weights) => "native morph preview is unavailable";
+    string? AnimationBind(string name, bool enabled, out int mappedBones, out int renderBones, bool morphs = true)
+    { mappedBones = renderBones = 0; return "native scene animation binding is unavailable"; }
+    string? AnimationFloats(out IReadOnlyList<AnimationFloatSlot> slots)
+    { slots = []; return "native animation float sampling is unavailable"; }
     string? AddCollision(string parent, string kind, float[] size, float[]? position, float[][]? points,
         ushort material, ushort bone, out string? path) { path = null; return "compiled collision creation is unavailable"; }
     string? CollisionMesh(string name, out CollisionMeshInfo? mesh) { mesh = null; return "compiled collision geometry is unavailable"; }

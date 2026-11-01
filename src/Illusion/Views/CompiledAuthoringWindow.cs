@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
@@ -6,6 +7,7 @@ using Illusion.Assets.Compiled;
 using Illusion.Domain;
 using Illusion.Scene;
 using Illusion.Viewport;
+using Microsoft.Win32;
 
 namespace Illusion.Views;
 
@@ -13,6 +15,7 @@ namespace Illusion.Views;
 internal sealed class CompiledAuthoringWindow : Window
 {
     private readonly D3DImageHost _host;
+    private WaterWavePreviewWindow? _waterWaves;
     private readonly TextBox _name = new() { Text = "new_group", Margin = new Thickness(0, 4, 0, 8) };
     private readonly ComboBox _kind = new() { ItemsSource = new[] { "box", "capsule", "convex", "triangle" }, SelectedIndex = 0, Margin = new Thickness(0, 4, 0, 8) };
     private readonly Vector3Box _size = new() { Label = "Box half-extents / capsule radius (X) and segment height (Z)", X = 0.5, Y = 0.5, Z = 0.5, Margin = new Thickness(0, 0, 0, 8) };
@@ -35,6 +38,12 @@ internal sealed class CompiledAuthoringWindow : Window
             ? host.CreateCompiledGroup(_name.Text, selected, out _) : "Select a destination group in the scene tree."));
         panel.Children.Add(Button("Make selected visual independent", () => host.SelectedNode is { } selected
             ? host.MakeCompiledMeshUnique(selected) : "Select one visual mesh in the scene tree."));
+        panel.Children.Add(Button("Place vehicle archive under selected Kit…", () =>
+        {
+            if (host.SelectedNode is not { } selected) return "Select a Kit in the city scene.";
+            var picker = new OpenFileDialog { Filter = "Mafia III vehicle archives (*.sds)|*.sds", InitialDirectory = Path.Combine(Assets.MafiaEnvironment.ArchiveFolder, "cars") };
+            return picker.ShowDialog(this) == true ? host.ObjectImporting.ImportVehicle(selected, new FileInfo(picker.FileName), null, null, null, out _) : null;
+        }));
         panel.Children.Add(new Separator { Margin = new Thickness(0, 12, 0, 12) });
         panel.Children.Add(new TextBlock { Text = "Add collision under selected object" }); panel.Children.Add(_kind);
         panel.Children.Add(_size); panel.Children.Add(_position);
@@ -53,6 +62,17 @@ internal sealed class CompiledAuthoringWindow : Window
                 new Vector3((float)_navigationOffset.X, (float)_navigationOffset.Y, (float)_navigationOffset.Z));
         }));
         panel.Children.Add(new TextBlock { Text = "Only entire sections without external streaming links can move. Topology and graph costs are preserved.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(Button("Preview analytical water waves…", () =>
+        {
+            if (_waterWaves is null)
+            {
+                _waterWaves = new WaterWavePreviewWindow(
+                    Path.Combine(Assets.MafiaEnvironment.GameRoot, "edit", "config", "render_config.xml"),
+                    Path.Combine(Assets.MafiaEnvironment.GameRoot, "edit", "maps", "engine", "sincos.dds")) { Owner = this };
+                _waterWaves.Closed += (_, _) => _waterWaves = null;
+            }
+            _waterWaves.Show(); _waterWaves.Activate(); return null;
+        }, "Analytical wave preview opened."));
         panel.Children.Add(Button("Edit navigation vertices...", () =>
         {
             new CompiledNavigationVertexWindow(host) { Owner = this }.Show(); return null;
@@ -61,6 +81,13 @@ internal sealed class CompiledAuthoringWindow : Window
         {
             new CompiledWorldCollisionWindow(host) { Owner = this }.Show(); return null;
         }));
+        panel.Children.Add(new Separator { Margin = new Thickness(0, 12, 0, 12) });
+        panel.Children.Add(Button("Open native animation clips…", () => { OpenAnimation(); return null; }, "Choose a clip and seek or play its timeline."));
+        panel.Children.Add(Button("Bind animation to selected scene rig", BindAnimation, "Native playback is transient; source files remain unchanged."));
+        panel.Children.Add(Button("Restore authored scene pose", () =>
+        {
+            Application.Current.Windows.OfType<ResourceEditorWindow>().FirstOrDefault()?.AnimationPreview?.ClearSceneBinding(); return null;
+        }, "The authored scene pose is restored."));
         panel.Children.Add(_status);
         Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         host.SelectionChanged += SelectionChanged;
@@ -68,16 +95,30 @@ internal sealed class CompiledAuthoringWindow : Window
         SelectionChanged();
     }
 
-    private Button Button(string label, Func<string?> action)
+    private Button Button(string label, Func<string?> action, string success = "Done. Undo/Redo is available in the editor.")
     {
         var button = new Button { Content = label, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 3, 0, 3), Padding = new Thickness(8, 5, 8, 5) };
         button.Click += (_, _) =>
         {
             if (_host.BridgeEditedCount > 0) { _status.Text = "End the Blender session before changing scene structure."; return; }
-            try { _status.Text = action() ?? "Done. Undo/Redo is available in the editor."; }
+            try { _status.Text = action() ?? success; }
             catch (Exception ex) { _status.Text = ex.Message; }
         };
         return button;
+    }
+
+    private AnimationPreviewWindow OpenAnimation()
+    {
+        var resource = Application.Current.Windows.OfType<ResourceEditorWindow>().FirstOrDefault();
+        if (resource is null) { resource = new ResourceEditorWindow(); resource.Show(); }
+        return resource.OpenAnimationPreview();
+    }
+
+    private string? BindAnimation()
+    {
+        if (_host.IsLoading) return "Wait for the scene to finish loading.";
+        if (_host.SelectedNode is not { } selected) return "Select a scene object with a render skeleton.";
+        return _host.BindCompiledAnimation(OpenAnimation(), selected);
     }
 
     private void SelectionChanged() => _selection.Text = _host.SelectedNode is { } selected

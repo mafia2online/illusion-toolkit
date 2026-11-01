@@ -20,6 +20,8 @@ public sealed class CompiledVehicleRig
     private readonly IFrameNode _frame;
     private readonly CompiledElement _rest, _inverse, _parents, _names, _bounds;
     private readonly Bone[] _bones;
+    private Matrix4x4[]? _animationPose;
+    internal long AuthoredRevision { get; private set; }
     public int Count => _bones.Length;
     public IReadOnlyList<Matrix4x4> LiveRest { get; }
     public SkeletonData Skeleton { get; }
@@ -41,7 +43,7 @@ public sealed class CompiledVehicleRig
         LiveRest = new LiveMatrices(this);
         Skeleton = new SkeletonData
         {
-            OwnerName = name, World = frame.WorldTransform, Attachments = [],
+            OwnerName = name, World = frame.WorldTransform, Attachments = [], LiveRest = LiveRest, OwnerFrame = frame,
             Bones = _bones.Select((bone, i) => new BoneData(Name(i), Parent(i), ModelRest(i), bone)).ToArray(),
             InverseBind = Enumerable.Range(0, count).Select(i => Matrix(_inverse, i)).ToArray()
         };
@@ -94,6 +96,20 @@ public sealed class CompiledVehicleRig
         return model;
     }
     public IFrameNode BoneSource(int index) => _bones[index];
+    /// <summary>The authored parent-local transform, unaffected by transient playback.</summary>
+    public Matrix4x4 LocalRest(int index) => Matrix(_rest, index);
+    /// <summary>Overrides render poses only; null restores canonical authored transforms without editing any resource.</summary>
+    public void SetAnimationPose(IReadOnlyList<Matrix4x4>? models)
+    {
+        if (models is null) { _animationPose = null; return; }
+        if (models.Count != Count) throw new ArgumentException("Animation pose count does not match the render rig.", nameof(models));
+        var copy = models.ToArray();
+        foreach (var matrix in copy)
+            if (matrix.M14 != 0 || matrix.M24 != 0 || matrix.M34 != 0 || matrix.M44 != 1
+                || CompiledSceneDocument.WriteMatrix(matrix).Chunk(4).Any(b => !float.IsFinite(BinaryPrimitives.ReadSingleLittleEndian(b))))
+                throw new ArgumentException("Animation pose must be finite.", nameof(models));
+        _animationPose = copy;
+    }
     private void SetLocal(int index, Matrix4x4 matrix)
     {
         byte[] value = CompiledSceneDocument.WriteMatrix(matrix);
@@ -102,6 +118,7 @@ public sealed class CompiledVehicleRig
         byte[] bytes = _graph.Data(_rest).ToArray();
         value.CopyTo(bytes, 4 + index * 48);
         _graph.Owner(_rest).Replace(_rest, bytes);
+        _animationPose = null; AuthoredRevision++;
     }
 
     /// <summary>Append a new unused bone without changing any existing bone index or inverse bind.</summary>
@@ -149,14 +166,14 @@ public sealed class CompiledVehicleRig
         if (geometryBind is not { } bind) return Skeleton;
         if (!Matrix4x4.Invert(bind, out var inverse)) throw new InvalidDataException("Invalid geometry bind transform.");
         return new SkeletonData { OwnerName = Skeleton.OwnerName, Bones = Skeleton.Bones, World = Skeleton.World,
-            Attachments = Skeleton.Attachments, InverseBind = Skeleton.InverseBind.Select(m => inverse * m).ToArray() };
+            Attachments = Skeleton.Attachments, LiveRest = LiveRest, OwnerFrame = _frame, InverseBind = Skeleton.InverseBind.Select(m => inverse * m).ToArray() };
     }
 
     private sealed class LiveMatrices(CompiledVehicleRig rig) : IReadOnlyList<Matrix4x4>
     {
         public int Count => rig.Count;
-        public Matrix4x4 this[int index] => rig.ModelRest(index);
-        public IEnumerator<Matrix4x4> GetEnumerator() => Enumerable.Range(0, Count).Select(rig.ModelRest).GetEnumerator();
+        public Matrix4x4 this[int index] => rig._animationPose?[index] ?? rig.ModelRest(index);
+        public IEnumerator<Matrix4x4> GetEnumerator() => Enumerable.Range(0, Count).Select(i => this[i]).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
     private sealed class Bone(CompiledVehicleRig rig, int index) : IFrameNode, IPropertySource

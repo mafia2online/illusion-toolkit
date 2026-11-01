@@ -150,11 +150,41 @@ public sealed class ResourceDecodeTools
         var editable = new List<string> { "faceUserData", "edgeUserData" };
         if (translate) editable.Add("isolatedSectionTranslation");
         if (interiorCandidate) editable.Add("nativeInteriorDeformation (requires exact source graph baseline)");
+        IReadOnlyList<int> flips = [];
+        try { flips = nav.EdgeFlipCandidates(); }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException) { }
+        if (flips.Count > 0) editable.Add("nativeTriangleDiagonalFlip (requires exact source graph baseline)");
+        IReadOnlyList<int> subdivisions = [];
+        try { subdivisions = nav.FaceSubdivisionCandidates(); }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException) { }
+        if (subdivisions.Count > 0) editable.Add("nativeTriangleSubdivision (requires exact source graph baseline)");
+        IReadOnlyList<Illusion.Formats.Navigation.Mafia3NavigationExtrusionCandidate> extrusions = [];
+        try { extrusions = nav.BoundaryExtrusionCandidates(); }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException) { }
+        if (extrusions.Count > 0) editable.Add("nativeOpenBoundaryExtrusion (requires exact source graph baseline)");
+        var streaming = nav.ReadStreaming();
+        var representatives = nav.ReadClusterRepresentatives();
+        if (streaming.Mesh.Count > 0) editable.Add("nativeJointSeamDeformation (requires loaded reciprocal peer, fixed representatives and exact multi-instance baseline)");
         var (first, count) = Page.Clamp(offset, limit);
         return new
         {
             format = "Mafia3NavMesh", resourceId = $"0x{nav.ResourceId:X8}", totalMeshes = nav.Meshes.Count,
-            geometryReadOnly = !translate && !interiorCandidate, topologyReadOnly = true, isolatedSectionTranslation = translate, translationRefusal,
+            geometryReadOnly = !translate && !interiorCandidate && flips.Count == 0 && subdivisions.Count == 0 && extrusions.Count == 0 && streaming.Mesh.Count == 0,
+            topologyReadOnly = flips.Count == 0 && subdivisions.Count == 0 && extrusions.Count == 0, diagonalFlipCandidates = flips, faceSubdivisionCandidates = subdivisions,
+            boundaryExtrusionCandidates = extrusions.Select(c => new { edge = c.Edge, position = new[] { c.Position.X, c.Position.Y, c.Position.Z } }),
+            isolatedBoundaryBoundsExpansion = translate && extrusions.Count > 0,
+            streamingPeers = streaming.Mesh.Select(c => c.OppositeUid).Distinct().Order().Select(uid => $"0x{uid:X8}"),
+            streamingMeshConnectionCount = streaming.Mesh.Count, streamingGraphConnectionCount = streaming.Graph.Count,
+            streamingGraphConnections = streaming.Graph.Skip(first).Take(count).Select(c => new {
+                sourceUid = $"0x{c.ThisUid:X8}", peerUid = $"0x{c.OppositeUid:X8}", node = c.Node, oppositeNode = c.OppositeNode,
+                edgeData = c.EdgeData, costRaw = c.Cost,
+                costFloat = float.IsFinite(BitConverter.UInt32BitsToSingle((uint)c.Cost << 16)) ? (float?)BitConverter.UInt32BitsToSingle((uint)c.Cost << 16) : null }),
+            totalClusters = representatives.Count,
+            clusterRepresentatives = Page.Slice(representatives, first, count).Select((p, i) => new { node = first + i, x = p.X, y = p.Y, z = p.Z }),
+            jointRepresentativeRecook = "opt-in moveRepresentatives; every moved cluster's external connections must lead to the selected loaded peer; native offline half costs are reproduced and rebuilt",
+            reciprocalSeamSplit = "navigation_stream_candidates lists geometric candidates for an explicit loaded section pair; navigation_stream_split inserts a matching midpoint and one native triangle in each section while preserving original stream IDs",
+            streamingMeshConnections = streaming.Mesh.Skip(first).Take(count).Select(c => new { peer = $"0x{c.OppositeUid:X8}", face = c.Face, edge = c.Edge, peerFace = c.OppositeFace, peerEdge = c.OppositeEdge }),
+            isolatedSectionTranslation = translate, translationRefusal,
             nativeInteriorDeformationCandidate = interiorCandidate, nativeBaselineRequired = true, nativeDeformationRefusal,
             protectedVertexCount = protectedVertices.Count, editableFields = editable,
             meshes = nav.Meshes.Take(16).Select(m => new

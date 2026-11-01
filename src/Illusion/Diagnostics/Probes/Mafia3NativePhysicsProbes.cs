@@ -15,7 +15,7 @@ internal static partial class Mafia3Probes
         if (string.IsNullOrWhiteSpace(executable) || string.IsNullOrWhiteSpace(fixtures) || !File.Exists(executable) || !Directory.Exists(fixtures)) return;
         Task.Run(async () =>
         {
-            async Task Validate(byte[] packet, string label, bool strict, int? variant = null)
+            async Task Validate(byte[] packet, string label, bool strict, int? variant = null, string operation = "physics_validate")
             {
                 string helper = Path.Combine(AppContext.BaseDirectory, "Illusion.exe");
                 if (!File.Exists(helper)) helper = Path.Combine(AppContext.BaseDirectory, "Illusion.NativeCookHost.exe");
@@ -31,7 +31,7 @@ internal static partial class Mafia3Probes
                 process.Start();
                 var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
                 await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new
-                { ExecutablePath = executable, Resource = packet, Operation = "physics_validate", Variant = variant, StrictBounds = strict }));
+                { ExecutablePath = executable, Resource = packet, Operation = operation, Variant = variant, StrictBounds = strict }));
                 process.StandardInput.Close();
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
                 try { await process.WaitForExitAsync(timeout.Token); }
@@ -39,6 +39,11 @@ internal static partial class Mafia3Probes
                 using var response = JsonDocument.Parse(await output);
                 if (process.ExitCode != 0 || !response.RootElement.GetProperty("Success").GetBoolean())
                     throw new InvalidDataException(label + ": " + response.RootElement.GetProperty("Error").GetString() + await error);
+                if (operation == "compound_validate")
+                {
+                    check(label + " original PC compound transforms and affected proxy containment", response.RootElement.GetProperty("Instances").GetInt32() > 0);
+                    return;
+                }
                 var report = response.RootElement.GetProperty("Physics");
                 check(label + " original PC binary triangle/Codec3Axis exact", report.GetProperty("MaximumVertexError").GetSingle() == 0 &&
                     report.GetProperty("MaximumBoundsError").GetSingle() == 0 &&
@@ -65,6 +70,18 @@ internal static partial class Mafia3Probes
                 check(Path.GetFileName(path) + " native oracle preserves source", File.ReadAllBytes(path).SequenceEqual(original));
             }
             if (template is null) return;
+            string worldPath = Path.Combine(fixtures, "world.hkx");
+            if (File.Exists(worldPath))
+            {
+                byte[] original = File.ReadAllBytes(worldPath);
+                var geometry = HavokMeshData.ReadVariant(original, 0) ?? throw new InvalidDataException("World fixture variant zero is unavailable.");
+                var center = geometry.Vertices.Aggregate(Vector3.Zero, (a, b) => a + b) / geometry.Vertices.Length;
+                byte[] recooked = HavokMeshWriter.ReplacePositions(original, 0, geometry.Vertices.Select(p => center + (p - center) * 1.1f).ToArray());
+                var refitted = HavokCompoundBoundsWriter.Refit(original, recooked, 0);
+                check("world expansion rebuilds containing native compound proxies", refitted.Compounds > 0 && refitted.Instances > 0);
+                await Validate(refitted.Bytes, "world expanded asset", true, 0, "compound_validate");
+                check("world compound oracle preserves source packet", File.ReadAllBytes(worldPath).SequenceEqual(original));
+            }
             var grid = Enumerable.Range(0, 101 * 101).Select(i => new Vector3(i % 101, i / 101, MathF.Sin(i % 101 * .1f) * MathF.Cos(i / 101 * .2f))).ToArray();
             var order = new List<uint>();
             for (int y = 0; y < 100; y++) for (int x = 0; x < 100; x++)

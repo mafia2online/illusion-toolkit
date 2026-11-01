@@ -9,6 +9,34 @@ public static class CompiledSurfaceMaterials
     public static SurfaceMaterial? Terrain(ulong material, Func<string, string?> texture)
     {
         var info = MafiaMaterials.GetMaterialInfo(material, 0, 0);
+        if (info.ShaderId == 0x336972a36e4e0995)
+        {
+            float[]? Parameter(string id, int count)
+            {
+                var values = info.Parameters.FirstOrDefault(p => p.ParamId == id)?.Values;
+                return values is not null && values.Count >= count && values.Take(count).All(float.IsFinite)
+                    ? values.Take(count).ToArray() : null;
+            }
+            VehicleDirtMaterial? dirt = null;
+            if (Parameter("C063", 3) is { } a0 && Parameter("C064", 3) is { } a1
+                && Parameter("C065", 3) is { } b0 && Parameter("C066", 3) is { } b1
+                && Parameter("D155", 2) is { } amount && Parameter("D156", 2) is { } smooth
+                && texture("T045") is { } mask)
+                dirt = new(mask, new(a0[0], a0[1], a0[2]), new(a1[0], a1[1], a1[2]),
+                    new(b0[0], b0[1], b0[2]), new(b1[0], b1[1], b1[2]),
+                    new(amount[0], amount[1]), new(smooth[0], smooth[1]));
+            if (dirt is not null && Parameter("D155", 3) is { } fullAmount && Parameter("D156", 3) is { } fullSmooth
+                && Parameter("D035", 1) is { } uvScale && Parameter("D038", 1) is { } offset
+                && texture("T019") is { } normalTexture && texture("T046") is { } secondaryMask)
+                dirt = dirt with { Normal = new(normalTexture, secondaryMask, uvScale[0], offset[0], fullAmount[2], fullSmooth[2]) };
+            VehicleDecalMaterial? decal = Parameter("C062", 4) is { } decalColor && texture("T018") is { } decalTexture
+                ? new(decalTexture, decalColor[3]) : null;
+            if (dirt is not null || decal is not null)
+                return new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
+                    Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One)
+                { VehicleDirt = dirt, VehicleDecal = decal };
+            return null;
+        }
         // Defining textures are deferred water data, not alpha-tested surface albedo.
         if (info.ShaderId == 0x82b040224bf06119) return WaterDefinition;
         int layers = info.ShaderId switch { 0x74f47efd17233c39 => 2, 0x3f92297c3b5e2837 => 3, _ => 0 };

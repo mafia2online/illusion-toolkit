@@ -253,6 +253,10 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<LuaTools>()
             .WithTools<EditorTools>()
             .WithTools<AuthoringTools>()
+            .WithTools<EffectPreviewTools>()
+            .WithTools<EffectPointTools>()
+            .WithTools<WaterWaveTools>()
+            .WithTools<MorphTools>()
             .WithTools<CarTools>();
 
         _options.ConfigureServices?.Invoke(builder.Services);

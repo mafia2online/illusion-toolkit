@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Illusion.Domain;
 using Illusion.Assets.Sds;
 using Illusion.Formats.Archive;
@@ -9,6 +10,7 @@ namespace Illusion.Assets.Compiled;
 public sealed partial class CompiledSceneDocument
 {
     private readonly Dictionary<string, CompiledVehicleRegistration> _vehiclePaintTables = [];
+    private readonly ConditionalWeakTable<MeshData, IFrameNode> _paintOwners = new();
 
     internal void LoadVehiclePaintTables()
     {
@@ -42,7 +44,7 @@ public sealed partial class CompiledSceneDocument
         }
     }
 
-    /// <summary>Material GUIDs and native color/dirty flags explicitly registered by this vehicle prefab.</summary>
+    /// <summary>Document-wide registration inventory for diagnostics. Visual appearance uses owner-scoped registrations.</summary>
     public IReadOnlyDictionary<ulong, uint> VehiclePaintMaterials
     {
         get
@@ -67,17 +69,45 @@ public sealed partial class CompiledSceneDocument
         }
     }
 
-    /// <summary>Apply registered paint; the verified native body shader blends C060/C061 using COLOR0.R/G.</summary>
-    public MeshData ApplyVehiclePaint(MeshData mesh)
+    /// <summary>Fresh native registrations of the nearest owning vehicle prefab, excluding other cars and cached donors.</summary>
+    public IReadOnlyDictionary<ulong, uint> VehiclePaintMaterialsFor(IFrameNode? owner)
     {
-        var materials = VehiclePaintMaterials;
+        for (var current = owner; current is not null; current = current.Parent)
+        {
+            if (current is not CompiledFrameNode frame) continue;
+            foreach (var entity in Components(frame.Element).Where(e => e.TypeId == 0xDEB11995))
+            {
+                var prefab = Graph.Resolve(Graph.Field(entity, "m_BuiltPrefabsCPtr"));
+                var effects = Graph.Field(prefab, "m_SShaderEffectInit");
+                if (Graph.Field(effects, "m_ColorAndDirty") is not { } rows) continue;
+                var result = new Dictionary<ulong, uint>();
+                foreach (var row in Graph.Items(rows))
+                    if (Graph.Field(row, "m_Guid") is { DataSize: 8 } guid && Graph.Field(row, "m_Flags") is { DataSize: 4 } flags)
+                    {
+                        ulong id = Graph.Integer(guid);
+                        result[id] = result.GetValueOrDefault(id) | checked((uint)Graph.Integer(flags));
+                    }
+                // An explicitly empty owning prefab is a real Drop, not permission to inherit another car's flags.
+                return result;
+            }
+        }
+        return new Dictionary<ulong, uint>();
+    }
+
+    /// <summary>Apply registered paint; the verified native body shader blends C060/C061 using COLOR0.R/G.</summary>
+    public MeshData ApplyVehiclePaint(MeshData mesh, IFrameNode? owner = null)
+    {
+        if (owner is not null) _paintOwners.AddOrUpdate(mesh, owner);
+        else _paintOwners.TryGetValue(mesh, out owner);
+        var materials = VehiclePaintMaterialsFor(owner);
         for (int i = 0; i < mesh.Parts.Length; i++)
         {
             var part = mesh.Parts[i];
             if (part.Surface is { Layers: -1 })
             {
                 part = new MeshPart(part.StartIndex, part.IndexCount, part.DiffuseTexture,
-                    part.NormalTexture, part.SpecularTexture, part.MaterialHash, Vector4.One, part.Blended);
+                    part.NormalTexture, part.SpecularTexture, part.MaterialHash, Vector4.One, part.Blended,
+                    part.Surface with { Layers = 0 });
                 mesh.Parts[i] = part;
             }
             if ((materials.GetValueOrDefault(part.MaterialHash) & 1) == 0 || part.DiffuseTexture is not null) continue;
@@ -88,9 +118,10 @@ public sealed partial class CompiledSceneDocument
             var secondary = info.Parameters.FirstOrDefault(p => p.ParamId == "C061")?.Values;
             if (info.ShaderId == 0x336972a36e4e0995 && mesh.Colors is not null &&
                 secondary is { Count: >= 3 } && secondary.Take(3).All(float.IsFinite))
-                surface = new SurfaceMaterial(-1, null, null, null, null, null, null, null, null,
-                    Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One)
+                surface = (surface ?? new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
+                    Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One)) with
                 {
+                    Layers = -1,
                     PaintPrimary = new(color[0], color[1], color[2], 1),
                     PaintSecondary = new(secondary[0], secondary[1], secondary[2], 1)
                 };

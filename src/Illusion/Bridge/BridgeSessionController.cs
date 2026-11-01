@@ -252,6 +252,7 @@ internal sealed class BridgeSessionController : IDisposable
     /// <summary>Tab entry point (UI thread): export the current selection into Blender.</summary>
     public void OpenInBlender()
     {
+        _host.ClearMorphPreview();
         if (_busy)
         {
             Notice?.Invoke("The Blender bridge is still working on the previous request.", false);
@@ -741,6 +742,7 @@ internal sealed class BridgeSessionController : IDisposable
     // object, is the one account of a push that does not have to be read out of a sentence.
     internal PushAckMessage ApplyPush(PushMessage push)
     {
+        _host.ClearMorphPreview();
         var ack = new PushAckMessage();
         _pushGate.Wait();
         // Whether the scene has been told a push is coming, so the pair is closed even when the apply throws

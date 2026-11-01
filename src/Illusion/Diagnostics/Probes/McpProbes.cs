@@ -41,6 +41,11 @@ internal static class McpProbes
         // DecodeTools + ResourceDecodeTools
         "decode_actors", "decode_frame_resource", "decode_itemdesc", "decode_collisions",
         "decode_resource",
+        "effect_sample",
+        "effect_preview", "effect_preview_screenshot",
+        "effect_point_sample", "effect_point_preview", "effect_point_screenshot", "effect_point_timeline",
+        "water_wave_preview", "water_wave_screenshot",
+        "morph_channels", "morph_preview",
         // EffectsTools
         "parse_effects_file", "parse_effects_from_bytes",
         // MaterialTools
@@ -58,6 +63,15 @@ internal static class McpProbes
         "viewport_screenshot", "object_move", "scene_reparent", "scene_delete_selected", "scene_duplicate_selected",
         "scene_create_group", "collision_mesh", "collision_recook", "collision_remove", "material_parameter", "world_collision_meshes", "world_collision_mesh", "world_collision_recook", "navigation_translate", "navigation_deform", "mesh_make_unique", "collision_add", "animation_open", "animation_screenshot",
         "actor_import", "object_properties", "object_set_property", "editor_undo", "editor_redo",
+        "animation_bind",
+        "animation_floats",
+        "navigation_flip",
+        "navigation_subdivide",
+        "navigation_extrude",
+        "navigation_stream_deform",
+        "navigation_stream_split",
+        "navigation_stream_candidates",
+        "car_place",
         "editor_mirror_winter",
         "object_import",
         "editor_target",

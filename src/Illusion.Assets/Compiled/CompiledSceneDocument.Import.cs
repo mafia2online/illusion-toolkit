@@ -11,9 +11,14 @@ namespace Illusion.Assets.Compiled;
 public sealed partial class CompiledSceneDocument : IFrameImportProvider
 {
     private Dictionary<ulong, string>? _sharedObjectPaths;
+    private string? _sharedObjectPathsFolder;
     private readonly Dictionary<(CompiledResource, uint), int> _schemaCopies = [];
 
     public IFrameDuplication? ImportFrame(string sourceResourcePath, ulong sourceObjectId, IFrameNode target, out string? refusal)
+        => ImportFrameCore(sourceResourcePath, sourceObjectId, target, out refusal);
+
+    private IFrameDuplication? ImportFrameCore(string sourceResourcePath, ulong sourceObjectId, IFrameNode target, out string? refusal,
+        VehicleImportSource? vehicle = null)
     {
         refusal = null;
         if (target is not CompiledFrameNode parent || !_frames.ContainsValue(parent) || Hierarchy(parent) is not { } container)
@@ -21,12 +26,13 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
         if (SourceArchive.Directory?.Name.Equals("city", StringComparison.OrdinalIgnoreCase) != true)
         { refusal = "Stock compiled props can only be imported into a city scene."; return null; }
         string city = SourceArchive.Name.StartsWith("si_", StringComparison.OrdinalIgnoreCase) ? "si" : "bc";
-        var sharedArchive = new FileInfo(Path.Combine(SourceArchive.Directory.Parent!.FullName, "city_crash", city + "_city_crash.sds"));
+        var sharedArchive = vehicle?.Archive ?? new FileInfo(Path.Combine(SourceArchive.Directory.Parent!.FullName, "city_crash", city + "_city_crash.sds"));
         if (!sharedArchive.Exists) { refusal = "The city's shared prop archive is missing."; return null; }
         string folder = SdsMeshLoader.EnsureExtracted(sharedArchive);
         string path = Path.GetFullPath(sourceResourcePath);
         if (!path.StartsWith(Path.GetFullPath(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
         { refusal = "The source must be a compiled resource from this city's shared prop archive."; return null; }
+        IEditAction? explicitDependencies = null; bool keepExplicitDependencies = false;
         try
         {
             void Load(string resourcePath)
@@ -37,8 +43,9 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 _archives.Add(resource, sharedArchive);
             }
             Load(path);
-            if (_sharedObjectPaths is null)
+            if (_sharedObjectPaths is null || !string.Equals(_sharedObjectPathsFolder, folder, StringComparison.OrdinalIgnoreCase))
             {
+                _sharedObjectPathsFolder = folder;
                 _sharedObjectPaths = [];
                 foreach (string resourcePath in SdsManifest.Load(folder).GetFiles("Generic"))
                     foreach (ulong id in CompiledResource.ReadObjectIds(resourcePath)) _sharedObjectPaths[id] = resourcePath;
@@ -58,6 +65,8 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
             if (!Graph.Objects.TryGetValue(sourceObjectId, out var source) || !Graph.Owner(source).Path.Equals(path, StringComparison.OrdinalIgnoreCase)
                 || source.TypeId != 0x4403597e)
             { refusal = "The stock scene-object GUID is not defined by the requested resource."; return null; }
+            if (vehicle is not null && !CompiledVehiclePlacementSupport.Supported(Graph, source))
+            { refusal = "The vehicle does not have a verified owned type-10 hierarchy."; return null; }
             var resourceOwner = Graph.Owner(container);
             var prototype = Graph.Nodes.Where(n => n.TypeId == container.TypeId && ReferenceEquals(Graph.Owner(n), resourceOwner))
                 .SelectMany(CurrentItems).FirstOrDefault(e => Graph.Field(e, "First") is { DataSize: 4 });
@@ -103,12 +112,20 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 }
             }
             using var transaction = new ImportTransaction(this, parent);
+            if (vehicle is null)
+            {
+                var tokens = nodes.Where(node => node.Event == 4 && node.DataSize == 8 && Graph.Kind(node) == 442
+                        && BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(node)[4..]) == node.TypeId)
+                    .Select(node => CompiledDependencyToken.Key(Graph, node)).Where(key => key != 0).ToHashSet();
+                if (tokens.Count > 0) explicitDependencies = CarryExplicitDependencies(resourceOwner, [sourceOwner], tokens);
+            }
             var element = resourceOwner.CopySubtree(sourceOwner, source, ids);
             Graph.RegisterSubtree(resourceOwner, element);
             List<GeometryCopy> geometryCopies;
             try
             {
-                geometryCopies = CopyHierarchyAssets(element, ids);
+                geometryCopies = vehicle is null ? CopyHierarchyAssets(element, ids)
+                    : CopyVehiclePlacementAssets(element, ids, resourceOwner, source, vehicle);
             }
             catch { Graph.SetSubtreeActive(resourceOwner, element, false); throw; }
             try
@@ -135,6 +152,7 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 resourceOwner.Replace(key, keyBytes);
                 if (Graph.Field(Graph.Field(entry, "Second"), "m_BoneName") is { } bone) resourceOwner.Replace(bone, new byte[bone.DataSize]);
                 var copiedFrames = new List<CompiledFrameNode>();
+                if (vehicle is not null) copiedFrames.AddRange(vehicle.Templates);
                 var frame = RegisterCopiedHierarchy(element, parent, transform, copiedFrames);
                 frame.LocalTransform = stock.LocalTransform;
                 var tables = Descendants(entry).Where(n => n.Event == 2 && n.ObjectId != 0).Select(n => n.ObjectId).Distinct().Select(id =>
@@ -164,9 +182,11 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 var root = Build(frame, new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive)), [], 0);
                 var duplicate = new CompiledDuplication(this, frame, root, resourceOwner, container, entry, toc!, tables, counts, Meshes.Skip(firstMesh).ToArray(), geometryCopies, copiedFrames.ToArray());
                 _links[frame] = (entry, transform, container, fresh);
-                var result = new ImportedFrame(this, duplicate, resourceOwner, resourceOwner.StreamIndex(container), schemas, dependencies, dependencyValues);
+                var result = new ImportedFrame(this, duplicate, resourceOwner, resourceOwner.StreamIndex(container), schemas, dependencies, dependencyValues, explicitDependencies);
                 result.Reattach();
+                if (vehicle is not null) _ = resourceOwner.Rewrite(EffectivePlans().GetValueOrDefault(resourceOwner) ?? new());
                 transaction.Commit();
+                keepExplicitDependencies = true;
                 return result;
             }
             catch
@@ -176,8 +196,9 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 throw;
             }
         }
-        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException or IOException)
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException or IOException or EditRefusedException)
         { refusal = ex.Message; return null; }
+        finally { if (!keepExplicitDependencies) explicitDependencies?.Undo(); }
     }
 
     // Dependency loading may remain cached after refusal. Mutation rollback preserves the existing
@@ -249,13 +270,15 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
     }
 
     private sealed class ImportedFrame(CompiledSceneDocument document, CompiledDuplication duplicate,
-        CompiledResource resource, int schemaStreamIndex, IReadOnlyDictionary<uint, byte[]> schemas, CompiledElement dependencies, CompiledElement[] addedDependencies) : IFrameDuplication
+        CompiledResource resource, int schemaStreamIndex, IReadOnlyDictionary<uint, byte[]> schemas, CompiledElement dependencies,
+        CompiledElement[] addedDependencies, IEditAction? explicitDependencies) : IFrameDuplication
     {
         public ISceneHierarchyNode Root => duplicate.Root;
         private bool _attached;
         public void Reattach()
         {
             if (_attached) return;
+            explicitDependencies?.Redo();
             foreach (var (type, bytes) in schemas)
             {
                 document._schemaCopies[(resource, type)] = document._schemaCopies.GetValueOrDefault((resource, type)) + 1;
@@ -273,6 +296,7 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
             duplicate.Detach();
             foreach (uint type in schemas.Keys)
                 if (--document._schemaCopies[(resource, type)] == 0) document.Plan(resource).AdditionalSchemas.Remove(type);
+            explicitDependencies?.Undo();
             _attached = false;
         }
     }

@@ -19,6 +19,7 @@ public sealed partial class CompiledSceneDocument
     private readonly List<NavigationAsset> _navigation = [];
     private readonly List<Mafia3AiWorldFile> _aiWorlds = [];
     private readonly List<Mafia3NavMeshFile> _navMeshes = [];
+    private readonly Dictionary<Mafia3NavigationMesh, SdsFrameNode> _navigationMeshNodes = [];
     private readonly List<string> _navigationWarnings = [];
     public IReadOnlyList<Mafia3AiWorldFile> AiWorlds => _aiWorlds;
     public IReadOnlyList<Mafia3NavMeshFile> NavigationMeshes => _navMeshes;
@@ -68,11 +69,13 @@ public sealed partial class CompiledSceneDocument
                     var nav = Mafia3NavMeshFile.Load(path);
                     _navMeshes.Add(nav);
                     _navigation.Add(new NavigationAsset(path, archive, nav.ToBytes, () => nav.Save(path)));
+                    RegisterNavigationBudget(path);
                     var fileNode = new SdsFrameNode { Name = System.IO.Path.GetFileName(path), Kind = "Navigation mesh" };
                     for (int i = 0; i < nav.Meshes.Count; i++)
                     {
                         var mesh = nav.Meshes[i];
                         var meshNode = new SdsFrameNode { Name = $"Mesh {i}: {mesh.FaceCount} faces, {mesh.EdgeCount} edges", Kind = "Navigation mesh" };
+                        _navigationMeshNodes.Add(mesh, meshNode);
                         void Pages(bool faces, int count, int stride)
                         {
                             if (stride == 0) return;
@@ -107,5 +110,6 @@ public sealed partial class CompiledSceneDocument
                 asset.Saved = true;
                 _written.Add(asset.Archive);
             }
+        FlushNavigationBudgets();
     }
 }

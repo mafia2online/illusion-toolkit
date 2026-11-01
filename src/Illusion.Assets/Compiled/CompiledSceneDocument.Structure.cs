@@ -57,6 +57,14 @@ public sealed partial class CompiledSceneDocument
         else plan.Values[count] = bytes;
     }
 
+    private void SetGuidTableItems(CompiledElement container, IReadOnlyList<CompiledElement> items, CompiledRewrite? target = null)
+    {
+        // Sorting one new action must not reorder GUID entries owned by earlier, still-active actions.
+        // Once all additions are undone, restore the exact stock order, even if that order was unsorted.
+        var original = container.Values.Skip(1).ToHashSet();
+        SetItems(container, items, target, restoreOrder: items.All(original.Contains));
+    }
+
     private CompiledElement? Hierarchy(CompiledFrameNode frame) =>
         Components(frame.Element).Select(c => Graph.Field(c, "m_Children")).FirstOrDefault(c => c is not null);
 

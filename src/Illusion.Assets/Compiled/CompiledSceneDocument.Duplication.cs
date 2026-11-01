@@ -15,6 +15,14 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
     private bool SafeHierarchy(CompiledFrameNode frame, HashSet<CompiledFrameNode> visited, HashSet<CompiledElement>? actorScope = null)
     {
         if (!visited.Add(frame) || _deleted.Contains(frame)) return false;
+        if (CompiledVehiclePlacementSupport.Supported(Graph, frame.Element))
+        {
+            var owned = CurrentDescendants(frame.Element).Where(n => n.TypeId == 0x4403597e).ToHashSet();
+            bool Children(CompiledFrameNode parent) => parent.Children.All(child => owned.Contains(child.Element)
+                && ReferenceEquals(Graph.Owner(child.Element), Graph.Owner(frame.Element)) && visited.Add(child)
+                && !_deleted.Contains(child) && Children(child));
+            return Children(frame) && visited.Count(f => owned.Contains(f.Element)) == owned.Count;
+        }
         var components = Components(frame.Element).ToArray();
         // These audio components serialize only event-resource addresses (or no fields). Their
         // native constructors clear owner/delegate pointers and create audio runtime state lazily.
@@ -23,8 +31,11 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
             c.TypeId == 0x9eb8db8d && Graph.Fields(c).Keys.Order().SequenceEqual(new[] { "m_StartEvent", "m_StopEvent" }));
         bool actor = ActorContract(frame.Element);
         bool vehicleMarker=CompiledTranslocatedCarSupport.Supported(Graph,frame.Element);
+        bool staticEntity = CompiledStaticEntitySupport.Supported(Graph, frame.Element)
+            || CompiledTreeEntitySupport.Supported(Graph, frame.Element, explicitEntries: CurrentExplicitDependencyEntries)
+            || CompiledFrameWrapperSupport.Supported(Graph, frame.Element);
         if (actor) actorScope = CurrentDescendants(frame.Element).ToHashSet();
-        if (!pureKit && !PhysicalGroupContract(frame.Element) && !StaticGeometry(frame) && !actor && !vehicleMarker && (actorScope is null || !ActorPartContract(frame.Element, actorScope))) return false;
+        if (!pureKit && !PhysicalGroupContract(frame.Element) && !StaticGeometry(frame) && !actor && !vehicleMarker && !staticEntity && (actorScope is null || !ActorPartContract(frame.Element, actorScope))) return false;
         return frame.Children.All(child => ReferenceEquals(Graph.Owner(child.Element), Graph.Owner(frame.Element)) && SafeHierarchy(child, visited, actorScope));
     }
 
@@ -122,8 +133,14 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
         var root = Build(copiedFrame, new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive)), [], 0);
         var result = new CompiledDuplication(this, copiedFrame, root, resource, container, clone, toc, tables, counts, Meshes.Skip(firstMesh).ToArray(), geometryCopies, copiedFrames.ToArray());
         result.Reattach();
-        transaction.Commit();
-        return result;
+        IEditAction? definitions = null;
+        try
+        {
+            definitions = RetainCopiedDefinitions(resource, frame.Element, resource.StreamIndex(container));
+            IFrameDuplication retained = definitions is null ? result : new DependentDuplication(this, resource, result, definitions);
+            transaction.Commit(); return retained;
+        }
+        catch { definitions?.Undo(); throw; }
     }
 
     private CompiledFrameNode RegisterCopiedHierarchy(CompiledElement element, CompiledFrameNode? parent,
@@ -206,7 +223,7 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
         {
             if (!_attached) return;
             document.SetItems(container, document.CurrentItems(container).Where(e => !ReferenceEquals(e, registration)).ToArray());
-            document.SetItems(toc, document.CurrentItems(toc).Except(tables).ToArray());
+            document.SetGuidTableItems(toc, document.CurrentItems(toc).Except(tables).ToArray());
             var plan = document.Plan(resource);
             foreach (var (type, count) in counts)
             {

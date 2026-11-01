@@ -143,7 +143,8 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
                 }
         }
         // Standalone asset definitions are templates; placed scenes supersede matching template roots.
-        var candidates = _frames.Values.Where(f => f.Parent is null && sceneResources.Contains(Graph.Owner(f.Element))).ToList();
+        var templates = NestedModelTemplateScenes();
+        var candidates = _frames.Values.Where(f => f.Parent is null && !templates.Contains(f.Element) && sceneResources.Contains(Graph.Owner(f.Element))).ToList();
         var named = activeScenes.Count > 0
             ? candidates.Where(f => activeScenes.Values.Contains(Graph.Owner(f.Element))).ToList()
             : candidates.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.Last()).ToList();
@@ -174,6 +175,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         LoadVehiclePaintTables();
         LoadNavigationResources();
         LoadEffectResources();
+        CaptureLoadedVehiclePlacements();
     }
 
     internal IEnumerable<CompiledElement> Components(CompiledElement scene) =>
@@ -242,7 +244,8 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         return node;
     }
 
-    private MeshData? DecodeVisual(CompiledFrameNode frame, CompiledElement visual, CompiledMeshDecoder decoder, int level)
+    private MeshData? DecodeVisual(CompiledFrameNode frame, CompiledElement visual, CompiledMeshDecoder decoder, int level,
+        CompiledMeshBinding.MorphChannels? morphChannels = null, float[]? morphWeights = null)
     {
         var set = Graph.Resolve(Graph.Field(visual, "m_MeshSet"));
         var mask = BoneMask(visual, level);
@@ -264,8 +267,8 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         }
         var skin = VehicleSkin(frame, visual, level, bindToLocal);
         var decoded = decoder.Decode(visual, frame.Name, frame.WorldTransform, level, mask, bindToLocal,
-            skin.Palette, skin.Skeleton, skin.Live);
-        if (decoded is not null) ApplyVehiclePaint(decoded);
+            skin.Palette, skin.Skeleton, skin.Live, morphChannels, morphWeights);
+        if (decoded is not null) ApplyVehiclePaint(decoded, frame);
         return decoded;
     }
 
@@ -424,6 +427,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         SaveNavigationResources();
         SaveWorldCollisionResources();
         SaveVehiclePaintTables();
+        foreach (var carry in _vehicleResources.Values) carry.Flush();
         foreach (var (path, table) in _gearboxes)
             if (table.IsDirty) File.WriteAllBytes(path, table.ToBytes());
         foreach (var (path, table) in _carTuning)
@@ -479,6 +483,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
             get => ReadMatrix(_document.Graph.Data(LinkTransform ?? _document.Graph.Field(Element, "m_Transform")!));
             set
             {
+                if (_document.ValidateVehiclePlacementTransform(this, value) is { } refusal) throw new EditRefusedException(refusal);
                 var graph = _document.Graph;
                 if (LinkTransform is not null) graph.Owner(LinkTransform).Replace(LinkTransform, WriteMatrix(value));
                 var transform = graph.Field(Element, "m_Transform")!;

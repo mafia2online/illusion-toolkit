@@ -706,6 +706,9 @@ public sealed unsafe class SceneRenderer : IDisposable
         {
             if (!mesh.Visible || mesh.Instanced) continue;             // instanced ones — separate pass
             if (mesh.Ghost != ghostPass) continue;
+            // Animated geometry may have moved into view since the previous frame.
+            // Refresh both its palette and posed bounds before the broad-phase test.
+            if (mesh.IsSkinned) mesh.RefreshPose();
             if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // frustum culling
             if (!HasPart(mesh, filter)) continue;
             drawn++;
@@ -731,10 +734,6 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             if (mesh.IsSkinned)
             {
-                // Straight from the document's rest transforms. Nothing has to tell the renderer a bone
-                // moved — the gizmo, an undo and a push from Blender all edit the same array, and each of
-                // them found its own way to forget to say so.
-                mesh.RefreshPose();
                 _skinnedShader.UpdateConstants(ctx, ref consts);
                 _skinnedShader.UpdateBones(ctx, ref mesh.Palette);
             }
@@ -756,7 +755,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             foreach (GpuPart part in mesh.Parts)
             {
-                _surfaceBindings.Bind(ctx, part);
+                _surfaceBindings.Bind(ctx, part, mesh.HasDecalUvs);
                 if (filter != PartFilter.All && part.Blended != (filter == PartFilter.Blended)) continue;
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
@@ -879,7 +878,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             foreach (GpuPart part in mesh.Parts)
             {
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
-                _surfaceBindings.Bind(ctx, part);
+                _surfaceBindings.Bind(ctx, part, mesh.HasDecalUvs);
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
                 srvs[2] = part.SpecSrv.Handle;     // t2 specular level
                 if (srvs[0] != last0 || srvs[1] != last1 || srvs[2] != last2)

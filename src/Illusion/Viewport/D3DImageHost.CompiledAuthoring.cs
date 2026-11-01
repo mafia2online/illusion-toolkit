@@ -106,6 +106,7 @@ public sealed partial class D3DImageHost
 
     internal void KeepCompiledMutation(SceneNode node, IEditAction mutation)
     {
+        ClearMorphPreview();
         History.Push(new CompiledMutationEdit(this, node, mutation));
         Persistence.MarkFrameModified(node); CarCollisionEditing.RefreshOverlay();
         RaiseSelectionPropertiesChanged(); RaiseSceneChanged();

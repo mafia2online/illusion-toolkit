@@ -137,7 +137,7 @@ internal sealed unsafe partial class NavigationOracle : IDisposable
             }
         }
         if (plan.Modified.AsSpan().SequenceEqual(plan.Baseline)) return plan.Baseline.ToArray();
-        var cooked = Generate(plan.Modified, plan, representatives, out _);
+        var cooked = Generate(plan.Modified, plan.ModifiedLayout ?? plan, representatives, out _);
         if (cooked.Costs.Count != baseline.Costs.Count || !cooked.Costs.Keys.ToHashSet().SetEquals(baseline.Costs.Keys))
             throw new NotSupportedException("Deformation changes native cluster connectivity.");
         byte[] result = plan.Modified.ToArray();
@@ -158,10 +158,13 @@ internal sealed unsafe partial class NavigationOracle : IDisposable
         // Both accelerator variants are optional to the proven native loader. They must never
         // retain old geometric caches; leave their unreachable objects/fixups intact for exact undo.
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(plan.RootCount), 2);
+        foreach (var link in Mafia3NavMeshFile.Read(plan.Baseline).ReadStreaming().Graph)
+            if (!plan.Baseline.AsSpan(plan.GraphPositions + link.Node * 16, 12).SequenceEqual(result.AsSpan(plan.GraphPositions + link.Node * 16, 12)))
+                throw new NotSupportedException("Moving a streamed cluster representative requires joint peer cost recooking.");
         return result;
     }
     private sealed record Graph(Vector3[] Positions, Dictionary<(int, int), ushort> Costs);
-    private static Graph Generate(byte[] bytes, Mafia3NavigationCookPlan plan, int[]? originalRepresentatives, out int[] representatives)
+    private static Graph Generate(byte[] bytes, Mafia3NavigationCookPlan plan, int[]? originalRepresentatives, out int[] representatives, byte[][]? streamingPeers = null)
     {
         nint raw = Map(bytes), mesh = raw + plan.MeshObject;
         nint instance = Allocate(512);
@@ -177,6 +180,7 @@ internal sealed unsafe partial class NavigationOracle : IDisposable
         }
         W(instance, 456, 1);
         nint collection = Allocate(128), info = Allocate(48); Q(info, 0, instance); Q(collection, 32, info); W(collection, 40, 1);
+        if (streamingPeers is not null) collection = StreamingCollection(bytes, mesh, instance, streamingPeers);
         nint centers = Allocate(plan.FaceCount * 16), normals = Allocate(plan.FaceCount * 16), temporary = Allocate(16);
         for (int f = 0; f < plan.FaceCount; f++)
         {
@@ -203,6 +207,8 @@ internal sealed unsafe partial class NavigationOracle : IDisposable
         for (int c = 0; c < plan.ClusterCount; c++) { W(repIds, c * 4, representatives[c]); Copy(repPositions + c * 16, centers + representatives[c] * 16, 16); }
         nint settings = Allocate(128), output = Allocate(80);
         ((delegate* unmanaged<nint, nint>)0x143C31550L)(settings);
+        if (streamingPeers is not null)
+            return GenerateStreamingGraph(bytes, plan, representatives, centers, context, settings);
         foreach (int off in new[] { 16, 32, 48 }) W(output, off + 12, unchecked((int)0x80000000));
         ((delegate* unmanaged<nint, nint, nint, nint, nint, nint, nint, nint>)0x143C32140L)(context, output,
             Array(faceClusters, plan.FaceCount), Array(repIds, plan.ClusterCount), Array(repPositions, plan.ClusterCount), settings + 16, settings + 96);
@@ -218,6 +224,18 @@ internal sealed unsafe partial class NavigationOracle : IDisposable
                 if ((cost & 0x7F80) == 0x7F80 || !costs.TryAdd((c, I(edge, 4)), cost))
                     throw new NotSupportedException("Native query failed or produced duplicate graph edges.");
             }
+        }
+        if (plan.RequiredFaceConnections is { } connections)
+        {
+            if ((connections.Length & 1) != 0 || connections.Any(f => (uint)f >= plan.FaceCount)) throw new InvalidDataException("Invalid native face connectivity proof request.");
+            nint work = Allocate(64);
+            for (int i = 0; i < connections.Length; i += 2)
+                foreach (var (from, to) in new[] { (connections[i], connections[i + 1]), (connections[i + 1], connections[i]) })
+                {
+                    float distance = ((delegate* unmanaged<nint, int, int, nint, nint, nint, float>)0x143C34F40L)(context, from, to, settings + 16, settings + 96, work);
+                    if (!float.IsFinite(distance) || distance < 0 || distance >= 1e30f)
+                        throw new NotSupportedException("Native pathfinding cannot traverse the newly authored face connection.");
+                }
         }
         return new(Enumerable.Range(0, plan.ClusterCount).Select(c => V(P(output, 16) + c * 16)).ToArray(), costs);
     }
