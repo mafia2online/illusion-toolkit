@@ -145,12 +145,25 @@ public interface IEditorSession
     string? WaterWaveScreenshot(string path) => "analytical water preview is unavailable";
     string? WaterSurface(bool? enabled, bool? playing, float? time, bool? normals, bool reload, out WaterSurfaceInfo? result)
     { result = null; return "native water surface preview is unavailable"; }
+    string? WaterOptics(bool? reflections, bool? refraction, out WaterSurfaceInfo? result)
+    { result = null; return "Water optics are unavailable."; }
     string? WaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset, out WaterSurfaceInfo? result)
     { result = null; return "native water foam diagnostics are unavailable"; }
     string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
         => "whole-map streaming control is unavailable";
     string? NativeLodStatus(out IReadOnlyList<NativeLodInfo> groups)
     { groups = []; return "native LOD inspection is unavailable"; }
+    IReadOnlyList<NativePlacementInfo> NativePlacements() => [];
+    string? NativePaint(bool? enabled, uint? shuffleSeed, out PaintPreviewInfo status)
+    {
+        status = new(false, 1, 0, 0, 0, 0, 0, 0, 0, 0, null, new Dictionary<string, int>());
+        return "Native paint preview is unavailable.";
+    }
+    string? InspectLinkedProxyBones(string owner, out IReadOnlyList<LinkedProxyBoneInfo> bones)
+    { bones = []; return "Prepared rigid bone inspection is unavailable."; }
+    string? SetLinkedProxyBone(string owner, int bone, float[] localMatrix) => "Prepared rigid bone authoring is unavailable.";
+    string? CreateLinkedProxyGroup(string owner, string name, out string? path)
+    { path = null; return "Prepared proxy group creation is unavailable."; }
     string? InspectLinkedProxy(string name, out LinkedProxyInfo? info)
     { info = null; return "linked proxy inspection is unavailable"; }
     string? PrepareLinkedProxy(string name, int expectedTriangles, int expectedDraws, out LinkedProxyInfo? info)

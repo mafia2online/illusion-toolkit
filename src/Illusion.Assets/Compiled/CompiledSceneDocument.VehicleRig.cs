@@ -13,12 +13,31 @@ public sealed partial class CompiledSceneDocument
     }
     private readonly Dictionary<CompiledElement, CompiledVehicleRig?> _vehicleRigs = [];
 
+    /// <summary>Restores canonical rig adapter identity after a completely reverted, unobservable staging failure.
+    /// Native immutable references and authored data must already have been restored before invoking it.</summary>
+    public Action CaptureRevertedRigCacheCheckpoint()
+    {
+        var before = _vehicleRigs.ToArray();
+        return () =>
+        {
+            _vehicleRigs.Clear();
+            foreach (var pair in before) _vehicleRigs.Add(pair.Key, pair.Value);
+        };
+    }
+
     /// <summary>One canonical editable skeleton per owning scene object.</summary>
     public CompiledVehicleRig? VehicleRig(CompiledFrameNode frame)
     {
+        var currentImmutable = Components(frame.Element).Select(component => Graph.Resolve(Graph.Field(component, "m_ImmutableData")))
+            .FirstOrDefault(immutable => immutable?.TypeId == 0x623e708e);
+        if (_vehicleRigs.TryGetValue(frame.Element, out var cached) && !ReferenceEquals(cached?.Immutable, currentImmutable))
+            _vehicleRigs.Remove(frame.Element);
         if (!_vehicleRigs.TryGetValue(frame.Element, out var rig))
             _vehicleRigs[frame.Element] = rig = CompiledVehicleRig.TryCreate(Graph, frame.Element, frame, frame.Name);
-        if (rig is not null) rig.MutationRefusal = () => ValidateSkeletonProxyMutation(rig.Immutable);
+        if (rig is not null) rig.MutationRefusal = () => !Components(frame.Element).Any(component =>
+                ReferenceEquals(Graph.Resolve(Graph.Field(component, "m_ImmutableData")), rig.Immutable))
+            ? "This skeleton no longer belongs to its canonical frame; refresh the skeleton tree before editing it."
+            : ValidateSkeletonProxyMutation(rig.Immutable);
         return rig;
     }
 

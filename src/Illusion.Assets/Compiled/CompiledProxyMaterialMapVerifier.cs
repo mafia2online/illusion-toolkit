@@ -30,11 +30,11 @@ internal static class CompiledProxyMaterialMapVerifier
             || !files.TryGetProperty(relative, out var expectedHash) || expectedHash.ValueKind != JsonValueKind.String
             || !File.Exists(full) || Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(full))) != expectedHash.GetString())
             throw new InvalidDataException("Proxy destination snapshot is missing or changed: " + Path.GetFileName(path));
-        var targetIds = new HashSet<ulong>(); int pairCount = 0;
+        var targetIds = new HashSet<ulong>(); var sourceIds = new HashSet<ulong>(); int pairCount = 0;
         foreach (var pair in pairs.EnumerateObject())
         {
             if (!ulong.TryParse(pair.Name, NumberStyles.None, CultureInfo.InvariantCulture, out ulong source) || source == 0
-                || !pair.Value.TryGetUInt64(out ulong target) || target == 0 || !targetIds.Add(target))
+                || !sourceIds.Add(source) || !pair.Value.TryGetUInt64(out ulong target) || target == 0 || !targetIds.Add(target))
                 throw new InvalidDataException("Invalid proxy scene identity mapping.");
             pairCount++;
         }
@@ -88,6 +88,59 @@ internal static class CompiledProxyMaterialMapVerifier
         }
         if (!actualScenes.SetEquals(targetIds) || actualMaterials.Count == 0 || !actualMaterials.SetEquals(declared.Keys))
             throw new InvalidDataException("Proxy material or scene coverage does not match its native destination.");
+        if (root.TryGetProperty("FineMaterialTextures", out var fine) && fine.ValueKind != JsonValueKind.Null)
+        {
+            if (fine.ValueKind != JsonValueKind.Object || !root.TryGetProperty("Child", out var childValue) || !childValue.TryGetUInt64(out ulong child) || child == 0)
+                throw new InvalidDataException("Invalid prepared fine material contract.");
+            var fineDeclared = new Dictionary<ulong, string>();
+            foreach (var entry in fine.EnumerateObject())
+                if (!ulong.TryParse(entry.Name, NumberStyles.None, CultureInfo.InvariantCulture, out ulong hash) || hash == 0
+                    || entry.Value.ValueKind != JsonValueKind.String || entry.Value.GetString() is not { Length: 64 } signature
+                    || signature.Any(ch => !Uri.IsHexDigit(ch)) || !fineDeclared.TryAdd(hash, signature))
+                    throw new InvalidDataException("Invalid fine material signature.");
+            // Read actual fine definitions and cross-resource face groups. Merely claiming a hash
+            // in JSON must not protect or authorize an unrelated material or omit a used one.
+            var resources = new List<CompiledResource> { resource };
+            foreach (var file in files.EnumerateObject().Where(file => Path.GetFileName(file.Name).StartsWith("Generic_", StringComparison.OrdinalIgnoreCase)))
+            {
+                string native = Path.GetFullPath(Path.Combine(workspace, file.Name));
+                if (!native.StartsWith(workspace + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || file.Value.ValueKind != JsonValueKind.String || !File.Exists(native)
+                    || Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(native))) != file.Value.GetString())
+                    throw new InvalidDataException("A fine native resource snapshot is missing or changed.");
+                if (!native.Equals(full, StringComparison.OrdinalIgnoreCase)) resources.Add(CompiledResource.Load(native));
+            }
+            var all = new CompiledGraph(resources); var used = new HashSet<ulong>();
+            foreach (ulong id in sourceIds)
+            {
+                if (all.Objects.GetValueOrDefault(id) is not { TypeId: 0x4403597e } scene) throw new InvalidDataException("Missing mapped native fine object.");
+                var models = all.Items(all.Field(scene, "m_Components")).Select(all.Resolve).OfType<CompiledElement>().Where(model => model.TypeId == 0x2da22400).ToArray();
+                if (models.Length != 1 || all.Resolve(all.Field(models[0], "m_LODGroup"))?.ObjectId != child)
+                    throw new InvalidDataException("Mapped fine native model ownership changed.");
+                foreach (var entry in all.Items(all.Field(models[0], "m_Visuals")))
+                {
+                    var visual = all.Resolve(entry) ?? throw new InvalidDataException("Missing fine native visual.");
+                    var set = all.Resolve(all.Field(visual, "m_MeshSet")); int levels = all.Items(all.Field(set, "m_LODs")).Count;
+                    var face = all.Resolve(all.Field(visual, "m_FaceGroupSet")); var tables = all.Items(all.Field(all.Field(face, "m_Data"), "m_FaceGroups"));
+                    if (levels == 0 || tables.Count == 0) throw new InvalidDataException("Missing fine native material levels.");
+                    foreach (int level in Enumerable.Range(0, levels).Select(level => Math.Min(level, tables.Count - 1)).Distinct())
+                    {
+                        var bytes = all.Data(tables[level]);
+                        if (bytes.Length < 4 || bytes.Length != 4L + BinaryPrimitives.ReadUInt32LittleEndian(bytes) * 40L)
+                            throw new InvalidDataException("Unknown fine native face-group layout.");
+                        uint count = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+                        for (int index = 0; index < count; index++)
+                        { ulong hash = BinaryPrimitives.ReadUInt64LittleEndian(bytes[(12 + index * 40)..]); if (hash != 0) used.Add(hash); }
+                    }
+                }
+            }
+            if (used.Count == 0 || !used.SetEquals(fineDeclared.Keys)) throw new InvalidDataException("Fine material coverage does not match its actual native LODs.");
+            foreach (var entry in fineDeclared)
+            {
+                if (declared.TryGetValue(entry.Key, out string? signature) && signature != entry.Value) throw new InvalidDataException("Fine and far material signatures disagree.");
+                declared[entry.Key] = entry.Value;
+            }
+        }
         return declared;
     }
 }

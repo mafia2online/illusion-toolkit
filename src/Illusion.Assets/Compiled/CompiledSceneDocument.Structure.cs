@@ -71,6 +71,8 @@ public sealed partial class CompiledSceneDocument
     internal bool ReparentCompiled(IFrameNode childNode, ISceneSource? parentSource)
     {
         if (childNode is not CompiledFrameNode child || !_frames.ContainsValue(child)) return false;
+        if (_proxyStructuralAuthorization.Count == 0 && _linkedProxyStates.Values.Any(state => state.Pairs.ContainsKey(child)))
+            return ReparentPreparedLinkedProxy(child, parentSource);
         CompiledFrameNode? parent;
         if (parentSource is null || ReferenceEquals(parentSource, this)) parent = null;
         else if (parentSource is CompiledFrameNode frame && _frames.ContainsValue(frame)) parent = frame;
@@ -172,7 +174,8 @@ public sealed partial class CompiledSceneDocument
         var rootPointer = Descendants(rootRegistration).FirstOrDefault(p => Graph.Kind(p) == 173 &&
             p.Values.ToArray() is { Length: > 1 } values && ReferenceEquals(values[1], frame.Element));
         var prototype = Graph.Nodes.Where(n => n.TypeId == target.TypeId && ReferenceEquals(Graph.Owner(n), resource))
-            .SelectMany(CurrentItems).FirstOrDefault(e => Graph.Field(e, "First") is { DataSize: 4 });
+            .SelectMany(CurrentItems).FirstOrDefault(e => Graph.Field(e, "First") is { DataSize: 4 })
+            ?? Graph.Nodes.Where(n => n.TypeId == target.TypeId).SelectMany(CurrentItems).FirstOrDefault(e => Graph.Field(e, "First") is { DataSize: 4 });
         if (rootPointer is null || prototype is null) return false;
         var entry = OwnershipShell(resource, prototype, frame.Element, Graph.Data(rootPointer.Values.First()).ToArray());
         var transform = Graph.Field(Graph.Field(entry, "Second") ?? entry, "m_LocalTransform");
@@ -195,7 +198,9 @@ public sealed partial class CompiledSceneDocument
     {
         CompiledElement Shell(CompiledElement source)
         {
-            var clone = resource.CloneElement(source);
+            var shallow = new CompiledRewrite(); shallow.Children[source] = [];
+            var clone = ReferenceEquals(Graph.Owner(source), resource) ? resource.CloneElement(source)
+                : resource.CopySubtree(Graph.Owner(source), source, new Dictionary<ulong, ulong>(), shallow);
             var values = source.Values.ToArray();
             foreach (var child in source.Children.Where(c => c.Event != 0))
                 clone.Children.Add(Graph.Kind(source) == 173 && values.Length > 1 && ReferenceEquals(child, values[1]) ? target : Shell(child));

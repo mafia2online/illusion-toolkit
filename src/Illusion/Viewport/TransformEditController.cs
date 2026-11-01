@@ -479,6 +479,7 @@ internal sealed class TransformEditController
     /// <summary>What the last <see cref="DuplicateSelected"/> copied: each source row and the row of its copy —
     /// for the host, which gives a copy of an imported object copies of the collision it was given.</summary>
     public IReadOnlyList<(SceneNode Source, SceneNode Copy)> LastDuplicates { get; private set; } = [];
+    internal Action<IFrameNode>? BeforeStructuredDuplicateGpuAllocation { get; set; }
 
     private bool DuplicateStructuredSelection()
     {
@@ -487,37 +488,62 @@ internal sealed class TransformEditController
         var edits = new List<StructuredDuplicateItem>();
         var pairs = new List<(SceneNode Source, SceneNode Copy)>();
         var copiedFrames = new HashSet<IFrameNode>();
-        foreach (var source in selected)
+        var staged = new List<IFrameDuplication>();
+        var allocated = new List<GpuMesh>();
+        var documents = selected.Select(node => node.OwningDocumentNode()?.Source).OfType<CompiledSceneDocument>().Distinct().ToArray();
+        var revertedResources = documents.SelectMany(document => document.Graph.Resources).Distinct()
+            .Select(resource => resource.CaptureRevertedMutationCheckpoint()).ToArray();
+        var revertedBounds = documents.Select(document => document.NativeLods?.CaptureRevertedBoundsCheckpoint()).OfType<Action>().ToArray();
+        try
         {
-            if (source.Source is not IFrameNode frame || !copiedFrames.Add(frame) || source.OwningDocumentNode() is not { } documentNode ||
-                source.OwningDocumentNode()?.Source is not IFrameDuplicationProvider provider) continue;
-            var duplicate = provider.Duplicate(frame, out string? refusal);
-            if (duplicate is null) { _host.RaiseNotice(refusal ?? "The object cannot be duplicated."); continue; }
-            var parent = documentNode;
-            if (duplicate.Root.Source is IFrameNode { Parent: { } parentFrame })
-                for (var ancestor = source.Parent; ancestor is not null; ancestor = ancestor.Parent)
-                    if (ReferenceEquals(ancestor.Source, parentFrame)) { parent = ancestor; break; }
-            var leaves = new List<SceneNode>();
-            var copy = SceneTree.BuildSceneTree(duplicate.Root, leaves);
-            var meshes = new List<GpuMesh>();
-            foreach (var leaf in leaves)
-                if (leaf.Pending is { } pending)
-                {
-                    var mesh = _host.Rnd!.CreateMeshGpu(pending);
-                    mesh.Owner = leaf;
-                    leaf.Mesh = mesh;
-                    leaf.Pending = null;
-                    _host.Rnd.AttachMesh(mesh);
-                    meshes.Add(mesh);
-                }
-            parent.AddChild(copy);
-            _host.Tree.MeshCount += meshes.Count;
-            _host.Persistence.MarkFrameModified(copy);
-            edits.Add(new(copy, parent, duplicate, meshes.ToArray()));
-            pairs.Add((source, copy));
+            foreach (var source in selected)
+            {
+                if (source.Source is not IFrameNode frame || !copiedFrames.Add(frame) || source.OwningDocumentNode() is not { } documentNode ||
+                    source.OwningDocumentNode()?.Source is not IFrameDuplicationProvider provider) continue;
+                var duplicate = provider.Duplicate(frame, out string? refusal);
+                if (duplicate is null) { _host.RaiseNotice(refusal ?? "The object cannot be duplicated."); continue; }
+                staged.Add(duplicate);
+                var parent = documentNode;
+                if (duplicate.Root.Source is IFrameNode { Parent: { } parentFrame })
+                    for (var ancestor = source.Parent; ancestor is not null; ancestor = ancestor.Parent)
+                        if (ReferenceEquals(ancestor.Source, parentFrame)) { parent = ancestor; break; }
+                var leaves = new List<SceneNode>();
+                var copy = SceneTree.BuildSceneTree(duplicate.Root, leaves);
+                var additional = duplicate.AdditionalRoots.Select(root => (Node: SceneTree.BuildSceneTree(root, leaves), Parent: documentNode)).ToArray();
+                var meshes = new List<GpuMesh>();
+                foreach (var leaf in leaves)
+                    if (leaf.Pending is { } pending)
+                    {
+                        BeforeStructuredDuplicateGpuAllocation?.Invoke(frame);
+                        var mesh = _host.Rnd!.CreateMeshGpu(pending);
+                        allocated.Add(mesh);
+                        meshes.Add(mesh);
+                        mesh.Owner = leaf;
+                        leaf.Mesh = mesh;
+                        leaf.Pending = null;
+                    }
+                edits.Add(new(copy, parent, duplicate, meshes.ToArray(), additional));
+                pairs.Add((source, copy));
+            }
+        }
+        catch
+        {
+            foreach (var duplicate in staged.AsEnumerable().Reverse()) duplicate.Detach();
+            foreach (var restore in revertedResources) restore();
+            foreach (var restore in revertedBounds) restore();
+            foreach (var mesh in allocated) mesh.Dispose();
+            throw;
         }
         if (edits.Count > 0)
         {
+            foreach (var edit in edits)
+            {
+                foreach (var mesh in edit.Meshes) _host.Rnd!.AttachMesh(mesh);
+                edit.Parent.AddChild(edit.Node);
+                foreach (var extra in edit.Additional) extra.Parent.AddChild(extra.Node);
+                _host.Tree.MeshCount += edit.Meshes.Length;
+                _host.Persistence.MarkFrameModified(edit.Node);
+            }
             LastDuplicates = pairs;
             History.Push(new StructuredDuplicateEdit(this, edits.ToArray()));
             _host.Selection.SetSelection(edits.Select(e => e.Node).ToList(), edits[^1].Node);
@@ -526,21 +552,26 @@ internal sealed class TransformEditController
         return true;
     }
 
-    private sealed record StructuredDuplicateItem(SceneNode Node, SceneNode Parent, IFrameDuplication Duplicate, GpuMesh[] Meshes);
+    private sealed record StructuredDuplicateItem(SceneNode Node, SceneNode Parent, IFrameDuplication Duplicate, GpuMesh[] Meshes,
+        (SceneNode Node, SceneNode Parent)[] Additional);
 
-    private sealed class StructuredDuplicateEdit(TransformEditController owner, StructuredDuplicateItem[] items) : INodeEdit
+    private sealed class StructuredDuplicateEdit(TransformEditController owner, StructuredDuplicateItem[] items) : INodeEdit, IPreflightEdit
     {
         private bool _attached = true;
-        public IEnumerable<SceneNode> Nodes => items.Select(i => i.Node);
+        public IEnumerable<SceneNode> Nodes => items.SelectMany(i => new[] { i.Node }.Concat(i.Additional.Select(extra => extra.Node)));
+        public void ValidateUndo() { foreach (var item in items) item.Duplicate.ValidateDetach(); }
+        public void ValidateRedo() { foreach (var item in items) item.Duplicate.ValidateReattach(); }
         public void Undo()
         {
+            ValidateUndo();
             owner._host.Selection.Select(null);
             foreach (var item in items)
             {
+                item.Duplicate.Detach();
                 owner._host.Rnd?.DetachMeshes(item.Meshes);
                 owner._host.Tree.MeshCount -= item.Meshes.Length;
                 item.Parent.Children.Remove(item.Node);
-                item.Duplicate.Detach();
+                foreach (var extra in item.Additional) extra.Parent.Children.Remove(extra.Node);
                 owner._host.Persistence.MarkFrameModified(item.Parent);
             }
             _attached = false;
@@ -548,10 +579,12 @@ internal sealed class TransformEditController
         }
         public void Redo()
         {
+            ValidateRedo();
             foreach (var item in items)
             {
                 item.Duplicate.Reattach();
                 item.Parent.AddChild(item.Node);
+                foreach (var extra in item.Additional) extra.Parent.AddChild(extra.Node);
                 foreach (var mesh in item.Meshes) owner._host.Rnd?.AttachMesh(mesh);
                 owner._host.Tree.MeshCount += item.Meshes.Length;
                 owner._host.Persistence.MarkFrameModified(item.Node);
@@ -660,6 +693,20 @@ internal sealed class TransformEditController
         // undoable) rather than attaching later as ghosts outside the tree.
         foreach (SceneNode n in roots) _host.Streamer.DrainPendingUnder(n);
 
+        // Capture one native transaction for the whole compiled-document selection. Per-row
+        // tokens could each permit removing a pair, then discover too late that the batch removes
+        // the family's last pair after an earlier row has already disappeared.
+        var compiledDetachments = new Dictionary<SceneNode, (IFrameDetachment? Token, bool Refused)>();
+        foreach (var group in roots.Where(row => row.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument)
+                     .GroupBy(row => row.OwningDocumentNode()!))
+        {
+            var frames = new List<IFrameNode>();
+            foreach (var row in group) CollectSubtreeFrames(row, frames);
+            var token = ((IFrameDetachmentProvider)group.Key.Source!).CaptureDetachment(frames.Distinct().ToArray());
+            bool first = true;
+            foreach (var row in group)
+            { compiledDetachments.Add(row, (first ? token : null, token is null)); first = false; }
+        }
         var items = new List<DeletedItem>(roots.Count);
         foreach (SceneNode n in roots)
         {
@@ -667,10 +714,25 @@ internal sealed class TransformEditController
             var meshes = new List<GpuMesh>();
             foreach (SceneNode leaf in n.DescendantMeshLeaves())
                 if (leaf.Mesh != null) meshes.Add(leaf.Mesh);
-            var detachment = BuildDetachment(n);
-            if (n.OwningDocumentNode()?.Source is IFrameDetachmentProvider && detachment is null) continue;
+            bool grouped = compiledDetachments.TryGetValue(n, out var prepared);
+            var detachment = grouped ? prepared.Token : BuildDetachment(n);
+            if (grouped ? prepared.Refused : n.OwningDocumentNode()?.Source is IFrameDetachmentProvider && detachment is null) continue;
+            var additionalFrames = detachment?.AdditionalFrames.ToHashSet() ?? [];
+            var additionalRows = new List<(SceneNode Node, SceneNode Parent, int Index)>();
+            void FindAdditional(SceneNode row)
+            {
+                if (row.Parent is { } holder && row.Source is IFrameNode frame && additionalFrames.Contains(frame) && !IsUnder(row, n))
+                {
+                    _host.Streamer.DrainPendingUnder(row);
+                    additionalRows.Add((row, holder, holder.Children.IndexOf(row)));
+                    meshes.AddRange(row.DescendantMeshLeaves().Select(leaf => leaf.Mesh).OfType<GpuMesh>());
+                    return;
+                }
+                foreach (var child in row.Children) FindAdditional(child);
+            }
+            if (additionalFrames.Count > 0 && n.OwningDocumentNode() is { } document) FindAdditional(document);
             items.Add(new DeletedItem(
-                n, parent, parent.Children.IndexOf(n), meshes.ToArray(), detachment, MirrorsOf(n)));
+                n, parent, parent.Children.IndexOf(n), meshes.Distinct().ToArray(), detachment, MirrorsOf(n).Concat(additionalRows).Distinct().ToArray()));
         }
         return items.Count == 0 ? null : new DeleteEdit(this, items.ToArray());
     }
@@ -736,7 +798,13 @@ internal sealed class TransformEditController
     private static void CollectSubtreeFrames(SceneNode node, List<IFrameNode> into)
     {
         // Collision placements are IFrameNode too but persist through their own .col path.
-        if (node.Source is IFrameNode fn and not CollisionInstanceAdapter) into.Add(fn);
+        // Compiled bones and attachment helpers are not registered native scene objects.
+        if (node.OwningDocumentNode()?.Source is CompiledSceneDocument)
+        {
+            if ((node.GeometrySource ?? node.Source) is ICompiledMeshSource { CanonicalFrame: CompiledSceneDocument.CompiledFrameNode frame })
+                into.Add(frame);
+        }
+        else if (node.Source is IFrameNode fn and not CollisionInstanceAdapter) into.Add(fn);
         foreach (SceneNode c in node.Children) CollectSubtreeFrames(c, into);
     }
 
@@ -756,6 +824,7 @@ internal sealed class TransformEditController
             if (n.Source is IFrameNode
                     and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter
                              or BoneNodeAdapter)
+                && n.Kind != "Bone"
                 && !HasSelectedAncestorNode(n, sel))
                 roots.Add(n);
         return roots;
@@ -810,10 +879,10 @@ internal sealed class TransformEditController
         var restored = new List<SceneNode>(items.Length);
         foreach (DeletedItem it in items.OrderBy(i => i.Index))
         {
+            it.Detached?.Reattach();
             it.Parent.Children.Insert(Math.Min(it.Index, it.Parent.Children.Count), it.Node);
             if (it.Detached != null)
             {
-                it.Detached.Reattach();
                 _host.Persistence.MarkFrameModified(it.Node);  // memory diverged from the last save again
                 _host.Persistence.MarkNameTableDirty(it.Node);
             }
@@ -837,18 +906,25 @@ internal sealed class TransformEditController
         SceneNode Node, SceneNode Parent, int Index, GpuMesh[] Meshes, IFrameDetachment? Detached,
         (SceneNode Node, SceneNode Parent, int Index)[] Mirrors);
 
-    private sealed class DeleteEdit : INodeEdit
+    private sealed class DeleteEdit : INodeEdit, IPreflightEdit
     {
         private readonly TransformEditController _owner;
         private readonly DeletedItem[] _items;
         private bool _applied; // true while the delete is in effect (meshes detached & held here)
+        private readonly GpuMesh[] _originalOrder;
 
-        public DeleteEdit(TransformEditController owner, DeletedItem[] items) { _owner = owner; _items = items; }
+        public DeleteEdit(TransformEditController owner, DeletedItem[] items)
+        { _owner = owner; _items = items; _originalOrder = owner._host.Rnd?.Meshes.ToArray() ?? []; }
 
         public IEnumerable<SceneNode> Nodes { get { foreach (DeletedItem i in _items) yield return i.Node; } }
 
-        public void Redo() { _owner.ApplyDelete(_items); _applied = true; }
-        public void Undo() { _owner.RestoreDelete(_items); _applied = false; }
+        public void ValidateUndo() { foreach (var item in _items) item.Detached?.ValidateReattach(); }
+        public void ValidateRedo() { foreach (var item in _items) item.Detached?.ValidateDetach(); }
+        public void Redo() { ValidateRedo(); _owner.ApplyDelete(_items); _applied = true; }
+        public void Undo()
+        {
+            ValidateUndo(); _owner.RestoreDelete(_items); _owner._host.Rnd?.RestoreMeshOrder(_originalOrder); _applied = false;
+        }
 
         // Dropped from history while still deleted → the detached meshes are ours to release (the deletion
         // itself stays permanent — the document was already marked modified). If undone, they are back in

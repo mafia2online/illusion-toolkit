@@ -80,6 +80,15 @@ public sealed partial class NativeLodGraph
 
     public BoundsSnapshot CaptureBounds() => new(this, Volatile.Read(ref _bounds).Values);
 
+    /// <summary>Captures the atomic bounds state and revision for a completely reverted,
+    /// unobservable native preflight. Invoke only after restoring every native field and graph
+    /// mutation; never use it for ordinary undo or to hide a partially applied transaction.</summary>
+    public Action CaptureRevertedBoundsCheckpoint()
+    {
+        var state = Volatile.Read(ref _bounds); long revision = BoundsRevision;
+        return () => { Volatile.Write(ref _bounds, state); Interlocked.Exchange(ref _boundsRevision, revision); };
+    }
+
     /// <summary>Validates and computes replacement own bounds plus recursive child unions without mutation.</summary>
     public BoundsSnapshot PrepareBounds(IReadOnlyDictionary<int, NativeLodBounds> ownBounds)
     {

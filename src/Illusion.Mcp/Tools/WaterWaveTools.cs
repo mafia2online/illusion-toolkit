@@ -19,8 +19,20 @@ public sealed class WaterWaveTools
         }
         catch (Exception ex) { return ToolResult.Fail(ex); }
     }
+    [McpServerTool(Name = "water_optics")]
+    [Description("Inspect or toggle water reflections and refraction in the current viewport. Uses captured current-frame opaque scene color/depth, bounded screen-space tracing, native D261 shoreline attenuation and the user-owned Blinn BRDF lookup. Screen-edge/missing hits retain toolkit water shading; native engine environment probes and temporal reflection filtering are not reproduced. Requires supported copied engine lookup. Preview only; no resource writes.")]
+    public static async Task<string> Optics(IEditorSession editor, IUiThreadMarshal ui, bool? reflections = null, bool? refraction = null)
+    {
+        try
+        {
+            WaterSurfaceInfo? result = null;
+            if (await ui.RunAsync(() => editor.WaterOptics(reflections, refraction, out result)) is { } refusal) return ToolResult.Invalid(refusal);
+            return ToolResult.Json(new { success = true, surface = result });
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
     [McpServerTool(Name = "water_surface")]
-    [Description("Inspect or control the Mafia III analytical water surface in the current viewport. Optional enabled, playing, time and normals change only preview state; reload rereads wave configuration and lookup files. Actual defining triangles supply native mask/color UVs and screen-space reconstruction. Active requires supported visible definitions, inputs and perspective shading. Uses toolkit lighting; dynamic ripples, SSR and refraction are excluded. Foam is a separate opt-in water_foam material diagnostic, default OFF; its replay is bounded to600seconds. No game resources are modified.")]
+    [Description("Inspect or control the Mafia III analytical water surface in the current viewport. Optional enabled, playing, time and normals change only preview state; reload rereads wave configuration and lookup files. Actual defining triangles supply native mask/color UVs and screen-space reconstruction. Active requires supported visible definitions, inputs and perspective shading. Uses toolkit lighting; optional water_optics adds captured-scene reflection/refraction with native depth attenuation and BRDF. Engine environment probes and dynamic ripples remain excluded. Foam is a separate opt-in water_foam material diagnostic, default OFF; its replay is bounded to600seconds. No game resources are modified.")]
     public static async Task<string> Surface(IEditorSession editor, IUiThreadMarshal ui, bool? enabled = null,
         bool? playing = null, float? time = null, bool? normals = null, bool reload = false)
     {
@@ -29,7 +41,7 @@ public sealed class WaterWaveTools
             WaterSurfaceInfo? result = null;
             if (await ui.RunAsync(() => editor.WaterSurface(enabled, playing, time, normals, reload, out result)) is { } refusal)
                 return ToolResult.Invalid(refusal);
-            return ToolResult.Json(new { success = true, scope = "analytical surface with toolkit shading; height/ripple inputs zero", surface = result });
+            return ToolResult.Json(new { success = true, scope = "analytical surface, toolkit lighting and optional captured-scene optics; dynamic ripple inputs zero", surface = result });
         }
         catch (Exception ex) { return ToolResult.Fail(ex); }
     }

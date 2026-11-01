@@ -155,11 +155,13 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         _sceneCollectionAuthoringOrigins.UnionWith(collectionScenes.Where(scene => !activeScenes.Values.Contains(Graph.Owner(scene))));
         var named = activeScenes.Count > 0 || collectionScenes.Count > 0
             ? candidates.Where(f => activeScenes.Values.Contains(Graph.Owner(f.Element)) || collectionScenes.Contains(f.Element)).ToList()
-            : candidates.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.Last()).ToList();
+            : HasPrimaryNativeTranslocators(sceneResources) ? [] : candidates.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.Last()).ToList();
         var decoder = new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive));
         var claimed = new HashSet<CompiledFrameNode>();
         foreach (var root in named)
             if (claimed.Add(root)) Roots.Add(Build(root, decoder, claimed, lod));
+        BuildNativeTranslocators(decoder, lod, sceneResources);
+        LoadNativePaintFields(decoder, sceneResources, claimed);
         RefreshNativeLodRenderCoverage();
         foreach (string path in SdsManifest.Load(SdsMeshLoader.EnsureExtracted(archive)).GetFiles("SystemObjectDatabase"))
         {

@@ -21,8 +21,20 @@ internal sealed partial class AppEditorSession
             renderer.NativeWaterPartsDrawn, host.NativeWaterInputError, renderer.NativeWaterFineNormalsConfigured,
             renderer.NativeWaterFlowPartsDrawn, renderer.NativeWaterFoamConfigured, renderer.NativeWaterFoamEnabled,
             renderer.NativeWaterFoamReady, renderer.NativeWaterFoamFrame, renderer.NativeWaterFoamTargetFrame,
-            renderer.NativeWaterFoamSeed, renderer.NativeWaterFoamMode, renderer.NativeWaterFoamError);
+            renderer.NativeWaterFoamSeed, renderer.NativeWaterFoamMode, renderer.NativeWaterFoamError,
+            renderer.NativeWaterOpticsConfigured, renderer.NativeWaterOpticsActive, renderer.NativeWaterReflections, renderer.NativeWaterRefraction);
         return null;
+    }
+
+    public string? WaterOptics(bool? reflections, bool? refraction, out WaterSurfaceInfo? result)
+    {
+        result = null;
+        if (TargetHost is not { Rnd: { } renderer }) return TargetNotOpen;
+        if (!renderer.NativeWaterOpticsConfigured && (reflections == true || refraction == true))
+            return "Water optics require native D261 thresholds and a supported env_brdf_lut_blinn.dds in copied working assets.";
+        if (reflections is { } r) renderer.NativeWaterReflections = r;
+        if (refraction is { } t) renderer.NativeWaterRefraction = t;
+        return WaterSurface(null, null, null, null, false, out result);
     }
 
     public string? WaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset, out WaterSurfaceInfo? result)

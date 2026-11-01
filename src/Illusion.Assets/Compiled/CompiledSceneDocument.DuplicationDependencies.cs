@@ -60,15 +60,19 @@ public sealed partial class CompiledSceneDocument
     }
 
     private sealed class DependentDuplication(CompiledSceneDocument document, CompiledResource resource,
-        IFrameDuplication copy, IEditAction definitions) : IFrameDuplication
+        IFrameDuplication copy, IEditAction definitions) : IFrameDuplication, ICompiledDuplicationMap
     {
         private bool _attached = true;
         private uint[]? _schemas, _allocations;
         private int _stream;
         public ISceneHierarchyNode Root => copy.Root;
+        public IReadOnlyDictionary<ulong, ulong> SceneIds => ((ICompiledDuplicationMap)copy).SceneIds;
+        public void ValidateDetach() => copy.ValidateDetach();
+        public void ValidateReattach() => copy.ValidateReattach();
         public void Detach()
         {
             if (!_attached) return;
+            ValidateDetach();
             var plan = document.Plan(resource);
             _schemas = plan.AdditionalSchemas.Keys.ToArray(); _allocations = plan.AllocationCountDeltas.Keys.ToArray();
             _stream = plan.SchemaStreamIndex;
@@ -77,6 +81,7 @@ public sealed partial class CompiledSceneDocument
         public void Reattach()
         {
             if (_attached) return;
+            ValidateReattach();
             definitions.Redo(); copy.Reattach();
             var plan = document.Plan(resource);
             // Dictionary reuses removed slots in reverse order. Preserve the actual pre-undo

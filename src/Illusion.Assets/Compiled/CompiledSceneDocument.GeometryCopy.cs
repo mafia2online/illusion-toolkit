@@ -7,6 +7,9 @@ namespace Illusion.Assets.Compiled;
 
 public sealed partial class CompiledSceneDocument
 {
+    // History may retain detached definitions. Reserve generated identities for this document's
+    // entire lifetime, rather than making an undone or preflighted asset's identity available again.
+    private readonly HashSet<ulong> _reservedGeometryCopyIds = [];
     private static readonly HashSet<uint> GeometryDependencyTypes =
         [0x1baf2d1d, 0xf0731a96, 0x4dc47de8, 0x51b03839, 0x557b6b6d, 0x2946549f];
 
@@ -136,6 +139,13 @@ public sealed partial class CompiledSceneDocument
     /// metadata and full source vertex buffers. The returned action has already been applied.</summary>
     public IEditAction? IsolateVisualGeometry(CompiledElement visual, out string? refusal)
     {
+        var frame = _frames.Values.FirstOrDefault(candidate => _linkedProxyStates.Values.Any(state => state.Pairs.ContainsKey(candidate))
+            && Components(candidate.Element).SelectMany(component => Graph.Items(Graph.Field(component, "m_Visuals"))).Any(item => ReferenceEquals(Graph.Resolve(item), visual)));
+        return frame is null ? IsolateVisualGeometryCore(visual, false, out refusal) : IsolatePreparedProxyGeometry(frame, visual, out refusal);
+    }
+
+    private IEditAction? IsolateVisualGeometryCore(CompiledElement visual, bool preparedGeometry, out string? refusal)
+    {
         refusal = null;
         if (!Graph.Nodes.Contains(visual) || visual.TypeId != 0x62c04287)
         { refusal = "The visual is not active in this document."; return null; }
@@ -144,10 +154,20 @@ public sealed partial class CompiledSceneDocument
         var references = new[] { Graph.Field(visual, "m_MeshSet"), Graph.Field(visual, "m_FaceGroupSet") }
             .OfType<CompiledElement>().Concat(Graph.Items(Graph.Field(visual, "m_CDSubdiv"))).ToArray();
         if (references.Any(r => r.Event == 2 && r.Values.Count() > 1))
-        { refusal = "Inline-owned geometry needs an ownership transfer before isolation."; return null; }
+        {
+            if (!preparedGeometry) { refusal = "Inline-owned geometry needs an ownership transfer before isolation."; return null; }
+            var transfer = ExternalizeProxyInlineGeometry(references);
+            try
+            {
+                var isolated = IsolateVisualGeometryCore(visual, true, out refusal);
+                if (isolated is null) { transfer.Undo(); return null; }
+                return new ProxyGeometryAction(() => { transfer.Redo(); isolated.Redo(); }, () => { isolated.Undo(); transfer.Undo(); });
+            }
+            catch { transfer.Undo(); throw; }
+        }
         var frame = _frames.Values.FirstOrDefault(f => Components(f.Element).SelectMany(c => Graph.Items(Graph.Field(c, "m_Visuals")))
             .Any(i => ReferenceEquals(Graph.Resolve(i), visual)));
-        if (frame is not null && ValidateSceneCollectionMutation(frame) is { } guardRefusal)
+        if (!preparedGeometry && frame is not null && ValidateSceneCollectionMutation(frame) is { } guardRefusal)
         { refusal = guardRefusal; return null; }
         var binding = _visualGeometry.FirstOrDefault(p => ReferenceEquals(p.Key.Visual, visual)).Value?.GeometryBinding ?? frame?.GeometryBinding;
         if (binding is null) { refusal = "This visual has no loaded geometry binding."; return null; }
@@ -162,8 +182,9 @@ public sealed partial class CompiledSceneDocument
             for (int lod = 0; lod < visible.Length; lod++)
                 if (visible[lod] is { } original)
                 {
-                    var partition = binding.CompactIsolatedView(original, lod, out var reason)
-                        ?? throw new NotSupportedException("Visual partition isolation failed: " + reason);
+                    var partition = preparedGeometry ? binding.CompactIsolatedViewCore(original, lod, out var reason)
+                        : binding.CompactIsolatedView(original, lod, out reason);
+                    if (partition is null) throw new NotSupportedException("Visual partition isolation failed: " + reason);
                     if (!partition.Unchanged) { partition.ApplyNew(); compacted.Add(partition); }
                 }
             var changed = before.Where(p => !Graph.Data(p.Key).SequenceEqual(p.Value))
@@ -234,7 +255,8 @@ public sealed partial class CompiledSceneDocument
         {
             ulong id;
             do { id = BinaryPrimitives.ReadUInt64LittleEndian(Guid.NewGuid().ToByteArray()) & 0x7fffffffffffffff; if (local) id |= 0x8000000000000000; }
-            while (id == 0 || Graph.Objects.ContainsKey(id) || _guids.ContainsValue(id) || _locals.Values.Any(d => d.ContainsValue(id)));
+            while (id == 0 || Graph.Objects.ContainsKey(id) || document._reservedGeometryCopyIds.Contains(id) || _guids.ContainsValue(id) || _locals.Values.Any(d => d.ContainsValue(id)));
+            document._reservedGeometryCopyIds.Add(id);
             return id;
         }
 

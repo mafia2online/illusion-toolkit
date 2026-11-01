@@ -315,6 +315,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
         List<SceneNode> linked = [.. LinkedCollision(selected).Values.SelectMany(hulls => hulls).Where(n => !held.Contains(n)).Distinct()];
         int before = Editing.History.UndoCount;
         var deleteTargets = selected.Concat(linked).ToArray();
+        var validatedPreparedDeletion = new HashSet<Assets.Compiled.CompiledSceneDocument>();
         foreach (var node in deleteTargets)
         {
             var frame = (node.GeometrySource ?? node.Source) switch
@@ -326,6 +327,21 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
             if (frame is not null && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
                 && document.ValidateSceneCollectionMutation(frame) is { } lodRefusal)
             {
+                if (validatedPreparedDeletion.Contains(document)) continue;
+                var frames = new List<IFrameNode>();
+                void Collect(SceneNode row)
+                {
+                    if ((row.GeometrySource ?? row.Source) is Assets.Compiled.ICompiledMeshSource
+                        { CanonicalFrame: Assets.Compiled.CompiledSceneDocument.CompiledFrameNode source }) frames.Add(source);
+                    foreach (var child in row.Children) Collect(child);
+                }
+                foreach (var target in deleteTargets.Where(target => ReferenceEquals(target.OwningDocumentNode()?.Source, document))) Collect(target);
+                var prepared = document.CaptureDetachment(frames.Distinct().ToArray());
+                if (prepared is not null)
+                {
+                    try { prepared.ValidateDetach(); validatedPreparedDeletion.Add(document); continue; }
+                    catch (EditRefusedException rejected) { lodRefusal = rejected.Message; }
+                }
                 refusal = "Nothing was deleted: " + lodRefusal;
                 RaiseNotice(refusal, isError: true); return false;
             }
@@ -890,6 +906,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     internal void RaiseMaterialsChanged()
     {
         Rnd?.NotifyNativeWaterFoamSourceChanged();
+        Streamer.InvalidateNativePaintMaterials();
         MaterialsChanged?.Invoke();
     }
 

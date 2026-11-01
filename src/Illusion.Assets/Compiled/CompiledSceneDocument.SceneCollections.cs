@@ -7,7 +7,7 @@ public sealed partial class CompiledSceneDocument
 {
     private readonly HashSet<CompiledElement> _sceneCollectionAuthoringOrigins = [];
     private readonly HashSet<CompiledElement> _sceneCollectionLodProxyGroups = [];
-    private const string SceneCollectionLodRefusal = "This object belongs to a linked native coarse/fine LOD group. Proxy regeneration is not supported; the object is read-only.";
+    private const string SceneCollectionLodRefusal = "This object belongs to a linked native coarse/fine LOD group. Prepare a verified family for supported paired authoring; direct changes remain read-only.";
 
     private void RegisterSceneCollectionProxyGroups(IEnumerable<CompiledElement> scenes)
     {
@@ -41,6 +41,7 @@ public sealed partial class CompiledSceneDocument
         var canonical = source is ICompiledMeshSource mesh ? mesh.CanonicalFrame : source;
         if (canonical is not CompiledFrameNode frame || !_frames.TryGetValue(frame.Element, out var stored)
             || !ReferenceEquals(frame, stored)) return null;
+        if (_proxyStructuralAuthorization.Contains(frame)) return null;
         var visited = new HashSet<CompiledFrameNode>();
         bool Blocked(CompiledFrameNode current)
         {

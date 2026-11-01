@@ -27,8 +27,8 @@ internal sealed class CompositeEdit : INodeEdit, IPreflightEdit
     public IEnumerable<SceneNode> Nodes =>
         _children.OfType<INodeEdit>().SelectMany(c => c.Nodes).Distinct();
 
-    public void ValidateUndo() { foreach (var child in _children.OfType<IPreflightEdit>()) child.ValidateUndo(); }
-    public void ValidateRedo() { foreach (var child in _children.OfType<IPreflightEdit>()) child.ValidateRedo(); }
+    public void ValidateUndo() { foreach (var child in _children) child.ValidateUndo(); }
+    public void ValidateRedo() { foreach (var child in _children) child.ValidateRedo(); }
 
     public void Undo()
     {

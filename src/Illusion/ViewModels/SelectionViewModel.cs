@@ -578,12 +578,12 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
 
     private void BuildMaterials()
     {
-        if (_node?.Source is not IMaterialListSource src)
+        if (_node is null)
         {
             _materials = Array.Empty<MaterialViewModel>();
             return;
         }
-        IReadOnlyList<MaterialInfo> infos = src.GetMaterials();
+        IReadOnlyList<MaterialInfo> infos = _viewport.GetMaterialsForNode(_node);
         var list = new List<MaterialViewModel>(infos.Count);
         for (int i = 0; i < infos.Count; i++)
             list.Add(new MaterialViewModel(infos[i], i, _viewport.RenderMaterialThumbnail(infos[i])));

@@ -1365,7 +1365,9 @@ internal sealed partial class AppEditorSession : IEditorSession
         slots = [];
         if (TargetHost is not { } host) return TargetNotOpen;
         if (Resolve(host, name, out SceneNode? node) is { } unresolved) return unresolved;
-        if (node!.Source is not Domain.Materials.IMaterialListSource adapter || adapter.GetMaterials() is not { Count: > 0 } before)
+        if (node is null) return "The mesh is no longer available.";
+        var before = host.GetMaterialsForNode(node);
+        if (before.Count == 0)
         {
             return $"'{name}' is a {node.Kind} with no material slots";
         }
@@ -1386,7 +1388,7 @@ internal sealed partial class AppEditorSession : IEditorSession
             if (!host.AssignSlotMaterial(node, index, hash)) return $"slot {index} of '{name}' could not be re-pointed";
             changed = index;
         }
-        slots = [.. adapter.GetMaterials().Select((m, i) => new MeshSlotInfo(i, m.Name, m.TriangleCount, i == changed))];
+        slots = [.. host.GetMaterialsForNode(node).Select((m, i) => new MeshSlotInfo(i, m.Name, m.TriangleCount, i == changed))];
         return null;
     }
 

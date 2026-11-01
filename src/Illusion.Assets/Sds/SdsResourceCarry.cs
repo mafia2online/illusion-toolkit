@@ -19,6 +19,9 @@ public sealed class SdsResourceCarry
     private readonly List<GenericBudget> _genericBudgets = [];
     private static readonly string[] BudgetFields = ["SlotRam", "SlotVram", "OtherRam", "OtherVram"];
     public bool IsDirty { get; private set; }
+    internal IReadOnlyList<string> StagedPayloadFiles => _entries.Values.Select(entry => Contained(_folder, entry.File)).ToArray();
+    internal IReadOnlyList<string> ActivePayloadFiles => _entries.Where(pair => _references.GetValueOrDefault(pair.Key) > 0)
+        .Select(pair => Contained(_folder, pair.Value.File)).ToArray();
 
     /// <summary>Restores flush bookkeeping when a containing multi-resource save restores its files.</summary>
     internal Action CaptureFlushCheckpoint()
@@ -102,6 +105,30 @@ public sealed class SdsResourceCarry
                     for (int i = 0; i < values.Length; i++) values[i] = checked(values[i] + uint.Parse(entry.Attribute(BudgetFields[i])!.Value, CultureInfo.InvariantCulture));
             }
             var budget = new GenericBudget(destinationFile, values);
+            _ = BuildManifest(_entries.Where(p => _references.GetValueOrDefault(p.Key) > 0).Select(p => p.Value), _genericBudgets.Append(budget));
+            var action = new BudgetEdit(this, budget); action.Redo(); return action;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or InvalidDataException or NotSupportedException or OverflowException or FormatException)
+        { refusal = ex.Message; return null; }
+    }
+
+    /// <summary>Stages a conservative CPU allowance for a growing Generic resource, without IO.
+    /// Both CPU pools are reserved because arbitrary native type evaluators can select either;
+    /// this is an allowance, not a claim that the serialized growth equals native consumption.</summary>
+    public IEditAction? AddGenericGrowthBudget(string destinationFile, long additionalRamBytes, out string? refusal)
+        => AddGenericGrowthBudget(destinationFile, additionalRamBytes, additionalRamBytes, out refusal);
+
+    /// <summary>Stages explicit positive SlotRam/OtherRam allowances; GPU allocations are independent.</summary>
+    public IEditAction? AddGenericGrowthBudget(string destinationFile, long additionalSlotRamBytes, long additionalOtherRamBytes, out string? refusal)
+    {
+        refusal = null;
+        try
+        {
+            _ = Contained(_folder, destinationFile);
+            if (additionalSlotRamBytes < 0 || additionalOtherRamBytes < 0) throw new ArgumentOutOfRangeException(nameof(additionalSlotRamBytes));
+            var target = Parse(_original).Elements("ResourceEntry").SingleOrDefault(e => e.Element("File")?.Value == destinationFile);
+            if (target?.Element("Type")?.Value != "Generic") throw new ArgumentException("Select a destination native Generic resource file.");
+            var budget = new GenericBudget(destinationFile, [checked((uint)additionalSlotRamBytes), 0, checked((uint)additionalOtherRamBytes), 0]);
             _ = BuildManifest(_entries.Where(p => _references.GetValueOrDefault(p.Key) > 0).Select(p => p.Value), _genericBudgets.Append(budget));
             var action = new BudgetEdit(this, budget); action.Redo(); return action;
         }

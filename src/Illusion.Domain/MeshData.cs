@@ -78,6 +78,12 @@ public sealed class MeshData
     /// </summary>
     public float[]? InstanceDrawDistances { get; init; }
 
+    /// <summary>Optional native internal mesh LOD selection for each placement.</summary>
+    public NativeInstanceLod? InstanceLod { get; init; }
+
+    /// <summary>Optional native root positions for spherical activation range, parallel to Instances.</summary>
+    public Vector3[]? InstanceDrawOrigins { get; init; }
+
     public int VertexCount => Positions.Length;
     public int TriangleCount => Indices.Length / 3;
 }

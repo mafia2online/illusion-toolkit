@@ -13,6 +13,8 @@ public sealed partial class CompiledSceneDocument : IFrameDetachmentProvider
     public IFrameDetachment? CaptureDetachment(IReadOnlyList<IFrameNode> frames)
     {
         var set = frames.OfType<CompiledFrameNode>().ToHashSet();
+        if (set.Any(frame => _linkedProxyStates.Values.Any(state => state.Pairs.ContainsKey(frame))))
+            return CapturePreparedLinkedProxyDetachment(frames);
         if (set.Any(frame => ValidateSceneCollectionMutation(frame) is not null)) return null;
         if (set.Count == 0 || set.Count != frames.Distinct().Count() || set.Any(f => !_frames.ContainsValue(f) || _deleted.Contains(f))) return null;
         // Every descendant must go with its parent: keeping a child would leave its placement undefined.

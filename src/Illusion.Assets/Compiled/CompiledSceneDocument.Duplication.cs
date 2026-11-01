@@ -10,7 +10,7 @@ namespace Illusion.Assets.Compiled;
 public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
 {
     public bool CanDuplicate(IFrameNode source) => source is CompiledFrameNode frame &&
-        _frames.ContainsValue(frame) && SafeHierarchy(frame, []);
+        _frames.ContainsValue(frame) && (CanDuplicatePreparedLinkedProxy(frame) || SafeHierarchy(frame, []));
 
     private bool SafeHierarchy(CompiledFrameNode frame, HashSet<CompiledFrameNode> visited, HashSet<CompiledElement>? actorScope = null)
     {
@@ -41,6 +41,8 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
 
     public IFrameDuplication? Duplicate(IFrameNode source, out string? refusal)
     {
+        if (_proxyStructuralAuthorization.Count == 0 && CanDuplicatePreparedLinkedProxy(source))
+            return DuplicatePreparedLinkedProxy(source, out refusal);
         try { return DuplicateCore(source, out refusal); }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException or IOException)
         { refusal = ex.Message; return null; }
@@ -132,7 +134,7 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
             parentContainer is not null ? Graph.Field(Graph.Field(clone, "Second") ?? clone, "m_LocalTransform") : null, copiedFrames);
         int firstMesh = Meshes.Count;
         var root = Build(copiedFrame, new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive)), [], 0);
-        var result = new CompiledDuplication(this, copiedFrame, root, resource, container, clone, toc, tables, counts, Meshes.Skip(firstMesh).ToArray(), geometryCopies, copiedFrames.ToArray());
+        var result = new CompiledDuplication(this, copiedFrame, root, resource, container, clone, toc, tables, counts, Meshes.Skip(firstMesh).ToArray(), geometryCopies, copiedFrames.ToArray(), ids);
         result.Reattach();
         IEditAction? definitions = null;
         try
@@ -190,11 +192,39 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
 
     private sealed class CompiledDuplication(CompiledSceneDocument document, CompiledFrameNode frame, SdsFrameNode root,
         CompiledResource resource, CompiledElement container, CompiledElement registration, CompiledElement toc,
-        List<CompiledElement> tables, Dictionary<uint, int> counts, MeshData[] meshes, List<GeometryCopy> geometryCopies, CompiledFrameNode[]? frames = null) : IFrameDuplication
+        List<CompiledElement> tables, Dictionary<uint, int> counts, MeshData[] meshes, List<GeometryCopy> geometryCopies, CompiledFrameNode[]? frames = null,
+        IReadOnlyDictionary<ulong, ulong>? sceneIds = null) : IFrameDuplication, ICompiledDuplicationMap
     {
         private readonly CompiledFrameNode[] _copiedFrames = frames ?? [frame];
+        // Vehicle imports also retain non-placed model templates in _copiedFrames. They are
+        // activation dependencies, not descendants of the owning scene registration.
+        private readonly HashSet<CompiledFrameNode> _initialHierarchy = CaptureHierarchy(frame);
+        private readonly CompiledFrameNode? _originalParent = frame.ParentFrame;
         public ISceneHierarchyNode Root => root;
+        public IReadOnlyDictionary<ulong, ulong> SceneIds { get; } = sceneIds is null ? new Dictionary<ulong, ulong>() : new Dictionary<ulong, ulong>(sceneIds);
         private bool _attached;
+        private static HashSet<CompiledFrameNode> CaptureHierarchy(CompiledFrameNode root)
+        {
+            var result = new HashSet<CompiledFrameNode>();
+            void Visit(CompiledFrameNode node) { if (result.Add(node)) foreach (var child in node.Children) Visit(child); }
+            Visit(root); return result;
+        }
+        public void ValidateDetach()
+        {
+            if (!_attached) return;
+            var current = new HashSet<CompiledFrameNode>();
+            void Visit(CompiledFrameNode node) { if (current.Add(node)) foreach (var child in node.Children) Visit(child); }
+            Visit(frame);
+            if (!current.SetEquals(_initialHierarchy) || !ReferenceEquals(frame.ParentFrame, _originalParent))
+                throw new EditRefusedException("Restore the copied hierarchy before removing its owning registration.");
+        }
+        public void ValidateReattach()
+        {
+            if (_attached) return;
+            if (!ReferenceEquals(frame.ParentFrame, _originalParent) || _originalParent is not null
+                && (!document._frames.ContainsValue(_originalParent) || document._deleted.Contains(_originalParent)))
+                throw new EditRefusedException("The copied hierarchy's original parent is no longer active.");
+        }
         public void RebuildRoot()
         {
             document.Roots.Remove(root);
@@ -207,6 +237,7 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
         public void Reattach()
         {
             if (_attached) return;
+            ValidateReattach();
             foreach (var geometry in geometryCopies) geometry.Reattach();
             document.Graph.SetSubtreeActive(resource, registration, true);
             foreach (var copied in _copiedFrames) document._frames[copied.Element] = copied;
@@ -223,6 +254,7 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
         public void Detach()
         {
             if (!_attached) return;
+            ValidateDetach();
             document.SetItems(container, document.CurrentItems(container).Where(e => !ReferenceEquals(e, registration)).ToArray());
             document.SetGuidTableItems(toc, document.CurrentItems(toc).Except(tables).ToArray());
             var plan = document.Plan(resource);

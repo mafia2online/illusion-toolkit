@@ -45,7 +45,8 @@ public sealed partial class CompiledSceneDocument
 
     private bool WriteMaterials(CompiledElement scene, IReadOnlyList<ulong[]> table, CompiledElement? visual = null)
     {
-        if (_frames.TryGetValue(scene, out var frame) && ValidateSceneCollectionMutation(frame) is not null) return false;
+        if (_frames.TryGetValue(scene, out var frame) && ValidateSceneCollectionMutation(frame) is not null)
+            return WriteLinkedProxyMaterials(frame, table, visual);
         var elements = EditableMaterialTables(scene, visual);
         if (table.Count == 0 || table.Count != elements.Count) return false;
         var replacements = new List<(CompiledElement Element, byte[] Bytes)>();
@@ -107,22 +108,6 @@ public sealed partial class CompiledSceneDocument
             return SetSlotTable(table);
         }
 
-        public bool SetSlotTable(IReadOnlyList<ulong[]> table)
-        {
-            if (SceneCollectionMutationRefusal is not null) return false;
-            var elements = _document.EditableMaterialTables(Element);
-            if (table.Count == 0 || table.Count != elements.Count) return false;
-            var replacements = new List<(CompiledElement Element, byte[] Bytes)>();
-            for (int lod = 0; lod < table.Count; lod++)
-            {
-                byte[] bytes = _document.Graph.Data(elements[lod]).ToArray();
-                if (table[lod].Length != BinaryPrimitives.ReadUInt32LittleEndian(bytes)) return false;
-                for (int slot = 0; slot < table[lod].Length; slot++)
-                    BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(12 + slot * 40), table[lod][slot]);
-                replacements.Add((elements[lod], bytes));
-            }
-            foreach (var (element, bytes) in replacements) _document.Graph.Owner(element).Replace(element, bytes);
-            return true;
-        }
+        public bool SetSlotTable(IReadOnlyList<ulong[]> table) => _document.WriteMaterials(Element, table);
     }
 }

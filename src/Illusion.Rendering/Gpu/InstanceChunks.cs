@@ -39,8 +39,9 @@ public static class InstanceChunks
     /// when the cloud is drawn regardless of range. Copies with different distances go into different cells even
     /// when they stand in the same place, so the renderer can drop a cell on distance alone.</param>
     public static (Matrix4x4[] Sorted, InstanceCell[] Cells) Build(
-        Matrix4x4[] instances, Vector3 localMin, Vector3 localMax, float[]? drawDistances = null)
+        Matrix4x4[] instances, Vector3 localMin, Vector3 localMax, float[]? drawDistances = null, int[]? sortedIndices = null)
     {
+        if (sortedIndices is not null && sortedIndices.Length != instances.Length) throw new ArgumentException("Instance sort mapping must match instance count.", nameof(sortedIndices));
         var bins = new Dictionary<(int X, int Y, float Distance), List<int>>();
         for (int i = 0; i < instances.Length; i++)
         {
@@ -72,6 +73,7 @@ public static class InstanceChunks
             foreach (int i in idx)
             {
                 Matrix4x4 m = instances[i];
+                if (sortedIndices is not null) sortedIndices[next] = i;
                 sorted[next++] = m;
                 if (hasLocal)
                 {

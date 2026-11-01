@@ -60,7 +60,7 @@ public sealed partial class D3DImageHost
         private void Swap(SceneNode row, GpuMesh before, GpuMesh after)
         {
             host.Rnd?.DetachMeshes([before]); host.Rnd?.AttachMesh(after);
-            after.Ghost = before.Ghost; row.Mesh = after;
+            after.Ghost = before.Ghost; after.Visible = before.Visible; row.Mesh = after;
             if (row.Source is IFrameNode frame) after.SetWorld(frame.WorldTransform);
         }
         public void Undo()
@@ -93,6 +93,20 @@ public sealed partial class D3DImageHost
         return null;
     }
 
+    internal string? CreateLinkedProxyGroup(SceneNode owner, string name, out SceneNode? created)
+    {
+        created = null;
+        if (!Tree.IsInScene(owner)) return "The fine object is no longer in this scene.";
+        if (IsLoading || BridgeEditedCount > 0) return "Wait for loading and end the Blender session before creating a group.";
+        if (owner.Source is not IFrameNode source || owner.OwningDocumentNode() is not { Source: CompiledSceneDocument document } documentNode)
+            return "Select a prepared fine object.";
+        var mutation = document.CreatePreparedLinkedProxyGroup(source, name, out var refusal);
+        if (mutation is null) return refusal ?? "The native group could not be created.";
+        var row = SceneTree.BuildSceneTree(mutation.Root, []);
+        var edit = new CreatedGroupEdit(this, documentNode, row, mutation);
+        edit.Redo(); History.Push(edit); created = row; return null;
+    }
+
     internal string? TranslateCompiledNavigation(SceneNode node, int section, Vector3 offset)
     {
         if (IsLoading || BridgeEditedCount > 0) return "wait for loading and end the Blender session before editing navigation";
@@ -112,19 +126,22 @@ public sealed partial class D3DImageHost
         RaiseSelectionPropertiesChanged(); RaiseSceneChanged();
     }
 
-    private sealed class CreatedGroupEdit(D3DImageHost host, SceneNode parent, SceneNode row, IFrameDuplication mutation) : INodeEdit
+    private sealed class CreatedGroupEdit(D3DImageHost host, SceneNode parent, SceneNode row, IFrameDuplication mutation) : INodeEdit, IPreflightEdit
     {
         private bool _attached = true;
         public IEnumerable<SceneNode> Nodes => [row];
+        public void ValidateUndo() => mutation.ValidateDetach();
+        public void ValidateRedo() { if (!_attached) mutation.ValidateReattach(); }
         public void Redo()
         {
+            ValidateRedo();
             if (!_attached) mutation.Reattach();
             parent.AddChild(row); host.Persistence.MarkFrameModified(row);
             host.Selection.SetSelection([row], row); host.CarCollisionEditing.RefreshOverlay(); host.RaiseSceneChanged(); _attached = true;
         }
         public void Undo()
         {
-            host.Selection.Select(null); parent.Children.Remove(row); mutation.Detach();
+            ValidateUndo(); mutation.Detach(); host.Selection.Select(null); parent.Children.Remove(row);
             host.Persistence.MarkFrameModified(parent); host.CarCollisionEditing.RefreshOverlay(); host.RaiseSceneChanged(); _attached = false;
         }
     }

@@ -24,6 +24,14 @@ public sealed class CompiledVehicleRig
     internal Func<string?>? MutationRefusal { get; set; }
     internal static string? BoneMutationRefusal(IFrameNode source) => source is Bone bone ? bone.Owner.MutationRefusal?.Invoke() : null;
     internal long AuthoredRevision { get; private set; }
+    internal void NotifyAuthoredMutation() { _animationPose = null; AuthoredRevision++; }
+    /// <summary>Captures transient playback and authored revision for a completely reverted,
+    /// unobservable failed transaction. Restore all native matrices first; never use for ordinary undo.</summary>
+    public Action CaptureRevertedAuthoredMutationCheckpoint()
+    {
+        var pose = _animationPose; long revision = AuthoredRevision;
+        return () => { _animationPose = pose; AuthoredRevision = revision; };
+    }
     public int Count => _bones.Length;
     public IReadOnlyList<Matrix4x4> LiveRest { get; }
     public SkeletonData Skeleton { get; }

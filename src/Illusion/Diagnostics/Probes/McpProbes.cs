@@ -46,7 +46,7 @@ internal static class McpProbes
         "effect_point_sample", "effect_point_preview", "effect_point_screenshot", "effect_point_timeline",
         "water_wave_preview", "water_wave_screenshot",
         "water_surface",
-        "water_foam",
+        "water_foam", "water_optics",
         "morph_channels", "morph_preview",
         // EffectsTools
         "parse_effects_file", "parse_effects_from_bytes",
@@ -61,9 +61,9 @@ internal static class McpProbes
         // EditorTools
         "editor_status", "editor_list_areas", "editor_open_area", "scene_find", "scene_select",
         "editor_stream_world",
-        "lod_status",
+        "lod_status", "placement_status", "foliage_paint",
         "linked_proxy_inspect",
-        "linked_proxy_prepare",
+        "linked_proxy_prepare", "linked_proxy_group", "linked_proxy_bones", "linked_proxy_bone_set",
         "blender_open", "blender_push", "blender_end", "editor_notices", "editor_save", "editor_build",
         "camera_get", "camera_look_at", "camera_set", "camera_frame_selection", "view_set",
         "viewport_screenshot", "object_move", "scene_reparent", "scene_delete_selected", "scene_duplicate_selected",

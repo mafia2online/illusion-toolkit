@@ -20,10 +20,10 @@ Implemented:
 - Import verified static CityCrash props, supported type-12 breakable actors and Kits containing independent actors under an explicitly selected Kit,
   with lazy previews, independent geometry and physics, and undo/redo. Existing actor physics is preserved.
   Build includes the shared CityCrash archive containing the new geometry definitions.
-- Stream districts by camera position in Whole map mode, using cached compiled visual bounds.
+- Stream districts by camera position in Whole map mode, using cached compiled visual bounds. Matching regional and global native placement archives activate their own resources once; dependency-only loads remain templates. Supported static translocator placements render with per-instance native mesh LOD and activation ranges. Verified procedural paint fields generate camera-local foliage with native clipped-cell density, additive refinement, point transforms and active prefixes; worker snapshots and GPU caches are bounded and read-only. Baked fields use native aggregate-cell LOD bounds. Editor-seeded ordering is explicit; wind and native packed-buffer/shader parity are not claimed.
 - Export and apply static and supported skinned mesh position, normal, all native UV sets, vertex color, topology and weight edits through the Blender bridge.
   Verified collision/render subdivision layouts are conservatively refitted; unsupported layouts are refused.
-  Linked coarse/fine scenery is protected until both representations can be rebuilt together; see [native scene collections](MAFIA3-SCENE-COLLECTIONS.md).
+  Linked coarse/fine scenery requires explicit family preparation. Supported static position/topology edits then rebuild native fine LODs and the paired far representation together; shared storage receives independent native identities. See [paired geometry](MAFIA3-PAIRED-GEOMETRY.md).
   Compression lattices and native bounds expand when required. Per-visual copy-on-write isolates shared vehicle parts.
   Packed channels, skin palettes and face groups are retained or rebuilt; unsafe empty BPA groups are refused.
 - Assemble vehicle wheels from `cars_universal.sds`, including mirrored wheel halves. Vehicle doors,
@@ -36,7 +36,7 @@ Implemented:
   include native component, dependency and allocation metadata. Box resizing and mesh recooking create independent cooked Havok data.
   Triangle topology cooking supports up to 100,000 vertices and 100,000 triangles; collision removal preserves shared assets.
 - Rename compiled text, including UTF-8 names; scene names update their verified FNV hash together with the text.
-- Assign existing materials to independent static and vehicle visual mesh slots, including matching LOD slots, with undo/redo.
+- Assign existing materials to independent static and vehicle visual mesh slots, including matching LOD slots, with undo/redo. Prepared linked families also support scoped paired material-slot edits, native Kit hierarchy/duplication/removal, and existing rigid rest-bone edits; unsupported component/skin/morph layouts remain guarded.
 - Read/write MTLB 63 libraries, resolve their texture bindings, and preserve unknown material fields.
 - MCP archive/texture/material inspection, `decode_resource` for `Generic`, map/resource opening,
   scene selection and movement, component properties, vehicle component tuning, undo/redo, Save/Build,
@@ -45,9 +45,8 @@ Implemented:
 The renderer uses toolkit shading. Verified native two/three-layer terrain inputs and blend equations are
 supported. Water uses the actual defining triangles and native mask/color UVs, analytical wave field and
 screen-ray surface grid, with shared viewport depth and toolkit lighting. Water textures retain their native
-mip chains. The isolated wave window also supports manual template weights. Ripple simulation, shoreline
-height, SSR, foam and refraction remain separate unsupported passes.
-See [surface evidence](MAFIA3-SURFACES.md).
+mip chains. The isolated wave window also supports manual template weights. Optional captured-scene reflection/refraction uses verified native shoreline depth attenuation and the authored Blinn BRDF. Reflected/transmitted radiance uses editor screen-space traces and toolkit lighting; native environment probes and temporal filtering are not reproduced. Native foam diagnostics are opt-in. Ripple simulation and the shoreline height field remain unsupported.
+See [surface evidence](MAFIA3-SURFACES.md) and [water evidence](MAFIA3-WATER-EVIDENCE.md).
 
 Additional authoring includes native vehicle cloning/registration, rig bones and poses, paint choices and
 material metadata, exact primary/secondary body paint through native vertex colors, traffic eligibility and

@@ -60,6 +60,13 @@ internal sealed class CompiledAuthoringWindow : Window
         panel.Children.Add(Button("Create root group", () => host.CreateCompiledGroup(_name.Text, null, out _)));
         panel.Children.Add(Button("Create group under selection", () => host.SelectedNode is { } selected
             ? host.CreateCompiledGroup(_name.Text, selected, out _) : "Select a destination group in the scene tree."));
+        panel.Children.Add(Button("Create group for prepared fine object", () => host.SelectedNode is { } selected
+            ? host.CreateLinkedProxyGroup(selected, _name.Text, out _) : "Select a prepared fine object in the scene tree."));
+        panel.Children.Add(Button("Edit prepared rigid skeleton…", () =>
+        {
+            if (host.SelectedNode is not { } selected) return "Select a prepared fine object.";
+            new CompiledProxyRigWindow(host, selected) { Owner = this }.Show(); return null;
+        }));
         panel.Children.Add(Button("Make selected visual independent", () => host.SelectedNode is { } selected
             ? host.MakeCompiledMeshUnique(selected) : "Select one visual mesh in the scene tree."));
         panel.Children.Add(Button("Place vehicle archive under selected Kitâ€¦", () =>

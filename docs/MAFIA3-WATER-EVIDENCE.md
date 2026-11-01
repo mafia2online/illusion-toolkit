@@ -193,3 +193,14 @@ substituted for analytical-field t256: PS7139 uses the square root of t256.x
 only to adjust ray distance. The existing geometry ray distance already
 propagates definition height; a canonical +0.25 Z move changed 17861 surface
 pixels and undo restored every resource byte and output pixel exactly.
+
+
+## Captured-scene optics and native shoreline attenuation
+
+The current surface optionally captures the editor's opaque scene color and a private typeless copy of its D24 depth before drawing water. Native PS1078 uses the absolute difference between water and opaque linear view depth, divided by D261.x (D261.y is the foam-weight endpoint), saturated and raised to 1.5. Its fine-normal slope also uses `min(abs(depthDifference) * .25, 1)`. The surface now consumes these depth terms instead of a fixed deep-water boundary. The authored variance mip channels determine roughness. The native adjusted reflection half-vector and user-owned T902 `env_brdf_lut_blinn.dds` supply the dielectric BRDF (`R * .02 + G`) and depth-dependent reflection weight. Material D261 edits update this preview without rebuilding scene assets; invalid thresholds disable optics until corrected.
+
+Reflected and refracted radiance is produced by a bounded editor screen-space ray trace over those captures (64 coarse steps and six crossing refinements, at most about 256 world units). Transmission uses the water dielectric ratio 1/1.333. Hits must remain on screen and pass depth/residual checks; missing reflection hits retain toolkit lighting. This is a current-frame editor implementation, not a port of native environment probes or temporal reflection filtering. Native entry points `RenderTransparentReflections` (Mac 0x102803AB0), `RenderTransparentReflectionsBuffer` (0x102805FC0), `GenerateReflections` (0x1028455B0), `GenerateTracedReflections` (0x1028449D0) and `RenderRefractionComposite` (0x1027FB230) confirm that native radiance generation is separate from the verified PS1078 material equations. No full in-game lighting parity is claimed.
+
+An ignored GPU oracle executes unmodified user-owned PS1078 and the production native helper with 500 randomized fields / 128,000 pixels, varied flow, banked normals and shallow depth. The maximum color-vector error is 0.00021143198; no pixel exceeds one 8-bit channel quantum. The pre-existing deep-water comparison with the production BRDF helper remains within 0.00042286396. This evidence applies to the controlled native material boundary, not the editor's radiance capture.
+
+Durable synthetic GPU tests cover a real reflected wall, captured underwater geometry, independent toggles, combined composition, visibility changes, resize/recreation, deterministic restoration and missing-BRDF fallback. Captures and lookup views are released with the water surface; SRVs are unbound across copy/RT boundaries. All tests use generated assets or copied user-owned inputs.

@@ -88,6 +88,9 @@ public sealed unsafe class GpuMesh : IDisposable
     public int InstanceCount = 1;
     public bool Instanced;
     public InstanceCell[]? InstanceCells;
+    public NativeInstanceLod? InstanceLod { get; private set; }
+    public NativeLodBounds[]? InstanceLodBounds { get; private set; }
+    public Vector3[]? InstanceDrawOrigins { get; private set; }
 
     /// <summary>The scene-tree leaf that owns this mesh (set on upload) — lets a viewport pick resolve to a node.</summary>
     public object? Owner;
@@ -194,12 +197,17 @@ public sealed unsafe class GpuMesh : IDisposable
 
         Matrix4x4[]? sortedInstances = null;
         InstanceCell[]? cells = null;
+        Vector3[]? sortedOrigins = null;
         if (instanced)
         {
             // Partition the cloud into XY cells (cell-major sorted copy + per-cell AABB) so the renderer
             // can cull whole cells; the mesh AABB is the union of cell AABBs, which covers the prototype
             // geometry extents — not just the copy translations.
-            (sortedInstances, cells) = InstanceChunks.Build(mesh.Instances!, lmin, lmax, mesh.InstanceDrawDistances);
+            int[]? order = mesh.InstanceDrawOrigins is null ? null : new int[mesh.Instances!.Length];
+            if (mesh.InstanceDrawOrigins is { } origins && origins.Length != mesh.Instances!.Length)
+                throw new ArgumentException("Native activation origins must match placement matrices.", nameof(mesh));
+            (sortedInstances, cells) = InstanceChunks.Build(mesh.Instances!, lmin, lmax, mesh.InstanceDrawDistances, order);
+            if (order is not null) sortedOrigins = order.Select(i => mesh.InstanceDrawOrigins![i]).ToArray();
             foreach (InstanceCell cell in cells)
             {
                 bmin = Vector3.Min(bmin, cell.Min);
@@ -228,10 +236,15 @@ public sealed unsafe class GpuMesh : IDisposable
             Instanced = instanced,
             InstanceCount = instanced ? mesh.Instances!.Length : 1,
             InstanceCells = cells,
+            InstanceLod = mesh.InstanceLod,
+            InstanceDrawOrigins = sortedOrigins,
+            InstanceLodBounds = mesh.InstanceLod is { } lod && sortedInstances is not null ? PlacementBounds(sortedInstances, lod) : null,
             PickPositions = mesh.Positions,
             _bindPositions = mesh.Positions,
             PickIndices = mesh.Indices,
         };
+
+        result.ExpandNativeInstanceBounds();
 
         fixed (MeshVertex* pVerts = verts)
             result.VertexBuffer = GpuBuffers.CreateImmutable(gpu, pVerts, (uint)(n * sizeof(MeshVertex)), BindFlag.VertexBuffer);
@@ -549,27 +562,77 @@ public sealed unsafe class GpuMesh : IDisposable
     /// written once and read every frame), so "update" means release and re-upload; the cell partition and the
     /// world AABB are rebuilt with it. An empty cloud leaves the mesh with nothing to draw.
     /// </summary>
-    public void SetInstances(GpuContext gpu, Matrix4x4[] instances, float[]? drawDistances = null)
+    private void ExpandNativeInstanceBounds()
+    {
+        ExpandNativeInstanceBounds(InstanceCells, InstanceLodBounds, InstanceDrawOrigins, ref BoundsMin, ref BoundsMax);
+    }
+
+    private static void ExpandNativeInstanceBounds(InstanceCell[]? cells, NativeLodBounds[]? bounds, Vector3[]? origins,
+        ref Vector3 minimum, ref Vector3 maximum)
+    {
+        if (cells is null) return;
+        for (int c = 0; c < cells.Length; c++)
+        {
+            ref var cell = ref cells[c];
+            for (uint i = cell.Start; i < cell.Start + cell.Count; i++)
+            {
+                if (bounds is not null) { cell.Min = Vector3.Min(cell.Min, bounds[i].Min); cell.Max = Vector3.Max(cell.Max, bounds[i].Max); }
+                if (origins is not null) { cell.Min = Vector3.Min(cell.Min, origins[i]); cell.Max = Vector3.Max(cell.Max, origins[i]); }
+            }
+            minimum = Vector3.Min(minimum, cell.Min); maximum = Vector3.Max(maximum, cell.Max);
+        }
+    }
+
+    private static NativeLodBounds[] PlacementBounds(Matrix4x4[] matrices, NativeInstanceLod lod)
+    {
+        var result = new NativeLodBounds[matrices.Length];
+        if (lod.QueryBounds is { } query)
+        {
+            if (!float.IsFinite(query.Min.LengthSquared()) || !float.IsFinite(query.Max.LengthSquared()) || Vector3.Min(query.Min, query.Max) != query.Min)
+                throw new ArgumentException("Native instance query bounds must be finite and ordered.", nameof(lod));
+            Array.Fill(result, query); return result;
+        }
+        for (int i = 0; i < matrices.Length; i++)
+        {
+            var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
+            for (int k = 0; k < 8; k++)
+            {
+                var point = Vector3.Transform(new Vector3((k & 1) == 0 ? lod.LocalMin.X : lod.LocalMax.X,
+                    (k & 2) == 0 ? lod.LocalMin.Y : lod.LocalMax.Y, (k & 4) == 0 ? lod.LocalMin.Z : lod.LocalMax.Z), matrices[i]);
+                min = Vector3.Min(min, point); max = Vector3.Max(max, point);
+            }
+            result[i] = new(min, max);
+        }
+        return result;
+    }
+
+    internal Action? BeforeInstanceBufferAllocation { get; set; }
+
+    public void SetInstances(GpuContext gpu, Matrix4x4[] instances, float[]? drawDistances = null, Vector3[]? drawOrigins = null)
     {
         ArgumentNullException.ThrowIfNull(instances);
         if (_disposed) return;
 
-        if (Instanced) InstanceBuffer.Dispose();
-        Instanced = instances.Length > 0;
-        InstanceCount = instances.Length;
-
-        if (!Instanced)
+        if (drawOrigins is not null && (drawOrigins.Length != instances.Length || drawOrigins.Any(origin => !float.IsFinite(origin.LengthSquared()))))
+            throw new ArgumentException("Native activation origins must be finite and match placement matrices.", nameof(drawOrigins));
+        if (instances.Length == 0)
         {
+            var old = InstanceBuffer;
             InstanceBuffer = default;
+            Instanced = true; InstanceCount = 0;
             InstanceCells = null;
+            InstanceLodBounds = null;
+            InstanceDrawOrigins = null;
             BoundsMin = new Vector3(float.MaxValue);
             BoundsMax = new Vector3(float.MinValue);
+            old.Dispose();
             return;
         }
 
-        (Matrix4x4[] sorted, InstanceCell[] cells) =
-            InstanceChunks.Build(instances, _localMin, _localMax, drawDistances);
-        InstanceCells = cells;
+        int[]? order = drawOrigins is null ? null : new int[instances.Length];
+        (Matrix4x4[] sorted, InstanceCell[] cells) = InstanceChunks.Build(instances, _localMin, _localMax, drawDistances, order);
+        var origins = order is null ? null : order.Select(index => drawOrigins![index]).ToArray();
+        var bounds = InstanceLod is { } lod ? PlacementBounds(sorted, lod) : null;
 
         var bmin = new Vector3(float.MaxValue);
         var bmax = new Vector3(float.MinValue);
@@ -578,12 +641,16 @@ public sealed unsafe class GpuMesh : IDisposable
             bmin = Vector3.Min(bmin, cell.Min);
             bmax = Vector3.Max(bmax, cell.Max);
         }
-        BoundsMin = bmin;
-        BoundsMax = bmax;
-
+        ExpandNativeInstanceBounds(cells, bounds, origins, ref bmin, ref bmax);
+        BeforeInstanceBufferAllocation?.Invoke();
+        ComPtr<ID3D11Buffer> replacement;
         fixed (Matrix4x4* pInst = sorted)
-            InstanceBuffer = GpuBuffers.CreateImmutable(
-                gpu, pInst, (uint)(sorted.Length * sizeof(Matrix4x4)), BindFlag.VertexBuffer);
+            replacement = GpuBuffers.CreateImmutable(gpu, pInst, checked((uint)(sorted.Length * sizeof(Matrix4x4))), BindFlag.VertexBuffer);
+        var previous = InstanceBuffer;
+        InstanceBuffer = replacement; Instanced = true; InstanceCount = instances.Length;
+        InstanceCells = cells; InstanceDrawOrigins = origins; InstanceLodBounds = bounds;
+        BoundsMin = bmin; BoundsMax = bmax;
+        previous.Dispose();
     }
 
     public void Dispose()

@@ -63,6 +63,11 @@ public sealed partial class D3DImageHost
             string variance = Path.Combine(MafiaEnvironment.GameRoot, "edit", "maps", "engine", "water_normal_variance.dds");
             if (detail is { Count: >= 4 } && float.IsFinite(detail[1]) && float.IsFinite(detail[3]) && File.Exists(variance))
                 Rnd.ConfigureNativeWaterFineNormals(File.ReadAllBytes(variance), detail[1], detail[3]);
+            var depth = MafiaMaterials.GetMaterialInfo(0x1A227ADE53424B91, 0, 0).Parameters
+                .FirstOrDefault(parameter => parameter.ParamId == "D261")?.Values;
+            string brdf = Path.Combine(MafiaEnvironment.GameRoot, "edit", "maps", "engine", "env_brdf_lut_blinn.dds");
+            Rnd.ConfigureNativeWaterOptics(File.Exists(brdf) ? File.ReadAllBytes(brdf) : null,
+                depth is { Count: 2 } ? new(depth[0], depth[1]) : default);
             NativeWaterInputError = null; return null;
         }
         catch (Exception ex) when (ex is IOException or System.Xml.XmlException or InvalidOperationException or NotSupportedException or ArgumentException

@@ -284,12 +284,38 @@ internal sealed class MaterialEditController
     {
         if ((node.GeometrySource ?? node.Source) is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return false;
         if (SlotAssignObstacle(node) != null) return false;
-        ulong? before = editor.GetSlotMaterial(slotIndex);
+        var compiledSource = (node.GeometrySource ?? node.Source) as Assets.Compiled.ICompiledMeshSource;
+        IReadOnlyList<ulong[]> tableBefore = editor.GetSlotTable();
+        int level = compiledSource is null || tableBefore.Count == 0 ? 0 : Math.Clamp(node.Lod, 0, tableBefore.Count - 1);
+        ulong? before = compiledSource is not null
+            ? tableBefore.Count > level && (uint)slotIndex < tableBefore[level].Length ? tableBefore[level][slotIndex] : null
+            : editor.GetSlotMaterial(slotIndex);
         if (before == null) return false;
         if (before == newHash) return true;
-        IReadOnlyList<ulong[]> tableBefore = editor.GetSlotTable();
-        if (!editor.SetSlotMaterial(slotIndex, newHash)) return false;
-        _host.Editing.History.Push(new SlotEdit(this, node, slotIndex, before.Value, newHash, tableBefore, editor.GetSlotTable()));
+        IEditAction? ownership = null;
+        if (compiledSource?.GeometryBinding is { } binding
+            && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
+            && document.GetLinkedProxyMaterialVisualTargets(compiledSource.CanonicalFrame, binding.Visual).Count > 0)
+        {
+            ownership = document.EnsurePreparedLinkedProxyMaterialOwnership(compiledSource.CanonicalFrame, binding.Visual, out var refusal);
+            if (refusal is not null) return false;
+        }
+        bool applied;
+        try
+        {
+            if (compiledSource is not null)
+            {
+                var table = tableBefore.Select(row => row.ToArray()).ToArray();
+                for (int lod = 0; lod < table.Length; lod++)
+                    for (int slot = 0; slot < table[lod].Length; slot++) if (table[lod][slot] == before.Value) table[lod][slot] = newHash;
+                applied = editor.SetSlotTable(table);
+            }
+            else applied = editor.SetSlotMaterial(slotIndex, newHash);
+        }
+        catch { ownership?.Undo(); throw; }
+        if (!applied) { ownership?.Undo(); return false; }
+        var edit = new SlotEdit(this, node, slotIndex, before.Value, newHash, tableBefore, editor.GetSlotTable());
+        _host.Editing.History.Push(ownership is null ? edit : new CompositeEdit([ownership, edit]));
         AfterSlotChanged(node, slotIndex, newHash);
         return true;
     }
@@ -306,7 +332,7 @@ internal sealed class MaterialEditController
         var source = node.GeometrySource ?? node.Source;
         var frame = source is Assets.Compiled.ICompiledMeshSource visual ? visual.CanonicalFrame : source as IFrameNode;
         if (frame is not null && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
-            && document.ValidateSceneCollectionMutation(frame) is { } refusal) return refusal;
+            && document.ValidateLinkedProxyMaterialSlots(frame) is { } refusal) return refusal;
         if ((node.GeometrySource ?? node.Source) is Assets.Compiled.ICompiledMeshSource && (node.GeometrySource ?? node.Source) is IMaterialSlotEditor compiled
             && compiled.GetSlotTable().Count == 0)
             return "Select an independent compiled visual with supported face groups.";
@@ -323,7 +349,11 @@ internal sealed class MaterialEditController
     private void ApplySlot(SceneNode node, int slotIndex, ulong hash, IReadOnlyList<ulong[]> table)
     {
         if ((node.GeometrySource ?? node.Source) is not IMaterialSlotEditor editor || !_host.Tree.IsInScene(node)) return;
-        if (editor.SetSlotTable(table) || editor.SetSlotMaterial(slotIndex, hash)) AfterSlotChanged(node, slotIndex, hash);
+        bool compiled = (node.GeometrySource ?? node.Source) is Assets.Compiled.ICompiledMeshSource;
+        if (editor.SetSlotTable(table) || !compiled && editor.SetSlotMaterial(slotIndex, hash)) AfterSlotChanged(node, slotIndex, hash);
+        else if (compiled)
+            throw new EditRefusedException((node.OwningDocumentNode()?.Source as Assets.Compiled.CompiledSceneDocument)?.LinkedProxyMaterialRefusal
+                ?? "The native material slot action is no longer valid.");
     }
 
     // ── Shared after-effects ──
@@ -345,6 +375,8 @@ internal sealed class MaterialEditController
             var detail = Catalog.GetParameter(hash, "D267");
             renderer.SetNativeWaterFineNormalParameters(detail is { Count: >= 4 } ? detail[1] : float.NaN,
                 detail is { Count: >= 4 } ? detail[3] : float.NaN);
+            var depth = Catalog.GetParameter(hash, "D261");
+            renderer.SetNativeWaterDepthThresholds(depth is { Count: 2 } ? new(depth[0], depth[1]) : new(float.NaN));
         }
         if (hash is 0x1A227ADE53424B91 or 0x0B2348BC137E2526 or 0x304B24141FEA1E4B && _host.Rnd is { } foamRenderer)
         {
@@ -372,10 +404,17 @@ internal sealed class MaterialEditController
         var materialSource = node.GeometrySource ?? node.Source;
         if (materialSource is Assets.Compiled.ICompiledMeshSource && materialSource is IMaterialSlotEditor compiled && _host.Rnd is { } renderer)
         {
-            var table = compiled.GetSlotTable();
+            var targets = new HashSet<Formats.Compiled.CompiledElement>();
+            if (materialSource is Assets.Compiled.ICompiledMeshSource { GeometryBinding: { } fineBinding } fineSource
+                && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument nativeDocument)
+                targets.UnionWith(nativeDocument.GetLinkedProxyMaterialVisualTargets(fineSource.CanonicalFrame, fineBinding.Visual));
+            bool Matches(SceneNode row) => ReferenceEquals(row.GeometrySource ?? row.Source, materialSource)
+                || (row.GeometrySource ?? row.Source) is Assets.Compiled.ICompiledMeshSource { GeometryBinding: { } binding } && targets.Contains(binding.Visual);
+            IReadOnlyList<ulong[]> Table(SceneNode row) => (row.GeometrySource ?? row.Source) is IMaterialSlotEditor target ? target.GetSlotTable() : [];
             void RefreshPending(SceneNode row)
             {
-                if (ReferenceEquals(row.GeometrySource ?? row.Source, materialSource) && row.Pending is { } pending && table.Count > 0)
+                var table = Table(row);
+                if (Matches(row) && row.Pending is { } pending && table.Count > 0)
                 {
                     var hashes = table[Math.Clamp(row.Lod, 0, table.Count - 1)];
                     for (int slot = 0; slot < Math.Min(hashes.Length, pending.Parts.Length); slot++)
@@ -388,7 +427,7 @@ internal sealed class MaterialEditController
             }
             if (node.OwningDocumentNode() is { } document) RefreshPending(document);
             foreach (GpuMesh mesh in renderer.Meshes)
-                if (mesh.Owner is SceneNode owner && ReferenceEquals(owner.GeometrySource ?? owner.Source, materialSource) && table.Count > 0)
+                if (mesh.Owner is SceneNode owner && Matches(owner) && Table(owner) is { Count: > 0 } table)
                 {
                     var hashes = table[Math.Clamp(owner.Lod, 0, table.Count - 1)];
                     for (int slot = 0; slot < hashes.Length; slot++)
@@ -699,7 +738,21 @@ internal sealed class MaterialEditController
         }
 
         public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
-        public void Undo() => _owner.ApplySlot(_node, _slotIndex, _before, _tableBefore);
-        public void Redo() => _owner.ApplySlot(_node, _slotIndex, _after, _tableAfter);
+        private void Validate(IReadOnlyList<ulong[]> expected, IReadOnlyList<ulong[]> requested)
+        {
+            if ((_node.GeometrySource ?? _node.Source) is not Assets.Compiled.ICompiledMeshSource source) return;
+            if (!_owner._host.Tree.IsInScene(_node) || source is not IMaterialSlotEditor editor)
+                throw new EditRefusedException("The native material owner is no longer in this scene.");
+            var current = editor.GetSlotTable();
+            if (current.Count != expected.Count || current.Where((row, index) => !row.SequenceEqual(expected[index])).Any())
+                throw new EditRefusedException("The native material table changed after this slot edit.");
+            if (_node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
+                && document.ValidatePreparedLinkedProxyMaterialTable(source.CanonicalFrame, requested) is { } refusal)
+                throw new EditRefusedException(refusal);
+        }
+        public void ValidateUndo() => Validate(_tableAfter, _tableBefore);
+        public void ValidateRedo() => Validate(_tableBefore, _tableAfter);
+        public void Undo() { ValidateUndo(); _owner.ApplySlot(_node, _slotIndex, _before, _tableBefore); }
+        public void Redo() { ValidateRedo(); _owner.ApplySlot(_node, _slotIndex, _after, _tableAfter); }
     }
 }

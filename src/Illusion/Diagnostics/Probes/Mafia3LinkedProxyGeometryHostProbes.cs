@@ -52,6 +52,20 @@ internal static partial class Mafia3Probes
         var beforeMeshes = renderer.Meshes.ToArray(); var oldFine = fineRow.Mesh; var oldFar = farRow.Mesh;
         var baseline = document.Graph.Resources.ToDictionary(r => r, r => SHA256.HashData(r.ToArray()));
         bool BytesExact(Dictionary<Illusion.Formats.Compiled.CompiledResource, byte[]> snapshots) => snapshots.All(p => SHA256.HashData(p.Key.ToArray()).SequenceEqual(p.Value));
+        var revisions = document.Graph.Resources.ToDictionary(resource => resource, resource => resource.Revision);
+        var expanded = fineBinding.Export(document, lowest, out refusal) ?? throw new InvalidDataException(refusal);
+        for (int index = 0; index < expanded.Positions.Length; index++) expanded.Positions[index] += new Vector3(12, 0, 0);
+        var replacement = fineBinding.TryApply(expanded, lowest, out refusal) ?? throw new InvalidDataException(refusal);
+        int replacementAllocations = 0; bool replacementRefused = false;
+        host.GeometryEditing.BeforeGeometryGpuAllocation = () =>
+        { if (++replacementAllocations == 2) throw new InvalidOperationException("Injected replacement GPU allocation failure."); };
+        try { host.GeometryEditing.ApplyPushBatch([new(fineRow, replacement)], [], [], null); }
+        catch (InvalidOperationException) { replacementRefused = true; }
+        finally { host.GeometryEditing.BeforeGeometryGpuAllocation = null; }
+        check("requantized proxy replacement allocation failure preserves native revisions all LOD GPUs order and history", replacementRefused
+            && replacementAllocations == 2 && replacement.AdditionalCompiledLodMeshes.Count > 0 && BytesExact(baseline)
+            && revisions.All(pair => pair.Key.Revision == pair.Value) && beforeMeshes.SequenceEqual(renderer.Meshes)
+            && ReferenceEquals(oldFine, fineRow.Mesh) && ReferenceEquals(oldFar, farRow.Mesh) && host.History.CanUndo && !host.History.CanRedo);
         var payload = fineBinding.Export(document, lowest, out refusal) ?? throw new InvalidDataException(refusal);
         int vertex = payload.LoopOrigIndex[0];
         for (int loop = 0; loop < payload.LoopOrigIndex.Length; loop++) if (payload.LoopOrigIndex[loop] == vertex) payload.LoopUvs[loop] += new Vector2(.125f, 0);

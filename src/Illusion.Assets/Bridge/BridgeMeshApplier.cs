@@ -58,6 +58,8 @@ public static class BridgeMeshApplier
     /// <summary>A computed geometry change, ready to flip in and out of the live frame data.</summary>
     public sealed class ApplyResult
     {
+        public sealed record CompiledLodMesh(Compiled.CompiledMeshBinding Binding, int Lod, MeshData Mesh);
+        public IReadOnlyList<CompiledLodMesh> AdditionalCompiledLodMeshes { get; internal set; } = [];
         /// <summary>Other native bindings changed atomically by this result; refresh these after apply and undo.</summary>
         public IReadOnlyList<Compiled.CompiledMeshBinding> AdditionalCompiledBindings { get; internal set; } = [];
         /// <summary>Preflighted render meshes for additional native outputs, avoiding decoding after mutation.</summary>

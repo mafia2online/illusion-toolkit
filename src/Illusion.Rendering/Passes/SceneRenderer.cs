@@ -51,6 +51,12 @@ public sealed unsafe partial class SceneRenderer : IDisposable
     public bool NativeWaterActive => NativeWaterEnabled && _nativeWaterActive && NativeWaterPartsDrawn > 0;
     public int NativeWaterPartsDrawn { get; private set; }
     public int NativeWaterFlowPartsDrawn => NativeWaterActive ? _nativeWater?.FlowPartsDrawn ?? 0 : 0;
+    public bool ConfigureNativeWaterOptics(byte[]? brdf, Vector2 depth) => _nativeWater?.ConfigureOptics(brdf, depth) ?? false;
+    public bool NativeWaterOpticsConfigured => _nativeWater?.OpticsConfigured ?? false;
+    public bool NativeWaterOpticsActive => NativeWaterActive && _nativeWater?.OpticsActive == true;
+    public bool NativeWaterReflections { get => _nativeWater?.ReflectionsEnabled ?? false; set { if (_nativeWater is not null) _nativeWater.ReflectionsEnabled = value; } }
+    public bool NativeWaterRefraction { get => _nativeWater?.RefractionEnabled ?? false; set { if (_nativeWater is not null) _nativeWater.RefractionEnabled = value; } }
+    public bool SetNativeWaterDepthThresholds(Vector2 depth) => _nativeWater?.SetOpticsDepthThresholds(depth) ?? false;
     public bool NativeWaterFoamConfigured => _nativeWater?.FoamConfigured ?? false;
     public bool NativeWaterFoamEnabled => _nativeWater?.FoamEnabled ?? false;
     public bool NativeWaterFoamReady => NativeWaterActive && _nativeWater?.FoamReadyFor(Camera) == true;
@@ -535,10 +541,13 @@ public sealed unsafe partial class SceneRenderer : IDisposable
     /// <summary>Replaces the copies of an instanced mesh in place — a crash placement was moved, added or
     /// removed. Only the matrix buffer is rebuilt; the mesh keeps its geometry, parts and texture leases, and
     /// stays in the render list.</summary>
-    public void UpdateInstances(GpuMesh mesh, System.Numerics.Matrix4x4[] instances, float[]? drawDistances = null)
+    public void UpdateInstances(GpuMesh mesh, System.Numerics.Matrix4x4[] instances, float[]? drawDistances = null,
+        System.Numerics.Vector3[]? drawOrigins = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
-        mesh.SetInstances(_gpu, instances, drawDistances);
+        int previousCount = mesh.InstanceCount;
+        mesh.SetInstances(_gpu, instances, drawDistances, drawOrigins);
+        if (_meshes.Contains(mesh)) TotalTriangles += (long)mesh.TriangleCount * (mesh.InstanceCount - previousCount);
         NotifyNativeWaterFoamSourceChanged();
     }
 
@@ -911,7 +920,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
     {
         bool any = false;
         foreach (GpuMesh m in _meshes)
-            if (m.Instanced && m.RenderVisible && m.Ghost == ghostPass) { any = true; break; }
+            if (m.Instanced && m.InstanceCount > 0 && m.RenderVisible && m.Ghost == ghostPass) { any = true; break; }
         if (!any) return 0;
 
         // Raster state carries over from the mesh pass (solid/wireframe by mode) — instances match it.
@@ -942,7 +951,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
 
         foreach (GpuMesh mesh in _meshes)
         {
-            if (!mesh.Instanced || !mesh.RenderVisible || mesh.Ghost != ghostPass) continue;
+            if (!mesh.Instanced || mesh.InstanceCount == 0 || !mesh.RenderVisible || mesh.Ghost != ghostPass) continue;
             if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // whole-cloud early-out
 
             // Cull cells once per mesh (shared by all parts), merging contiguous survivors so a mostly
@@ -967,6 +976,24 @@ public sealed unsafe partial class SceneRenderer : IDisposable
                         continue;
                     }
                     if (maxDist > 0f && DistanceSqToAabb(eye, cell.Min, cell.Max) > maxDistSq) continue;
+                    if (mesh.InstanceLod is { } lod && mesh.InstanceLodBounds is { } bounds)
+                    {
+                        for (uint i = cell.Start; i < cell.Start + cell.Count; i++)
+                        {
+                            var box = bounds[i];
+                            if (!frustum.Intersects(box.Min, box.Max)
+                                || cell.DrawDistance > 0 && (mesh.InstanceDrawOrigins is { } origins
+                                    ? (eye - origins[i]).LengthSquared() : DistanceSqToAabb(eye, box.Min, box.Max)) > cell.DrawDistance * cell.DrawDistance
+                                || maxDist > 0 && DistanceSqToAabb(eye, box.Min, box.Max) > maxDistSq
+                                || lod.Table.Select(eye, box.Min, box.Max, NativeInstanceLodScaleSquared, NativeInstanceLodBiasSquared) != lod.Level) continue;
+                            if (_visibleRanges.Count > 0 && _visibleRanges[^1].Start + _visibleRanges[^1].Count == i)
+                            {
+                                var previous = _visibleRanges[^1]; _visibleRanges[^1] = (previous.Start, previous.Count + 1);
+                            }
+                            else _visibleRanges.Add((i, 1));
+                        }
+                        continue;
+                    }
                     if (_visibleRanges.Count > 0
                         && _visibleRanges[^1].Start + _visibleRanges[^1].Count == cell.Start)
                     {
@@ -1012,6 +1039,11 @@ public sealed unsafe partial class SceneRenderer : IDisposable
     }
 
     // Squared distance from a point to the closest point of an AABB (0 inside).
+    /// <summary>Editor LOD context multipliers; one/zero preserves authored world-distance thresholds.
+    /// Native renderer quality/FOV overrides are not inferred from the running game.</summary>
+    public float NativeInstanceLodScaleSquared { get; set; } = 1;
+    public float NativeInstanceLodBiasSquared { get; set; }
+
     private static float DistanceSqToAabb(Vector3 p, Vector3 min, Vector3 max)
     {
         Vector3 c = Vector3.Clamp(p, min, max);

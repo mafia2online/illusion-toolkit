@@ -66,10 +66,10 @@ internal static partial class Mafia3Probes
                 check("changed or aliased native visual ownership refuses before either geometry writes", source.TryApply(notPrepared, lowest, out _) is null && Same(aliased));
             }
             finally { visualList.Children.RemoveAt(visualList.Children.Count - 1); doc.Graph.Owner(count).Replace(count, countBefore); }
-            var position = Export(source, lowest); position.Positions[0] += new Vector3(.00001f, 0, 0);
-            check("paired attributes reject even sub-quantum position changes before native writes", source.TryApply(position, lowest, out _) is null && Same(baseline));
-            var topology = Export(source, lowest); topology.LoopOrigIndex[0] = topology.LoopOrigIndex[1];
-            check("paired attributes reject topology changes atomically", source.TryApply(topology, lowest, out _) is null && Same(baseline));
+            var position = Export(source, lowest); position.Positions[0] = new Vector3(float.NaN, 0, 0);
+            check("paired geometry rejects nonfinite positions before native writes", source.TryApply(position, lowest, out _) is null && Same(baseline));
+            var topology = Export(source, lowest); topology.LoopVertexIndices = topology.LoopVertexIndices[..^1];
+            check("paired geometry rejects malformed topology atomically", source.TryApply(topology, lowest, out _) is null && Same(baseline));
             var authoredMaterial = Export(source, lowest); authoredMaterial.Materials[0].Authored = true;
             check("paired attributes retain material identity guards", source.TryApply(authoredMaterial, lowest, out _) is null && Same(baseline));
             var normal = Export(source, lowest); int normalVertex = normal.LoopOrigIndex[0];

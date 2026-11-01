@@ -9,6 +9,11 @@ public sealed partial class CompiledMeshBinding
     public BridgeMeshApplier.ApplyResult? CompactIsolatedView(MeshData originalView, int lod, out string? reason)
     {
         if (MutationRefusal is { } refusal) { reason = refusal; return null; }
+        return CompactIsolatedViewCore(originalView, lod, out reason);
+    }
+
+    internal BridgeMeshApplier.ApplyResult? CompactIsolatedViewCore(MeshData originalView, int lod, out string? reason)
+    {
         try
         {
             var context = Read(lod); var mesh = context.Mesh;

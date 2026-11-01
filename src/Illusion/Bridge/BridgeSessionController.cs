@@ -903,8 +903,21 @@ internal sealed class BridgeSessionController : IDisposable
                     FrameObjectSingleMesh? levelFrame = fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh ofRow } ? ofRow : null;
                     List<BridgeMeshApplier.ApplyResult> earlier =
                         levelFrame != null && perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? held) ? held : [];
-                    BridgeMeshApplier.ApplyResult? result =
-                        BridgeMeshApplier.TryApplyAfter(earlier, fn, payload, out string? reason, node.Lod);
+                    BridgeMeshApplier.ApplyResult? result;
+                    string? reason;
+                    if (fn is ICompiledMeshSource)
+                    {
+                        // Prepared native regeneration stages reversible pointer/ownership/bounds
+                        // writes to derive its plan. Keep that synchronous scope on the owning UI
+                        // thread so rendering and inspectors cannot observe its temporary state.
+                        var planned = _host.Dispatcher.Invoke(() =>
+                        {
+                            var value = BridgeMeshApplier.TryApplyAfter(earlier, fn, payload, out var refusal, node.Lod);
+                            return (Result: value, Reason: refusal);
+                        });
+                        result = planned.Result; reason = planned.Reason;
+                    }
+                    else result = BridgeMeshApplier.TryApplyAfter(earlier, fn, payload, out reason, node.Lod);
                     if (result == null)
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });

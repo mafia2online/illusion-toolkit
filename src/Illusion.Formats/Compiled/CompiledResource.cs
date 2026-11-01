@@ -107,6 +107,15 @@ public sealed partial class CompiledResource
         return () => IsDirty = original;
     }
 
+    /// <summary>Captures revision and dirty state for a fully reverted, unobservable preflight.
+    /// The caller must restore every payload and AST mutation before invoking the returned action.
+    /// This does not restore bytes and must not be used for ordinary undo or a partial rollback.</summary>
+    public Action CaptureRevertedMutationCheckpoint()
+    {
+        bool dirty = IsDirty; long revision = Revision;
+        return () => { IsDirty = dirty; Revision = revision; };
+    }
+
     public bool HasVariableChanges => _variableValues.Count != 0 || _variableSaved;
     public byte[] ToArray() => _variableValues.Count == 0 ? (byte[])_bytes.Clone()
         : Rewrite(new CompiledRewrite { AllowNativeAllocatorFallback = true }).ToArray();

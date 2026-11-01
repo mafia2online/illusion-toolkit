@@ -28,7 +28,7 @@ namespace Illusion.Viewport;
 /// work is UI-thread-free (the D3D11 device is free-threaded); only the attach runs on the UI thread,
 /// a few milliseconds per frame.
 /// </summary>
-internal sealed class DistrictStreamer
+internal sealed partial class DistrictStreamer
 {
     private readonly D3DImageHost _host;
 
@@ -211,6 +211,7 @@ internal sealed class DistrictStreamer
         LiveUpdateCollision();
         // …and the crash props, whose copies live in the instance buffers of their prototypes.
         LiveUpdateCrash();
+        TickNativePaint(dt);
     }
 
     // Ray-picks the nearest collision placement under a viewport ray (CPU): collision hulls are hardware-instanced
@@ -366,7 +367,7 @@ internal sealed class DistrictStreamer
                 var zone = zones.FirstOrDefault(z => area is not null && z.Districts.Contains(area.BaseName)) ?? zones[0];
                 _host.LookAt((zone.Min + zone.Max) * 0.5f, Math.Max(10, (zone.Max - zone.Min).Length() * 0.25f), Vector3.UnitZ);
             }
-            EnterStreaming();
+            EnterStreaming(area?.FileFor(winter));
             return;
         }
 
@@ -376,6 +377,7 @@ internal sealed class DistrictStreamer
 
         var items = new List<(FileInfo File, string Label, string? District)>();
         if (area != null) items.Add((area.FileFor(winter), area.BaseName, null));
+        AddNativePlacementItems(items, area?.FileFor(winter));
         AddCrashItem(items, winter);
 
         LoadSet(items);
@@ -834,7 +836,7 @@ internal sealed class DistrictStreamer
     }
 
     // Enter streaming mode: clear the scene, then StreamStep populates it by camera position.
-    private void EnterStreaming()
+    private void EnterStreaming(FileInfo? initialScene)
     {
         _streaming = true;
         ResetScene();
@@ -848,6 +850,9 @@ internal sealed class DistrictStreamer
         var crashItems = new List<(FileInfo File, string Label, string? District)>();
         AddCrashItem(crashItems, _winter);
         foreach (var it in crashItems) _loadQueue.Enqueue(it);
+        var nativeItems = new List<(FileInfo File, string Label, string? District)>();
+        AddNativePlacementItems(nativeItems, initialScene);
+        foreach (var it in nativeItems) _loadQueue.Enqueue(it);
 
         _host.RaiseSceneChanged();
     }
@@ -871,20 +876,26 @@ internal sealed class DistrictStreamer
         foreach (AreaZone z in zones)
             if (z.Contains(cam, StreamMargin)) foreach (string d in z.Districts) keep.Add(d);
 
+        foreach (var item in NativePlacementsForDistricts(keep)) if (item.District is { } key) keep.Add(key);
         bool changed = false;
 
         foreach (string name in _loadedDistricts.Keys.ToList())
         {
             // The crash layer is whole-map (never named by a zone) — only its toggle unloads it.
-            if (string.Equals(name, CrashLayerKey, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(name, CrashLayerKey, StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith(NativeGlobalPlacementPrefix, StringComparison.OrdinalIgnoreCase)) continue;
             if (!keep.Contains(name)) { UnloadDistrict(name); changed = true; }
         }
 
         // Start ONE background load of a missing district, if nothing is currently loading/building.
-        if (_loadTask == null && !_building)
+        if (_loadTask == null && !_building && _loadQueue.Count == 0)
         {
+            foreach (var item in NativePlacementsForDistricts(desired))
+                if (item.District is { } key && !_loadedDistricts.ContainsKey(key))
+                { StartBackgroundLoad(item.File, item.Label, key); break; }
             foreach (string name in desired)
             {
+                if (_loadTask is not null) break;
                 if (_loadedDistricts.ContainsKey(name)) continue;
                 MapArea? area = null;
                 foreach (MapArea a in _host.Catalogs.Areas) if (a.BaseName == name) { area = a; break; }
@@ -1581,6 +1592,8 @@ internal sealed class DistrictStreamer
     // Clears the current scene: discards an in-flight background load and empties the queue, tree, folders and counters.
     private void ResetScene()
     {
+        _nativePaintPreview?.Reset();
+        _nativePlacementArchives.Clear();
         _host.ClearMorphPreview();
         _host.Selection.Select(null); // the selected node is about to disappear — drop it and its highlight box
         _host.Editing.History.Clear(); // the nodes the undo/redo entries reference are being unloaded
@@ -1640,6 +1653,8 @@ internal sealed class DistrictStreamer
     /// continuation — the host must then skip its synchronous base-Dispose path.
     public bool ShutdownDeferred(Func<Action?> tearDown)
     {
+        _nativePaintPreview?.Dispose();
+        _nativePaintPreview = null;
         _loadCts?.Cancel();
         Task<PreparedLoad?>? task = _loadTask;
         _loadTask = null;

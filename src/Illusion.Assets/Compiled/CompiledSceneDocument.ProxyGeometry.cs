@@ -16,6 +16,13 @@ public sealed partial class CompiledSceneDocument
     private BridgeMeshApplier.ApplyResult? TryApplyLinkedProxyGeometry(CompiledMeshBinding binding, CompiledFrameNode frame,
         MeshObjectPayload payload, int lod, out string? refusal)
     {
+        var attributes = TryApplyLinkedProxyAttributes(binding, frame, payload, lod, out refusal);
+        return attributes ?? TryApplyLinkedProxyReplacement(binding, frame, payload, lod, out refusal);
+    }
+
+    private BridgeMeshApplier.ApplyResult? TryApplyLinkedProxyAttributes(CompiledMeshBinding binding, CompiledFrameNode frame,
+        MeshObjectPayload payload, int lod, out string? refusal)
+    {
         refusal = null;
         try
         {
@@ -70,6 +77,7 @@ public sealed partial class CompiledSceneDocument
                 // Preparation undo/redo deliberately replaces runtime state while retaining canonical
                 // native frames. Never validate or accept pins on a detached state captured by history.
                 if (!_linkedProxyStates.TryGetValue(state.Parent, out var active) || active.Child != state.Child
+                    || !active.Pairs.TryGetValue(frame, out var currentFar) || !ReferenceEquals(currentFar, farFrame)
                     || active.Pairs.Count != state.Pairs.Count
                     || state.Pairs.Any(pair => !active.Pairs.TryGetValue(pair.Key, out var target) || !ReferenceEquals(target, pair.Value)))
                     throw new InvalidDataException("The paired attribute preparation is no longer active with the same native owners.");

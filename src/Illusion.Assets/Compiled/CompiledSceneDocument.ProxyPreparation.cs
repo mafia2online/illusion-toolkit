@@ -92,6 +92,8 @@ public sealed partial class CompiledSceneDocument
         private readonly List<MeshData> _meshes = [];
         private IEditAction? _initialBounds;
         private readonly Dictionary<CompiledFrameNode, System.Numerics.Matrix4x4> _initialWorlds;
+        private readonly Dictionary<CompiledElement, byte[]> _initialFineData;
+        private readonly Dictionary<CompiledElement, CompiledElement[]> _initialFineChildren;
         internal IReadOnlyDictionary<CompiledFrameNode, CompiledFrameNode> Pairs { get; }
         private bool _attached;
 
@@ -114,6 +116,9 @@ public sealed partial class CompiledSceneDocument
             var old = RowMeshes(_oldRow).ToHashSet(); _oldMeshes = document.Meshes.Where(old.Contains).ToArray();
             Pairs = plan.Fine.ToDictionary(frame => frame, frame => new CompiledFrameNode(document, copy.Copied(frame.Element)!));
             _initialWorlds = plan.Fine.ToDictionary(frame => frame, frame => frame.WorldTransform);
+            var fineNodes = document.SelectProxyLowestGeometry(plan.Fine).Closure.SelectMany(root => ProxyNodes(root)).Distinct().ToArray();
+            _initialFineData = fineNodes.Where(node => node.Event == 4).ToDictionary(node => node, document.ProxyCurrentData);
+            _initialFineChildren = fineNodes.Where(node => node.Event == 2).ToDictionary(node => node, document.ProxyCurrentChildren);
             _frames.AddRange(Pairs.Values);
         }
         internal void Attach()
@@ -146,12 +151,31 @@ public sealed partial class CompiledSceneDocument
             if (_initialBounds is null) _initialBounds = d.RefreshNativeLodBounds(); else _initialBounds.Redo();
             d._preparedProxyEdits.Add(Preview.ParentGroupId, this); d.RegisterPreparedProxyState(this); _attached = true;
         }
-        public void Undo()
+        public void ValidateUndo()
         {
             if (!_attached) return;
             var d = _document;
-            if (_initialWorlds.Any(pair => pair.Key.WorldTransform != pair.Value))
-                throw new EditRefusedException("Undo the paired transforms before undoing proxy preparation.");
+            if (!d._linkedProxyStates.TryGetValue(Preview.ParentGroupId, out var state) || state.Pairs.Count != Pairs.Count
+                || Pairs.Any(pair => !state.Pairs.TryGetValue(pair.Key, out var target) || !ReferenceEquals(target, pair.Value))
+                || _initialWorlds.Any(pair => pair.Key.WorldTransform != pair.Value || pair.Key.ParentFrame is not null || pair.Key.Children.Count != 0)
+                || _initialFineData.Any(pair => !d.ProxyCurrentData(pair.Key).AsSpan().SequenceEqual(pair.Value))
+                || _initialFineChildren.Any(pair => !d.ProxyCurrentChildren(pair.Key).SequenceEqual(pair.Value)))
+                throw new EditRefusedException("Undo paired structural, bind, material and geometry edits before undoing proxy preparation.");
+            if (ValidateProxyMaterialSignatures(state) is { } material) throw new EditRefusedException(material);
+            if (d.ValidateProxyInvariants(state) is { } invariant) throw new EditRefusedException(invariant);
+        }
+        public void ValidateRedo()
+        {
+            if (_attached) return;
+            if (_initialWorlds.Any(pair => pair.Key.WorldTransform != pair.Value || pair.Key.ParentFrame is not null || pair.Key.Children.Count != 0)
+                || _initialFineData.Any(pair => !_document.ProxyCurrentData(pair.Key).AsSpan().SequenceEqual(pair.Value))
+                || _initialFineChildren.Any(pair => !_document.ProxyCurrentChildren(pair.Key).SequenceEqual(pair.Value)))
+                throw new EditRefusedException("The original fine family changed after proxy preparation was undone.");
+        }
+        public void Undo()
+        {
+            if (!_attached) return; ValidateUndo();
+            var d = _document;
             _initialBounds!.Undo();
             d._preparedProxyEdits.Remove(Preview.ParentGroupId); d._linkedProxyStates.Remove(Preview.ParentGroupId);
             foreach (var row in _rows) d.Roots.Remove(row);
@@ -172,7 +196,7 @@ public sealed partial class CompiledSceneDocument
         }
         public void Redo()
         {
-            if (_attached) return;
+            if (_attached) return; ValidateRedo();
             foreach (var carry in _carries) carry.Redo(); _copy.Reattach(); Attach();
         }
         internal void RollbackFailedAttach()

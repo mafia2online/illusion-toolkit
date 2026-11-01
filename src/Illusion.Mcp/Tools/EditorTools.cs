@@ -298,7 +298,7 @@ public sealed class EditorTools
     }
 
     [McpServerTool(Name = "mesh_materials")]
-    [Description("The material slots of a mesh - which material each part of it is drawn with, and how many triangles that part has. With 'slot' and 'material', that slot is first re-pointed at another material (what the Materials tab's 'assign to slot' does): one undoable edit that touches no geometry and no UV, so the new texture is laid out the way the old one was - look at the result. Further levels of detail follow wherever they used the slot's old material. The material is named exactly as search_materials spells it. A district's winter archive is edited separately. The hull's surface type (what footsteps sound like, where grass tufts grow) is the collision's own and does not change with this.")]
+    [Description("The material slots of a mesh - which material each part of it is drawn with, and how many triangles that part has. A Mafia III visual/LOD row reports that selected native level. With 'slot' and 'material', that slot is first re-pointed at another material (what the Materials tab's 'assign to slot' does): one undoable edit that touches no geometry and no UV, so the new texture is laid out the way the old one was - look at the result. Further levels of detail follow wherever they used the slot's old material. The material is named exactly as search_materials spells it. A district's winter archive is edited separately. The hull's surface type (what footsteps sound like, where grass tufts grow) is the collision's own and does not change with this.")]
     public static async Task<string> MeshMaterials(
         IEditorSession editor,
         IUiThreadMarshal ui,

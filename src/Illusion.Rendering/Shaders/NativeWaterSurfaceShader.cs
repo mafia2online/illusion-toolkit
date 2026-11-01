@@ -26,6 +26,9 @@ cbuffer WaterConstants : register(b0)
     float4 FoamState;
     float4 FoamColor;
     float4 FoamControls;
+    float4 OpticsDepth;
+    float4 OpticsState;
+    float4 CameraForward;
 };
 Texture2D<float4> Tex0 : register(t0);
 Texture2D<float4> Tex1 : register(t1);
@@ -36,6 +39,9 @@ Texture2D<float4> FlowField : register(t5);
 Texture2D<float4> FoamHistory : register(t6);
 Texture2D<float4> FoamDetail : register(t7);
 Texture2D<float4> FoamNormal : register(t8);
+Texture2D<float4> OpaqueColor : register(t9);
+Texture2D<float> OpaqueDepth : register(t10);
+Texture2D<float4> OpticsBrdf : register(t11);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
@@ -73,7 +79,7 @@ DefinitionTargets DefinitionPS(DefinitionOut input)
 }
 """;
 
-    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + NativeWaterFineNormalShader.Functions + NativeWaterFoamSurfaceShader.Functions + """
+    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + NativeWaterFineNormalShader.Functions + NativeWaterFoamSurfaceShader.Functions + NativeWaterOpticsShader.Functions + """
 struct WaveTargets { float4 Displacement:SV_Target0; float4 Normal:SV_Target1; };
 WaveTargets WavePS(DefinitionOut input)
 {
@@ -122,8 +128,17 @@ float4 SurfacePS(GridOut input):SV_Target
         if (FoamState.y == 2) return float4(saturate(foam.Roughness).xxx, 1);
         return float4(foam.DiffuseDiagnostic, 1);
     }
+    float depthFade = 1, depthSlope = 1;
+    if (OpticsState.x != 0)
+    {
+        float scene = OpaqueDepth.SampleLevel(PointClamp, input.Position.xy * TargetData.xy, 0);
+        float sceneZ = OpticsDepth.x * OpticsDepth.y / (OpticsDepth.y - scene * (OpticsDepth.y - OpticsDepth.x));
+        float waterZ = dot(input.WorldPosition - CameraTime.xyz, CameraForward.xyz);
+        depthFade = NativeWaterDepthFade(waterZ, sceneZ, OpticsDepth.z);
+        depthSlope = min(abs(waterZ - sceneZ) * .25, 1);
+    }
     if (FineNormal.z != 0) normal = EvaluateNativeWaterFineNormal(FineNoise, Wrapped,
-        input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y, flow);
+        input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y * depthFade * depthSlope, flow);
     if (FieldData.z != 0) return float4(normal * .5 + .5, 1);
     float3 color = Tex2.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0).rgb;
     if (LightMode.w == 2) color = float3(.80, .81, .83);
@@ -144,7 +159,14 @@ float4 SurfacePS(GridOut input):SV_Target
         float fresnel = pow(1 - saturate(dot(normal, V)), SpecParams.w);
         rim = AmbientUp.rgb * (fresnel * SpecParams.z);
     }
-    return float4(pow(saturate(color * diffuse + specular + rim), Gamma.rgb), 1);
+    float3 lit = pow(saturate(color * diffuse + specular + rim), Gamma.rgb);
+    if (OpticsState.x != 0 && LightMode.w != 2)
+    {
+        float roughness = FineNormal.z != 0 ? NativeWaterVarianceRoughness(FineNoise, Wrapped,
+            input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, FineNormal.x, FineNormal.y, flow) : .5;
+        lit = ComposeWaterOptics(input.WorldPosition, normal, input.Normal, input.Position.xy * TargetData.xy, depthFade, roughness, lit);
+    }
+    return float4(lit, 1);
 }
 """;
 }

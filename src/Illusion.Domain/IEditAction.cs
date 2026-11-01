@@ -3,6 +3,9 @@ namespace Illusion.Domain;
 /// <summary>One reversible scene edit. <see cref="Undo"/> restores the before-state, <see cref="Redo"/> the after.</summary>
 public interface IEditAction
 {
+    /// <summary>Optional read-only preflight used before any child of a composite changes state.</summary>
+    void ValidateUndo() { }
+    void ValidateRedo() { }
     void Undo();
     void Redo();
 

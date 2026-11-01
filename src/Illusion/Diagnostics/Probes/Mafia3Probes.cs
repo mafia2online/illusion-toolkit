@@ -16,6 +16,7 @@ internal static partial class Mafia3Probes
     {
         var report = new StringBuilder();
         int failures = 0;
+        bool ready = false;
         void Check(string name, bool passed)
         {
             report.AppendLine($"[{(passed ? "PASS" : "FAIL")}] {name}");
@@ -25,6 +26,7 @@ internal static partial class Mafia3Probes
         {
             if (!MafiaEnvironment.TryInitialize(root, out string? error)) throw new InvalidOperationException(error);
             if (MafiaEnvironment.Profile != GameProfile.MafiaIII) throw new InvalidOperationException("A copied Mafia III root is required.");
+            ready = true;
             TestEdits(Check);
             TestStructuralEdits(Check);
             TestPropImport(Check);
@@ -37,9 +39,21 @@ internal static partial class Mafia3Probes
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
             TestCompiledLinkedProxyGeometry(Check);
+            TestCompiledLinkedProxyReplacement(Check);
+            TestCompiledLinkedProxyStructure(Check);
+            TestCompiledLinkedProxyHighMaterials(Check);
             TestLinkedProxyGeometryHost(Check);
+            TestLinkedProxyStructureHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
+            TestNativeInstanceLod(Check);
+            TestNativeInstanceUpdates(Check);
+            TestNativePaintTriangle(Check);
+            TestNativePaintClipping(Check);
+            TestNativePaintTransforms(Check);
+            TestNativePaintCells(Check);
+            TestNativePaintFields(Check);
+            TestNativePaintHost(Check);
             TestCompiledLinkedProxyBreadth(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
@@ -57,6 +71,7 @@ internal static partial class Mafia3Probes
             TestCompiledWaterWavePreview(Check);
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
+            TestNativeWaterOptics(Check);
             TestNativeWaterFoam(Check);
             TestNativeWaterFoamContext(Check);
             TestNativeWaterFoamSurface(Check);
@@ -75,6 +90,11 @@ internal static partial class Mafia3Probes
             TestCompiledVehicleMapImport(Check);
         }
         catch (Exception ex) { failures++; report.AppendLine("[FAIL] " + ex); }
+        if (ready)
+        {
+            try { TestCopiedResourceRestoration(Check); }
+            catch (Exception ex) { failures++; report.AppendLine("[FAIL] final working-resource audit: " + ex); }
+        }
         report.AppendLine($"Failures: {failures}");
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "illusion_mafia3_editing.txt"), report.ToString());
         Environment.ExitCode = failures == 0 ? 0 : 1;
@@ -84,6 +104,7 @@ internal static partial class Mafia3Probes
     {
         var report = new StringBuilder();
         int failures = 0;
+        bool ready = false;
         string output = Path.Combine(Path.GetTempPath(), "illusion_mafia3.txt");
         File.WriteAllText(output, "Running copied-file Mafia III regression..." + Environment.NewLine);
         void Check(string name, bool result)
@@ -97,6 +118,7 @@ internal static partial class Mafia3Probes
         {
             if (!MafiaEnvironment.TryInitialize(root, out string? error)) throw new InvalidOperationException(error);
             Check("detect Mafia III", MafiaEnvironment.Profile == GameProfile.MafiaIII);
+            ready = MafiaEnvironment.Profile == GameProfile.MafiaIII;
             var files = ResourceUnpacker.EnumerateGameSds();
             Check("fixture has archives", files.Count > 0);
             foreach (var file in files)
@@ -204,9 +226,21 @@ internal static partial class Mafia3Probes
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
             TestCompiledLinkedProxyGeometry(Check);
+            TestCompiledLinkedProxyReplacement(Check);
+            TestCompiledLinkedProxyStructure(Check);
+            TestCompiledLinkedProxyHighMaterials(Check);
             TestLinkedProxyGeometryHost(Check);
+            TestLinkedProxyStructureHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
+            TestNativeInstanceLod(Check);
+            TestNativeInstanceUpdates(Check);
+            TestNativePaintTriangle(Check);
+            TestNativePaintClipping(Check);
+            TestNativePaintTransforms(Check);
+            TestNativePaintCells(Check);
+            TestNativePaintFields(Check);
+            TestNativePaintHost(Check);
             TestCompiledLinkedProxyBreadth(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
@@ -224,6 +258,7 @@ internal static partial class Mafia3Probes
             TestCompiledWaterWavePreview(Check);
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
+            TestNativeWaterOptics(Check);
             TestNativeWaterFoam(Check);
             TestNativeWaterFoamContext(Check);
             TestNativeWaterFoamSurface(Check);
@@ -246,6 +281,11 @@ internal static partial class Mafia3Probes
         {
             failures++;
             report.AppendLine("[FAIL] " + ex);
+        }
+        if (ready)
+        {
+            try { TestCopiedResourceRestoration(Check); }
+            catch (Exception ex) { failures++; report.AppendLine("[FAIL] final working-resource audit: " + ex); }
         }
         report.AppendLine($"Failures: {failures}");
         File.WriteAllText(output, report.ToString());

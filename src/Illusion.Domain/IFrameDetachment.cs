@@ -3,6 +3,9 @@ namespace Illusion.Domain;
 /// <summary>The persistence half of an undoable subtree removal.</summary>
 public interface IFrameDetachment
 {
+    IReadOnlyList<IFrameNode> AdditionalFrames => [];
+    void ValidateDetach() { }
+    void ValidateReattach() { }
     void Detach();
     void Reattach();
     string? VolumesRefused => null;

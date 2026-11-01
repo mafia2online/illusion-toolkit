@@ -11,13 +11,14 @@ public sealed partial class CompiledSceneDocument
     private long _proxyStructuralRevision;
     private sealed record ProxyWorkspaceRecord(int Version, ulong Parent, ulong Child,
         Dictionary<ulong, ulong> Pairs, Dictionary<string, string> Files, Dictionary<ulong, float[]> Bounds,
-        Dictionary<ulong, string> MaterialTextures, string DestinationResource);
+        Dictionary<ulong, string> MaterialTextures, string DestinationResource, Dictionary<ulong, ulong>? GeometryOwners = null,
+        Dictionary<string, string>? GeometryOrigins = null, Dictionary<ulong, string>? FineMaterialTextures = null);
     private sealed class ProxyRuntimeState(ulong parent, ulong child, IReadOnlyDictionary<CompiledFrameNode, CompiledFrameNode> pairs,
         CompiledResource[] resources, string[] files)
     {
         internal ulong Parent { get; } = parent;
         internal ulong Child { get; } = child;
-        internal IReadOnlyDictionary<CompiledFrameNode, CompiledFrameNode> Pairs { get; } = pairs;
+        internal Dictionary<CompiledFrameNode, CompiledFrameNode> Pairs { get; } = new(pairs);
         internal CompiledResource[] Resources { get; } = resources;
         internal string[] Files { get; set; } = files;
         internal Dictionary<string, byte[]> FileHashes { get; set; } = files.ToDictionary(p => p,
@@ -30,6 +31,10 @@ public sealed partial class CompiledSceneDocument
         internal long BoundsRevision { get; set; }
         internal long StructuralRevision { get; set; }
         internal Dictionary<ulong, string> MaterialTextures { get; } = [];
+        internal Dictionary<ulong, string> FineMaterialTextures { get; } = [];
+        // Persisted hints only. Geometry's native ownership verifier must independently authorize them.
+        internal Dictionary<ulong, ulong> GeometryOwners { get; } = [];
+        internal Dictionary<string, string> GeometryOrigins { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal string DestinationResource { get; set; } = "";
         internal void AcceptRevisions() { foreach (var resource in Resources) Revisions[resource] = resource.Revision; }
     }
@@ -103,7 +108,7 @@ public sealed partial class CompiledSceneDocument
                 {
                     if (!Graph.Objects.TryGetValue(pair.Key, out var source) || !_frames.TryGetValue(source, out var fine)
                         || !Graph.Objects.TryGetValue(pair.Value, out var target) || !_frames.TryGetValue(target, out var far)
-                        || ProxyGroup(fine)?.ObjectId != mapping.Child || fine.ParentFrame is not null || fine.Children.Count != 0
+                        || ProxyGroup(fine)?.ObjectId != mapping.Child || !ProxyFineAncestrySupported(fine) || fine.Children.Count != 0
                         || ProxyGroup(far)?.ObjectId != mapping.Parent || far.ParentFrame is not null || far.Children.Count != 0
                         || Components(target).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400)))
                         throw new InvalidDataException("Prepared render ownership or group membership changed.");
@@ -119,10 +124,18 @@ public sealed partial class CompiledSceneDocument
                     p => new NativeLodBounds(new(p.Value[0], p.Value[1], p.Value[2]), new(p.Value[3], p.Value[4], p.Value[5])));
                 var state = new ProxyRuntimeState(mapping.Parent, mapping.Child, pairs, resources, files.Keys.ToArray());
                 state.DestinationResource = mapping.DestinationResource;
+                if (mapping.GeometryOwners is not null)
+                    foreach (var pair in mapping.GeometryOwners.Where(pair => pair.Key != 0 && pair.Value != 0)) state.GeometryOwners.TryAdd(pair.Key, pair.Value);
+                if (mapping.GeometryOrigins is not null)
+                    foreach (var pair in mapping.GeometryOrigins.Where(pair => !string.IsNullOrWhiteSpace(pair.Key)
+                        && pair.Value is { Length: 64 } && pair.Value.All(Uri.IsHexDigit))) state.GeometryOrigins.TryAdd(pair.Key, pair.Value);
                 CaptureProxyInvariants(state); CaptureProxyMaterialSignatures(state);
                 if (state.MaterialTextures.Count != mapping.MaterialTextures.Count || state.MaterialTextures.Any(p =>
                     !mapping.MaterialTextures.TryGetValue(p.Key, out var signature) || signature != p.Value))
                     throw new InvalidDataException("Prepared proxy material texture dependencies changed; its carried textures have not been rebuilt.");
+                if (mapping.FineMaterialTextures is not null && (state.FineMaterialTextures.Count != mapping.FineMaterialTextures.Count
+                    || state.FineMaterialTextures.Any(p => !mapping.FineMaterialTextures.TryGetValue(p.Key, out var signature) || signature != p.Value)))
+                    throw new InvalidDataException("Prepared fine LOD material texture dependencies changed.");
                 InstallNativeLodBoundsBaseline(baseline);
                 _linkedProxyStates.Add(mapping.Parent, state); CompiledProxyMaterialGuard.Track(this);
                 _proxyMappingBaselines.Add(path, bytes);
@@ -145,15 +158,18 @@ public sealed partial class CompiledSceneDocument
             if (File.Exists(expected.Key) ? expected.Value is null || !File.ReadAllBytes(expected.Key).AsSpan().SequenceEqual(expected.Value) : expected.Value is not null)
                 throw new InvalidOperationException("The proxy workspace mapping changed independently; reload before saving.");
         var mappingPaths = _proxyMappingBaselines.Keys.Concat(_linkedProxyStates.Keys.Select(ProxyMappingPath)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var metadataPaths = mappingPaths.Concat(ProxyGeometryOriginPaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var folders = Graph.Resources.Where(r => r.IsDirty || HasStructuralChanges(r)).Select(r => Path.GetDirectoryName(r.Path)!)
             .Concat(_vehicleResources.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var dirty = Graph.Resources.Select(r => r.CaptureDirtyCheckpoint()).ToArray();
         var carryCheckpoints = _vehicleResources.Values.Select(c => c.CaptureFlushCheckpoint()).ToArray();
-        using var journal = new CompiledProxySaveJournal(folders, mappingPaths);
+        var oldFiles = _linkedProxyStates.Values.ToDictionary(state => state, state => state.Files);
+        using var journal = new CompiledProxySaveJournal(folders, metadataPaths);
         try
         {
             string result = SaveWorkingCopyCore();
             ProxySaveAfterNativeWrite?.Invoke();
+            FlushProxyGeometryOrigins();
             foreach (string path in mappingPaths)
             {
                 ulong parent = Convert.ToUInt64(Path.GetFileNameWithoutExtension(path), 16);
@@ -163,20 +179,23 @@ public sealed partial class CompiledSceneDocument
                         .SelectMany(folder => XElement.Load(Path.Combine(folder, "SDSContent.xml")).Elements("ResourceEntry")
                             .Where(e => e.Element("Type")?.Value is "Texture" or "MemFile")
                             .Select(e => Path.Combine(folder, e.Element("File")!.Value)));
-                    state.Files = state.Files.Concat(payloads).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                    var stagedPayloads = _vehicleResources.Values.SelectMany(manager => manager.StagedPayloadFiles).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var activePayloads = _vehicleResources.Values.SelectMany(manager => manager.ActivePayloadFiles).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    state.Files = state.Files.Where(file => !stagedPayloads.Contains(file) || activePayloads.Contains(file))
+                        .Concat(payloads).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                     var files = state.Files.ToDictionary(p => Path.GetRelativePath(MafiaEnvironment.ResourcesFolder!, p),
                         p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p))), StringComparer.OrdinalIgnoreCase);
                     var record = new ProxyWorkspaceRecord(2, state.Parent, state.Child,
                         state.Pairs.ToDictionary(p => p.Key.Element.ObjectId, p => p.Value.Element.ObjectId), files,
                         NativeLodBoundsBaseline.ToDictionary(p => p.Key, p => new[] { p.Value.Min.X, p.Value.Min.Y, p.Value.Min.Z, p.Value.Max.X, p.Value.Max.Y, p.Value.Max.Z }),
-                        new(state.MaterialTextures), state.DestinationResource);
+                        new(state.MaterialTextures), state.DestinationResource, new(state.GeometryOwners), new(state.GeometryOrigins), new(state.FineMaterialTextures));
                     AtomicFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(record));
                 }
                 else if (_proxyMappingBaselines.GetValueOrDefault(path) is { } original) AtomicFile.WriteAllBytes(path, original);
                 else if (File.Exists(path)) File.Delete(path);
             }
             ProxySaveBeforeSnapshot?.Invoke();
-            var mappingSnapshots = mappingPaths.Select(path => (Path: path, Bytes: File.Exists(path) ? File.ReadAllBytes(path) : null)).ToArray();
+            var mappingSnapshots = metadataPaths.Select(path => (Path: path, Bytes: File.Exists(path) ? File.ReadAllBytes(path) : null)).ToArray();
             var nativeSnapshots = _linkedProxyStates.Values.Select(state => (State: state, Hashes: state.Files.ToDictionary(path => path,
                 path => SHA256.HashData(File.ReadAllBytes(path)), StringComparer.OrdinalIgnoreCase))).ToArray();
             journal.Commit();
@@ -186,6 +205,7 @@ public sealed partial class CompiledSceneDocument
         }
         catch
         {
+            foreach (var pair in oldFiles) pair.Key.Files = pair.Value;
             foreach (var restore in dirty) restore();
             foreach (var restore in carryCheckpoints) restore();
             throw;

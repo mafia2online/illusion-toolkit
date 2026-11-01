@@ -16,6 +16,9 @@ public interface ISceneHierarchyNode
 public interface IFrameDuplication
 {
     ISceneHierarchyNode Root { get; }
+    IReadOnlyList<ISceneHierarchyNode> AdditionalRoots => [];
+    void ValidateDetach() { }
+    void ValidateReattach() { }
     void Detach();
     void Reattach();
 }
