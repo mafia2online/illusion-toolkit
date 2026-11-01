@@ -34,10 +34,12 @@ internal sealed partial class AppEditorSession
             if (host.BindCompiledAnimation(preview, node!, morphs) is { } bindingRefusal) return bindingRefusal;
             mappedBones = preview.BoundBones; renderBones = preview.SceneBones; return null;
         }
-        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or InvalidOperationException or ArgumentException)
         { return "Native scene animation binding: " + ex.Message; }
     }
     public string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result)
+        => AnimationOpen(archive, clip, time, playing, out result, -1);
+    public string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result, int skeletonCandidate)
     {
         result = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
@@ -51,9 +53,11 @@ internal sealed partial class AppEditorSession
             if (ResourceWindow is null) new ResourceEditorWindow { ShowActivated = false, WindowState = System.Windows.WindowState.Normal }.Show();
             var window = ResourceWindow?.OpenAnimationPreview(new FileInfo(path), activate: false);
             if (window is null) return "The resource editor could not open.";
+            result = new AnimationInfo(path, window.ClipNames, window.SelectedClip, window.CurrentTime, window.Duration, window.IsPlaying)
+            { SkeletonCandidates = window.SkeletonChoices.Select((choice, index) => new AnimationSkeletonChoice(index, choice.Candidate, choice.RequiresSelection)).ToArray(), BoundRigs = window.BoundRigCount };
             if ((uint)clip >= window.ClipNames.Count) return $"Clip index must be between 0 and {window.ClipNames.Count - 1}.";
-            window.SelectClip(clip); window.Seek((float)time); window.SetPlaying(playing);
-            result = new AnimationInfo(path, window.ClipNames, window.SelectedClip, window.CurrentTime, window.Duration, window.IsPlaying);
+            window.SelectClip(clip, skeletonCandidate); window.Seek((float)time); window.SetPlaying(playing);
+            result = result with { SelectedClip = window.SelectedClip, Time = window.CurrentTime, Duration = window.Duration, Playing = window.IsPlaying, BoundRigs = window.BoundRigCount };
             return null;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ArgumentException)

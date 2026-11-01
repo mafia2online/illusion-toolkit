@@ -148,10 +148,14 @@ public interface IEditorSession
     { result = null; return "native water surface preview is unavailable"; }
     string? WaterOptics(bool? reflections, bool? refraction, out WaterSurfaceInfo? result)
     { result = null; return "Water optics are unavailable."; }
+    string? WaterReflection(bool? enabled, bool reset, out WaterReflectionInfo? result)
+    { result = null; return "Temporal water reflections are unavailable."; }
     string? WaterContact(float[]? origin, int[]? texels, float[]? influences, int? frame, bool reset, bool clear, bool? jointFoam, out WaterContactInfo? result)
     { result = null; return "Native contact preview is unavailable."; }
     string? VegetationWind(bool? enabled, float? time, float[]? globalWind, float[]? localPosition, float[]? localParameters, out VegetationWindInfo? result)
     { result = null; return "Native vegetation wind preview is unavailable."; }
+    string? VegetationFast(bool? enabled, float[]? weatherWind, float[]? fieldOrigin, uint? noiseSeed, out VegetationFastInfo? result)
+    { result = null; return "Native FAST vegetation field preview is unavailable."; }
     string? WaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset, out WaterSurfaceInfo? result)
     { result = null; return "native water foam diagnostics are unavailable"; }
     string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
@@ -175,6 +179,10 @@ public interface IEditorSession
     {path=null;return "Prepared skinned prop import is unavailable.";}
     string? InspectLinkedProxySkinSources(string owner,out IReadOnlyList<LinkedProxySkinSourceInfo> sources)
     {sources=[];return "Prepared skinned source inspection is unavailable.";}
+    string? ImportLinkedProxyMorph(string owner, string parent, string resource, string guid, out string? path)
+    { path = null; return "Prepared morph prop import is unavailable."; }
+    string? InspectLinkedProxyMorphSources(string owner, out IReadOnlyList<LinkedProxyMorphSourceInfo> sources)
+    { sources = []; return "Prepared morph source inspection is unavailable."; }
     string? InspectLinkedProxy(string name, out LinkedProxyInfo? info)
     { info = null; return "linked proxy inspection is unavailable"; }
     string? PrepareLinkedProxy(string name, int expectedTriangles, int expectedDraws, out LinkedProxyInfo? info)
@@ -341,4 +349,9 @@ public interface IEditorSession
     { result = null; return "Native animation authoring is unavailable."; }
     string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result)
     { result = null; return "Native animation preview is unavailable."; }
+    string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result, int skeletonCandidate)
+    {
+        if (skeletonCandidate < 0) return AnimationOpen(archive, clip, time, playing, out result);
+        result = null; return "Explicit native skeleton candidates are unavailable.";
+    }
 }

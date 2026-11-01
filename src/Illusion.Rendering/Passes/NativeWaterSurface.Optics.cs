@@ -24,6 +24,7 @@ public sealed unsafe partial class NativeWaterSurface
     /// Screen-space radiance comes from this editor's opaque scene, not engine environment captures.</summary>
     public bool ConfigureOptics(byte[]? brdf, Vector2 depthThresholds)
     {
+        ResetTemporalReflections();
         _opticsBrdf.Dispose(); _opticsBrdf = default; _opticsDepthValid = false;
         if (_disposed || brdf is null || !float.IsFinite(depthThresholds.X) || !float.IsFinite(depthThresholds.Y)
             || depthThresholds.X <= 0 || depthThresholds.Y <= 0) return false;
@@ -34,6 +35,7 @@ public sealed unsafe partial class NativeWaterSurface
 
     public bool SetOpticsDepthThresholds(Vector2 depth)
     {
+        ResetTemporalReflections();
         _opticsDepthValid = float.IsFinite(depth.X) && float.IsFinite(depth.Y) && depth.X > 0 && depth.Y > 0;
         if (!_opticsDepthValid) return false;
         _opticsDepth = depth; return true;

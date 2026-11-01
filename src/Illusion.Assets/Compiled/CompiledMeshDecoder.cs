@@ -235,7 +235,7 @@ internal sealed class CompiledMeshDecoder
         {
             Name = name, World = world, Positions = positions, Normals = normals, UVs = uvs,
             DecalUVs = parts.Any(p => p.Surface?.VehicleDecal is not null) ? decalUvs : null,
-            Colors = _retainVertexColors || parts.Any(p => p.Surface is { Layers: >= 2 } or { NativeVegetationWind: not null }) ? colors : null,
+            Colors = _retainVertexColors || parts.Any(p => p.Surface is { Layers: >= 2 } or { NativeVegetationWind: not null } or { NativeVegetationFast: not null }) ? colors : null,
             SecondaryColors = parts.Any(p => p.Surface?.NativeVegetationWind is not null) ? secondaryColors : null,
             NativeWindGeometryBind = bindToLocal ?? Matrix4x4.Identity,
             Indices = selected.ToArray(), Parts = parts.ToArray(), Lod = level,

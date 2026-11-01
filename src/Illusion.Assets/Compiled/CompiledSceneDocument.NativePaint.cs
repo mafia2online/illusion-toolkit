@@ -122,6 +122,13 @@ public sealed partial class CompiledSceneDocument
                     || templateBind != Matrix4x4.Identity))
                     throw new NotSupportedException("Native baked paint currently requires an identity template binding.");
                 string? renderRefusal = null;
+                string templateFlagSource = "Scene-object template route";
+                bool bakedBins = baked;
+                if (baked)
+                {
+                    try { bakedBins = !CompiledPaintMaterialRouting.AllInstanced(template.Meshes.OfType<MeshData>().SelectMany(mesh => mesh.Parts).Select(part => part.MaterialHash), out templateFlagSource); }
+                    catch (NotSupportedException ex) { renderRefusal = ex.Message; bakedBins = false; templateFlagSource = "Unknown; rendering refused"; }
+                }
                 float minimumScale = F(spawner, "m_ScaleMin"), maximumScale = F(spawner, "m_ScaleMax");
                 var compression = Graph.Data(Graph.Field(firstSet, "m_PosCompression") ?? throw new InvalidDataException("Native paint template has no compression envelope."));
                 var origin = CompiledMeshDecoder.Vector(compression); float quantum = CompiledMeshDecoder.Float(compression, 12);
@@ -151,8 +158,9 @@ public sealed partial class CompiledSceneDocument
                 }
                 fields.Add(new(root.ObjectId, _archives[Graph.Owner(root)].FullName, Graph.Text(Graph.Field(layer, "m_Name")!),
                     Graph.Text(Graph.Field(instance, "m_Name")!), mapped, CompiledPaintDensity.Read(Graph, store), world, value,
-                    minimumScale, maximumScale, F(spawner, "m_NormalAlignment"), baked, CreateMeshes, renderRefusal, spacingSettings)
+                    minimumScale, maximumScale, F(spawner, "m_NormalAlignment"), bakedBins, CreateMeshes, renderRefusal, spacingSettings)
                 { SpawningProfileId = profile.ObjectId, OwnerSceneId = owner.ObjectId, OwnerVisualHash = ownerVisualName,
+                    AggregateCellLod = baked, TemplateFlagSource = templateFlagSource,
                     OwnerLod = _nativeLodVisuals.GetValueOrDefault((owner, ownerVisual)) });
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException or ArgumentException or InvalidOperationException or OverflowException)

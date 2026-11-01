@@ -364,6 +364,7 @@ internal sealed class MaterialEditController
     {
         RefreshMeshesUsing(hash);
         RefreshNativeWaterRuntime(hash);
+        if (hash == 0x55D306DD06000A9C) _host.ReloadNativeVegetationFastInputs();
         _host.RaiseMaterialsChanged();
         _host.RaiseDirtyChanged();
     }
@@ -394,6 +395,7 @@ internal sealed class MaterialEditController
         RefreshMeshesUsing(newHash);
         RefreshNativeWaterRuntime(oldHash);
         if (newHash != oldHash) RefreshNativeWaterRuntime(newHash);
+        if (oldHash == 0x55D306DD06000A9C || newHash == 0x55D306DD06000A9C) _host.ReloadNativeVegetationFastInputs();
         _host.RaiseMaterialsChanged();
         _host.RaiseDirtyChanged();
     }

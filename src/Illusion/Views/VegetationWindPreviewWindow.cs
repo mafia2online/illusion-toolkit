@@ -12,6 +12,9 @@ internal sealed class VegetationWindPreviewWindow : Window
     private readonly TextBox _localPosition = new() { Text = "0, 0, 0" };
     private readonly TextBox _localParameters = new() { Text = "0, 0" };
     private readonly TextBox _time = new() { Text = "0" };
+    private readonly TextBox _fieldWeather = new() { Text = "0, 0, 0" };
+    private readonly TextBox _fieldOrigin = new() { Text = "0, 0" };
+    private readonly TextBox _fieldSeed = new() { Text = "1" };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,12,0,0) };
     internal VegetationWindPreviewWindow(D3DImageHost host)
     {
@@ -25,7 +28,14 @@ internal sealed class VegetationWindPreviewWindow : Window
         apply.Click += (_,_) => Apply(); panel.Children.Add(apply);
         var disable = new Button { Content = "Disable / inspect" };
         disable.Click += (_,_) => ShowResult(_host.SetNativeVegetationWind(false,null,null,null,null,out var result),result);
-        panel.Children.Add(disable); panel.Children.Add(_status);
+        panel.Children.Add(disable);
+        panel.Children.Add(new TextBlock { Text = "FAST field: explicit fixed128-world-unit tile, seeded noise and steady weather. Enable the context above first. Replay is60Hz/bounded; inspect readiness. No live camera/weather history or actor collision simulation is inferred.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,12,0,0) });
+        Add("Field weather velocity (three floats)",_fieldWeather);Add("Fixed field world origin XY",_fieldOrigin);Add("Editor CRT noise seed",_fieldSeed);
+        var fast = new Button { Content = "Enable / apply FAST field", Margin = new Thickness(0,8,0,4) };
+        fast.Click += (_,_) => Fast(true);panel.Children.Add(fast);
+        var inspectFast = new Button { Content = "Inspect FAST replay" };inspectFast.Click += (_,_) => Fast(null);panel.Children.Add(inspectFast);
+        var disableFast = new Button { Content = "Disable FAST field" };disableFast.Click += (_,_) => Fast(false);panel.Children.Add(disableFast);
+        panel.Children.Add(_status);
         Content = new ScrollViewer { Content = panel,VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         if (_host.SetNativeVegetationWind(null,null,null,null,null,out var initial) is null && initial is not null)
         {
@@ -53,4 +63,14 @@ internal sealed class VegetationWindPreviewWindow : Window
     private void ShowResult(string? error, Mcp.VegetationWindInfo? result) => _status.Text = error ?? (result is null ? "Viewport unavailable."
         : $"Enabled: {result.Enabled}; bridge suspended: {result.BridgeSuspended}. Last frame: {result.EligibleMeshes} eligible meshes, {result.DrawnParts} drawn parts, {result.PendingMeshes} pending.\n"
             + string.Join("\n",result.Refusals.Select(pair => $"{pair.Value}: {pair.Key}")));
+    private void Fast(bool? enabled)
+    {
+        try
+        {
+            string? error = _host.SetNativeVegetationFast(enabled, enabled==true?Parse(_fieldWeather,3):null,
+                enabled==true?Parse(_fieldOrigin,2):null, enabled==true?uint.Parse(_fieldSeed.Text,CultureInfo.InvariantCulture):null,out var result);
+            _status.Text = error ?? (result is null?"Viewport unavailable.":$"FAST enabled:{result.Enabled}; ready:{result.Ready}; frames:{result.Frames}/{result.TargetFrame}; drawn parts:{result.DrawnParts}.\n{result.Status}\n{result.Scope}");
+        }
+        catch(Exception error)when(error is FormatException or OverflowException){_status.Text=error.Message;}
+    }
 }

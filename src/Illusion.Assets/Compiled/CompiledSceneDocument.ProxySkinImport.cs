@@ -16,6 +16,16 @@ public sealed partial class CompiledSceneDocument
     /// into the coarse archive; palettes, inverse binds and positive-weight joint envelopes persist.</summary>
     public IFrameDuplication? ImportPreparedSkinnedProp(string sourceResourcePath, ulong sourceObjectId,
         IFrameNode familyOwner, IFrameNode target, out string? refusal)
+        => ImportPreparedDeformedProp(sourceResourcePath, sourceObjectId, familyOwner, target, out refusal, false);
+
+    /// <summary>Imports verified rigid sparse-morph props with independent native inline atlases
+    /// and conservative copied envelopes for manual target weights in [0,1].</summary>
+    public IFrameDuplication? ImportPreparedMorphProp(string sourceResourcePath, ulong sourceObjectId,
+        IFrameNode familyOwner, IFrameNode target, out string? refusal)
+        => ImportPreparedDeformedProp(sourceResourcePath, sourceObjectId, familyOwner, target, out refusal, true);
+
+    private IFrameDuplication? ImportPreparedDeformedProp(string sourceResourcePath, ulong sourceObjectId,
+        IFrameNode familyOwner, IFrameNode target, out string? refusal, bool morph)
     {
         refusal=null;
         var canonical=familyOwner is ICompiledMeshSource visual?visual.CanonicalFrame:familyOwner;
@@ -34,8 +44,9 @@ public sealed partial class CompiledSceneDocument
         try
         {
             if(!Matrix4x4.Invert(parent.WorldTransform,out var parentInverse))throw new NotSupportedException("The owning Kit transform is singular.");
-            near=ImportFrameCore(sourceResourcePath,sourceObjectId,parent,out refusal,preparedSkin:true,preparedSkinPlacement:owner.WorldTransform*parentInverse)??throw new NotSupportedException(refusal);
+            near=ImportFrameCore(sourceResourcePath,sourceObjectId,parent,out refusal,preparedSkin:!morph,preparedSkinPlacement:owner.WorldTransform*parentInverse,preparedMorph:morph)??throw new NotSupportedException(refusal);
             fine=(CompiledFrameNode)near.Root.Source!;
+            if(morph)ExpandPreparedMorphEnvelopes(fine);
             var child=Graph.Objects[state.Child];var coarseGroup=Graph.Objects[state.Parent];
             var destination=Graph.Owner(state.Pairs[owner].Element);
             void Group(CompiledFrameNode frame,ulong id)

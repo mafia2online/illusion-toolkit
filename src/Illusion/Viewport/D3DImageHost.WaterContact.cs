@@ -27,9 +27,10 @@ public sealed partial class D3DImageHost
         result = new(renderer.NativeWaterAvailable, renderer.NativeWaterContactPreviewEnabled,
             renderer.NativeWaterContactPreviewReady, renderer.NativeWaterContactConfigured,
             renderer.NativeWaterContactFrame, renderer.NativeWaterContactTargetFrame,
-            [renderer.NativeWaterContactOrigin.X, renderer.NativeWaterContactOrigin.Y], true, true,
+            [renderer.NativeWaterContactOrigin.X, renderer.NativeWaterContactOrigin.Y], renderer.NativeWaterContactZeroFoamSource, true,
             renderer.NativeWaterContactJointFoam ? SceneRenderer.NativeWaterContactJointScope : SceneRenderer.NativeWaterContactScope, renderer.NativeWaterContactError,
-            renderer.NativeWaterContactJointFoam, renderer.NativeWaterFoamFrame, renderer.NativeWaterFoamTargetFrame);
+            renderer.NativeWaterContactJointFoam, renderer.NativeWaterFoamFrame, renderer.NativeWaterFoamTargetFrame,
+            renderer.NativeWaterContactJointFoam && !renderer.NativeWaterContactZeroFoamSource);
         return null;
     }
 }

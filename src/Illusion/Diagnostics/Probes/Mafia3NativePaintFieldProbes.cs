@@ -22,7 +22,8 @@ internal static partial class Mafia3Probes
         if (field is null) { check("copied Bayou native paint entry resolves its explicit attached visual and template", false); return; }
         var resources = document.Graph.Resources.ToDictionary(resource => resource, resource => resource.ToArray());
         check("copied Bayou native paint entries expose static mesh profiles and explicit effect refusals", document.NativePaintFields.Count == 67
-            && document.NativePaintFields.Count(field => field.NativeBakedBins) == 54 && document.NativePaintRefusals.Count == 11
+            && document.NativePaintFields.Count(field => field.AggregateCellLod) == 54
+            && document.NativePaintFields.All(field => !field.NativeBakedBins) && document.NativePaintRefusals.Count == 11
             && document.NativePaintFields.All(field => field.OwnerSceneId != 0 && field.OwnerVisualHash != 0 && field.RenderRefusal is null));
         var cell = field.GenerateCell(0, -22, -1, 0, 1);
         check("actual copied weed cell generates clipped density-filtered points and all three native mesh levels", cell.Candidates == 675
@@ -36,6 +37,11 @@ internal static partial class Mafia3Probes
             && cell.Points.Select(PointKey).Order().SequenceEqual(changedSeed.Points.Select(PointKey).Order()));
         check("baked paint levels use one fixed full-cell native expanded query box", cell.Meshes.All(mesh => mesh.InstanceLod?.QueryBounds is not null)
             && cell.Meshes.Select(mesh => mesh.InstanceLod!.QueryBounds).Distinct().Count() == 1);
+        check("native all-instanced material cell uses original position-hash matrices independently of aggregate LOD", field.AggregateCellLod
+            && !field.NativeBakedBins && cell.Meshes[0].Instances!.SequenceEqual(cell.Points.Select(point => Illusion.Formats.Compiled.CompiledPaintTransform.ComputeInstancedCell(
+                point.Position, point.Normal, field.PlacementScales.X, field.PlacementScales.Y, field.NormalAlignment))));
+        check("native paint orientation flags identify configured metadata or bounded verified stock source", document.NativePaintFields
+            .Where(profile => profile.AggregateCellLod).All(profile => profile.TemplateFlagSource is "Configured native shader cache" or "Verified stock template flags (configured cache absent)"));
         bool budgetRefused = false, cancelled = false;
         try { _ = field.GenerateCell(0, -22, -1, 0, 1, 1); } catch (NotSupportedException) { budgetRefused = true; }
         using (var cancellation = new CancellationTokenSource())

@@ -121,6 +121,7 @@ public sealed partial class CompiledSceneDocument
         foreach (var frame in fine)
         {
             bool verifiedSkin = PreparedSkinContract(frame, out _);
+            bool verifiedMorph = PreparedMorphContract(frame, out _);
             var model = Components(frame.Element).Single(c => c.TypeId == 0x2da22400);
             var declared = Graph.Items(Graph.Field(model, "m_Visuals"));
             if (declared.Count == 0 || declared.Select(Graph.Resolve).Any(v => v?.TypeId != 0x62c04287))
@@ -134,18 +135,18 @@ public sealed partial class CompiledSceneDocument
                     throw new NotSupportedException("Unknown immutable rigid binding in the fine proxy family.");
                 var set = Graph.Resolve(Graph.Field(visual, "m_MeshSet")) ?? throw new NotSupportedException("Missing native mesh set.");
                 var lods = Graph.Items(Graph.Field(set, "m_LODs")); int last = lods.Count - 1;
-                if (last < 0 || Graph.Field(set, "m_MorphMapHash") is { } morph && Graph.Integer(morph) != 0
+                if (last < 0 || !verifiedMorph && (Graph.Field(set, "m_MorphMapHash") is { } morph && Graph.Integer(morph) != 0
                     || ProxyReferencePresent(Graph.Field(set, "m_MorphTextureData"))
                     || Graph.Field(set, "m_CorrectionMorphDataHash") is { } correction && Graph.Integer(correction) != 0
                     || Graph.Field(set, "m_CorrectionMorphDataList") is { } list &&
-                        (Graph.Data(list).Length < 4 || BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(list)) != 0))
+                        (Graph.Data(list).Length < 4 || BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(list)) != 0)))
                     throw new NotSupportedException("Morph or empty proxy geometry cannot be prepared.");
                 if (!plans.ContainsKey(set)) { var p = new CompiledRewrite(); Select(p, Graph.Field(set, "m_LODs")!, [lods[last]]); plans.Add(set, p); }
                 var native = Graph.Resolve(Graph.Field(lods[last], "m_Mesh")) ?? throw new NotSupportedException("Missing native lowest mesh."); meshes.Add(native);
                 if (ProxyReferencePresent(Graph.Field(native, "m_InternalMorphMapTextureData")) || ProxyReferencePresent(Graph.Field(native, "m_InternalMorphTextureData")))
                     throw new NotSupportedException("Internal morph texture dependencies cannot be prepared as static proxies.");
                 var flags = Graph.Data(Graph.Field(native, "m_VFFlags")!);
-                if (flags.Length != 12 || Enumerable.Range(0, 3).Any(i => (BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(Graph.Field(native, "m_VFFlags")!)[(i * 4)..]) & (verifiedSkin ? 0x200000u : 0x200040u)) != 0))
+                if (flags.Length != 12 || Enumerable.Range(0, 3).Any(i => (BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(Graph.Field(native, "m_VFFlags")!)[(i * 4)..]) & (verifiedMorph ? 0x40u : verifiedSkin ? 0x200000u : 0x200040u)) != 0))
                     throw new NotSupportedException("Skinned or morph proxy replacement has not been validated.");
                 var face = Graph.Resolve(Graph.Field(visual, "m_FaceGroupSet")) ?? throw new NotSupportedException("Missing native face groups.");
                 var tables = Graph.Items(Graph.Field(Graph.Field(face, "m_Data"), "m_FaceGroups")); int index = Math.Min(last, tables.Count - 1);

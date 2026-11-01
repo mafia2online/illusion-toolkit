@@ -6,8 +6,8 @@ using Silk.NET.DXGI;
 
 namespace Illusion.Rendering.Passes;
 
-/// <summary>Bounded explicit sparse-stamp preview. Capture and wind are deliberately zero;
-/// this is an independent preview clock, not actor physics or joint native foam replay.</summary>
+/// <summary>Bounded explicit sparse-stamp preview. Independent mode supplies zero auxiliary
+/// foam source and wind. Joint replay can explicitly supply the prior native foam source.</summary>
 public sealed unsafe class NativeWaterContactPreview : IDisposable
 {
     private readonly NativeWaterContact[] _passes;
@@ -18,7 +18,9 @@ public sealed unsafe class NativeWaterContactPreview : IDisposable
     public int Frame { get; private set; }
     public int TargetFrame { get; private set; }
     public bool Ready => !_disposed && Frame == TargetFrame;
-    public bool ZeroHeightCapture => true;
+    /// <summary>Compatibility name; t052 is an auxiliary foam source, not water height.</summary>
+    public bool ZeroHeightCapture => ZeroFoamSource;
+    public bool ZeroFoamSource { get; private set; } = true;
     public bool ZeroWind => true;
     public string? Error { get; private set; }
     public ComPtr<ID3D11ShaderResourceView> State => !_disposed && Frame > 0 ? _passes[(Frame - 1) & 1].State : default;
@@ -43,22 +45,48 @@ public sealed unsafe class NativeWaterContactPreview : IDisposable
     public bool Seek(int frame, bool reset)
     {
         if (_disposed || frame is < 0 or > 36000) return false;
-        if (reset || frame < Frame) Frame = 0;
+        if (reset || frame < Frame) { Frame = 0; ZeroFoamSource = true; }
         TargetFrame = frame; Error = null; return true;
     }
     public int Advance(int maxSteps = 4)
+        => AdvanceCore(maxSteps, default, Origin);
+    /// <summary>One native frame using the preceding blurred RGBA8 foam source and its
+    /// world camera origin. Each following frame must provide its newly generated source.</summary>
+    public int AdvanceWithFoamSource(ComPtr<ID3D11ShaderResourceView> source, Vector2 sourceOrigin)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (source.Handle == null || !float.IsFinite(sourceOrigin.X) || !float.IsFinite(sourceOrigin.Y))
+        { Error = "A finite previous foam-source origin and texture are required."; return 0; }
+        ShaderResourceViewDesc view; source.Handle->GetDesc(&view);
+        if (view.ViewDimension != D3DSrvDimension.D3D11SrvDimensionTexture2D || view.Format != Format.FormatR8G8B8A8Unorm || view.Texture2D.MostDetailedMip != 0)
+        { Error = "The auxiliary foam source must be a 2D native RGBA8 texture."; return 0; }
+        ID3D11Resource* resource = null; source.Handle->GetResource(&resource);
+        try
+        {
+            ResourceDimension dimension; resource->GetType(&dimension);
+            if (dimension != ResourceDimension.Texture2D) { Error = "The auxiliary foam source must be a 2D texture."; return 0; }
+            Texture2DDesc desc; ((ID3D11Texture2D*)resource)->GetDesc(&desc);
+            if (desc.Width != 512 || desc.Height != 512 || desc.ArraySize != 1 || desc.SampleDesc.Count != 1 || desc.Format != Format.FormatR8G8B8A8Unorm)
+            { Error = "The auxiliary foam source requires native single-sample 512-square RGBA8 storage."; return 0; }
+        }
+        finally { if (resource != null) resource->Release(); }
+        return AdvanceCore(1, source, sourceOrigin);
+    }
+    private int AdvanceCore(int maxSteps, ComPtr<ID3D11ShaderResourceView> source, Vector2 sourceOrigin)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (maxSteps is < 0 or > 4) throw new ArgumentOutOfRangeException(nameof(maxSteps));
+        Error = null;
         int count = 0;
         while (Frame < TargetFrame && count < maxSteps)
         {
             int write = Frame & 1;
             var state = Frame == 0 ? _zero : _passes[write ^ 1].State;
             var foam = Frame == 0 ? _zero : _passes[write ^ 1].Foam;
-            var input = new NativeWaterContactInputs(state, foam, _zero, Frame == 0 ? _stamp : _zero,
-                _zero, _windSampler, _fieldSampler, new(Origin.X, Origin.Y, Origin.X, Origin.Y), Origin, Vector2.Zero, 0, 1f / 60);
+            var input = new NativeWaterContactInputs(state, foam, source.Handle == null ? _zero : source, Frame == 0 ? _stamp : _zero,
+                _zero, _windSampler, _fieldSampler, new(Origin.X, Origin.Y, Origin.X, Origin.Y), sourceOrigin, Vector2.Zero, 0, 1f / 60);
             if (!_passes[write].Evaluate(input)) { Error = "Native contact preview input was refused."; break; }
+            ZeroFoamSource = source.Handle == null;
             Frame++; count++;
         }
         return count;

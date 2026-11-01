@@ -20,6 +20,18 @@ public static class CompiledPaintTransform
         return ComputeBasis(position, normal, scaleMin, scaleMax, normalAlignment, angle, scale);
     }
 
+    /// <summary>Native all-IsInstanced CreateMeshCell route: position-hash basis, fixed template-axis conversion,
+    /// then uniform scale. This is distinct from both CreateSOCell and the 16-bin packed-buffer route.</summary>
+    public static Matrix4x4 ComputeInstancedCell(Vector3 position, Vector3 normal, float scaleMin, float scaleMax, float normalAlignment)
+    {
+        uint hash = BitConverter.SingleToUInt32Bits(position.X) ^ unchecked(BitConverter.SingleToUInt32Bits(position.Y) * 0x34674b15u)
+            ^ unchecked(BitConverter.SingleToUInt32Bits(position.Z) * 0xf1b7u);
+        const float inverse24 = 5.960465188081798e-8f;
+        float angle = ((hash & 0xffffff) * 6.2831854820251465f) * inverse24;
+        float scale = scaleMin + (scaleMax - scaleMin) * ((BitOperations.RotateLeft(hash, 17) & 0xffffff) * inverse24);
+        return ComputeBasis(position, normal, scaleMin, scaleMax, normalAlignment, angle, scale, true);
+    }
+
     /// <summary>
     /// Native small-mesh CopyBuffers orientation bin (0..15), followed by PatchInstance translation.
     /// This matrix precedes native packed-buffer requantization. The caller must preserve the native
@@ -34,7 +46,7 @@ public static class CompiledPaintTransform
             scaleMin + (scaleMax - scaleMin) * fraction);
     }
 
-    private static Matrix4x4 ComputeBasis(Vector3 position, Vector3 normal, float scaleMin, float scaleMax, float normalAlignment, float angle, float scale)
+    private static Matrix4x4 ComputeBasis(Vector3 position, Vector3 normal, float scaleMin, float scaleMax, float normalAlignment, float angle, float scale, bool instancedCell = false)
     {
         if (!Finite(position) || !Finite(normal) || !float.IsFinite(scaleMin) || !float.IsFinite(scaleMax) || !float.IsFinite(normalAlignment))
             throw new InvalidDataException("Native paint transforms require finite inputs.");
@@ -94,7 +106,26 @@ public static class CompiledPaintTransform
                 }
             }
         }
-        for (int row = 0; row < 3; row++) for (int column = 0; column < 3; column++) matrix[row * 4 + column] *= scale;
+        if (instancedCell)
+        {
+            // Preserve original multiply/add order, including the native cos(pi/2) residual and signed zeros.
+            const float residual = -4.371138828673793e-8f;
+            float negativeZero = BitConverter.UInt32BitsToSingle(0x80000000);
+            for (int row = 0; row < 3; row++)
+            {
+                int at = row * 4; float x = matrix[at], y = matrix[at + 1], z = matrix[at + 2];
+                float rx = ((x * 1 + 0) + y * 0) + z * 0;
+                float ry = ((x * 0 + 0) + y * residual) + z * -1;
+                float rz = ((x * negativeZero + 0) + y * 1) + z * residual;
+                float translation = ((x * 0 + position[row]) + y * 0) + z * 0;
+                matrix[at] = ((rx * scale + 0) + ry * 0) + rz * 0;
+                matrix[at + 1] = ((rx * 0 + 0) + ry * scale) + rz * 0;
+                matrix[at + 2] = ((rx * 0 + 0) + ry * 0) + rz * scale;
+                matrix[at + 3] = ((rx * 0 + translation) + ry * 0) + rz * 0;
+            }
+            position = new(matrix[3], matrix[7], matrix[11]);
+        }
+        else for (int row = 0; row < 3; row++) for (int column = 0; column < 3; column++) matrix[row * 4 + column] *= scale;
         if (!float.IsFinite(scale) || matrix.ContainsAnyExceptInRange(float.MinValue, float.MaxValue))
             throw new InvalidDataException("Native paint transform is degenerate or overflows its finite representation.");
         return new Matrix4x4(matrix[0], matrix[4], matrix[8], 0, matrix[1], matrix[5], matrix[9], 0,

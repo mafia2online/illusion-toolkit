@@ -47,6 +47,10 @@ public sealed unsafe class NativeWaterFoam : IDisposable
     public uint Seed { get; private set; }
     public bool ZeroRippleInput { get; private set; } = true;
     public ComPtr<ID3D11ShaderResourceView> Output => _disposed ? default : _histories[_read]!.Resource;
+    /// <summary>Native Renderer+2712: blurred RGBA8 generation source, BEFORE scalar foam
+    /// history. PC contact t052 consumes this from the preceding frame, not WaterHeight.</summary>
+    public ComPtr<ID3D11ShaderResourceView> GeneratedSource => _disposed ? default : _current!.Resource;
+    public Vector2 GeneratedSourceOrigin => _previousOrigin;
     public const string Description = "Offscreen native foam equations with explicit caller depth/height, deterministic seeded noise and history; no water-surface foam blending.";
 
     public NativeWaterFoam(GpuContext gpu, NativeWaterFoamParameters parameters)

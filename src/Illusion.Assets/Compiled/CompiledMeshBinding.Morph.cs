@@ -13,6 +13,11 @@ public sealed partial class CompiledMeshBinding
     public MorphChannels ReadMorphChannels(int lod, ReadOnlySpan<byte> atlasDds) => ReadMorphChannels(_graph, _visual, lod, atlasDds);
 
     internal static MorphChannels ReadMorphChannels(CompiledGraph graph, CompiledElement visual, int lod, ReadOnlySpan<byte> atlasDds)
+        => ReadMorphChannels(graph, visual, lod, new CompiledMorphAtlas(atlasDds));
+
+    internal MorphChannels ReadMorphChannels(int lod, CompiledMorphAtlas atlas) => ReadMorphChannels(_graph, _visual, lod, atlas);
+
+    internal static MorphChannels ReadMorphChannels(CompiledGraph graph, CompiledElement visual, int lod, CompiledMorphAtlas atlas)
     {
         var set = graph.Resolve(graph.Field(visual, "m_MeshSet"));
         var levels = graph.Items(graph.Field(set, "m_LODs"));
@@ -28,7 +33,6 @@ public sealed partial class CompiledMeshBinding
         if (precisionData.Length != 4) throw new InvalidDataException("Invalid native morph precision.");
         float precision = BinaryPrimitives.ReadSingleLittleEndian(precisionData);
         int alignment = checked((int)graph.Integer(graph.Field(set, "m_MorphPixelAlignment")!));
-        var atlas = new CompiledMorphAtlas(atlasDds);
         var declaration = graph.Data(graph.Field(mesh, "m_VFFlags")!);
         var streams = graph.Items(graph.Field(mesh, "m_VertexWrapper"));
         if (declaration.Length != 12 || streams.Count != 3) throw new InvalidDataException("Invalid morph vertex declaration.");

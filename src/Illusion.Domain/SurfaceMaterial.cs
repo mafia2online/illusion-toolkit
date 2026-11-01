@@ -18,6 +18,8 @@ public sealed record SurfaceMaterial(int Layers, string? Layer2Diffuse, string? 
     public NativeWaterDefinitionMaterial? NativeWaterDefinition { get; init; }
     /// <summary>Verified native LARGE vegetation current-position material controls.</summary>
     public NativeVegetationWindMaterial? NativeVegetationWind { get; init; }
+    /// <summary>Native FAST offset-field displacement limits D219; activation requires an explicit ready field context.</summary>
+    public NativeVegetationFastMaterial? NativeVegetationFast { get; init; }
     /// <summary>Explicit native vegetation path whose current deformation is not supported.</summary>
     public string? NativeVegetationWindRefusal { get; init; }
 }
@@ -38,3 +40,5 @@ public sealed record NativeWaterDefinitionMaterial(string ColorTexture, string M
 
 /// <summary>Native D137/D138 and D185..189 controls, without inferred weather or FAST simulation inputs.</summary>
 public sealed record NativeVegetationWindMaterial(Vector4 Pivot, Vector3 Leaf, Vector3 D185, Vector3 D186, Vector3 D187, Vector3 D188, float D189);
+/// <summary>Verified FAST material min/max displacement selected by normalized COLOR0.R.</summary>
+public sealed record NativeVegetationFastMaterial(Vector2 Displacement);

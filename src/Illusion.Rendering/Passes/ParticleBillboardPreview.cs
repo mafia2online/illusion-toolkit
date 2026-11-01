@@ -11,6 +11,8 @@ namespace Illusion.Rendering.Passes;
 public readonly record struct PreviewBillboard(Vector2 Position, Vector2 HalfSize, Vector4 Color, Vector4 AtlasUv)
 {
     public float Rotation { get; init; }
+    public Vector4? NextAtlasUv { get; init; }
+    public float AtlasBlend { get; init; }
 }
 
 /// <summary>Isolated unlit atlas/alpha visualization of evaluated particles, independent of scene shaders.</summary>
@@ -29,11 +31,11 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
     private ComPtr<ID3D11ShaderResourceView> _texture;
     private string? _texturePath;
     private bool _hasTexture;
-    private struct Constants { public Vector4 Rect, Uv, Color, Rotation; }
+    private struct Constants { public Vector4 Rect, Uv, Color, Rotation, NextUv, Blend; }
     private const string Hlsl = """
-        cbuffer Preview : register(b0) { float4 Rect; float4 Uv; float4 Color; float4 Rotation; };
+        cbuffer Preview : register(b0) { float4 Rect; float4 Uv; float4 Color; float4 Rotation; float4 NextUv; float4 Blend; };
         Texture2D Atlas : register(t0); SamplerState Samp : register(s0);
-        struct Varying { float4 Position : SV_POSITION; float2 Uv : TEXCOORD0; };
+        struct Varying { float4 Position : SV_POSITION; float2 Uv : TEXCOORD0; float2 NextUv : TEXCOORD1; };
         Varying VSMain(uint id : SV_VertexID) {
             const float2 corners[6] = {float2(-1,1),float2(1,1),float2(1,-1),float2(-1,1),float2(1,-1),float2(-1,-1)};
             float2 corner = corners[id]; Varying o;
@@ -41,9 +43,14 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
             offset = float2(Rotation.x * offset.x - Rotation.y * offset.y, Rotation.y * offset.x + Rotation.x * offset.y);
             o.Position = float4(Rect.xy + offset * Rotation.zw, 0, 1);
             o.Uv = lerp(Uv.xy, Uv.zw, float2(corner.x * .5 + .5, .5 - corner.y * .5));
+            o.NextUv = lerp(NextUv.xy, NextUv.zw, float2(corner.x * .5 + .5, .5 - corner.y * .5));
             return o;
         }
-        float4 PSMain(Varying i) : SV_TARGET { return Atlas.Sample(Samp, i.Uv) * Color; }
+        float4 PSMain(Varying i) : SV_TARGET {
+            float4 value = Atlas.Sample(Samp, i.Uv);
+            if (Blend.x > 0) value = lerp(value, Atlas.Sample(Samp, i.NextUv), Blend.x);
+            return value * Color;
+        }
         """;
 
     public ParticleBillboardPreview(GpuContext gpu)
@@ -75,6 +82,9 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
     public void Render(SharedRenderTarget target, IReadOnlyList<PreviewBillboard> sprites, string? texturePath, float extent)
     {
         if (!float.IsFinite(extent) || extent <= 0) throw new ArgumentOutOfRangeException(nameof(extent));
+        if (sprites.Any(sprite => !float.IsFinite(sprite.AtlasBlend) || sprite.AtlasBlend is < 0 or > 1
+            || sprite.NextAtlasUv is { } uv && (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y) || !float.IsFinite(uv.Z) || !float.IsFinite(uv.W))))
+            throw new ArgumentOutOfRangeException(nameof(sprites), "Atlas blend and second UV rectangle must be finite; blend must be0–1.");
         var ctx = _gpu.Context11;
         if (!_hasTexture || texturePath != _texturePath)
         {
@@ -96,7 +106,8 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
         {
             var constants = new Constants { Rect = new(sprite.Position.X / horizontal, sprite.Position.Y / extent,
                 sprite.HalfSize.X, sprite.HalfSize.Y), Uv = sprite.AtlasUv, Color = sprite.Color,
-                Rotation = new(MathF.Cos(sprite.Rotation), MathF.Sin(sprite.Rotation), 1 / horizontal, 1 / extent) };
+                Rotation = new(MathF.Cos(sprite.Rotation), MathF.Sin(sprite.Rotation), 1 / horizontal, 1 / extent),
+                NextUv = sprite.NextAtlasUv ?? sprite.AtlasUv,Blend = new(sprite.AtlasBlend,0,0,0) };
             GpuBuffers.UpdateConstant(ctx, _constants, ref constants); ctx.Draw(6, 0);
         }
         texture = null; ctx.PSSetShaderResources(0, 1, &texture); ctx.Flush();

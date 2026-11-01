@@ -117,3 +117,19 @@ Original UpdateAnimTmp1017833E0 computes cell steps and accumulates row-major or
 The isolated point/plane timeline accepts native Rotation type2DBB6813 with orientation0 (billboard), zero axis variance/motion alignment, supported spin/direction/variance curves and finite initial angles within ten revolutions. Initial degrees convert with the original0.01745329238474369 factor. Birth consumes the native spin-direction and initial-angle random draws before Texture; continuing spin uses the independent particle seed XOR0x7EA8, generation-time spin variance, native angular wrapping and authored 2D spin. Other orientation modes remain refused. Preview sprites rotate in world units before aspect scaling; the pixels still use labeled toolkit unlit shading.
 
 Original Rotation::Init1019DB300, GenerationContinues1019D89C0, ParticleOnce1019D8A80, ParticleContinues1019D95B0 and ParticleOnceTransformed1019D94C0 establish the contract.10000 randomized birth/update cases match angle, direction and random state exactly. A full original Tick replay of actual generation1065E033E7A21445 matches11460 fields over1000frames (digestC257907EF2519B7D2D3DF3CB726C41BFE5956166221C2D8F0E242B7334FDC110). A separate45+/-180-degree,1.25-spin,30-degree-variance/-.25-direction case matches another11460 fields (8AA476AB28546BC708F280564927E48F8003BE5C9A484219F3DE911F98B5F693).48 durable timeline checks and8 offscreen atlas/rotation checks pass; shader checks include quarter-turn bounds, exact angle rewind and wide-aspect geometry. The shipped corpus now exposes21 verified timeline stacks.
+
+### Animated, blended and mirrored atlas follow-up
+
+The earlier static-atlas boundary is expanded to verified single-cycle animated
+loop/clamp/ping-pong playback, fixed-time or lifetime repetition, preload,
+quantized two-frame blending, and native random mirror modes 0–3. The original
+ordered Tick/cache/birth/render routines match all twelve animation cases and
+three mirror cases over 1,000 frames each. Both frame UVs reach the GPU preview
+and MCP. Unsupported cycle starts, counts and mirror modes still refuse before
+replay. See [atlas contract and verification](MAFIA3-PARTICLE-ATLASES.md).
+
+The combined navigation/effects window regression passes 182 checks. Actual
+background editor/MCP authoring also passes compressed Build, independent fresh
+decode, exact image rewind and Undo restoring every copied native working file.
+The stock eligible count remains 21 because other active-operator gates dominate;
+this adds verified authoring/playback capability without enabling unproved stacks.

@@ -40,16 +40,18 @@ public sealed unsafe partial class SceneRenderer
     }
 
     private void BeginNativeVegetationWindFrame()
-    { NativeVegetationWindDrawnParts = 0; NativeVegetationWindEligibleMeshes = 0; NativeVegetationWindPendingMeshes = 0; _vegetationWindValidationWork = 0; _vegetationWindRefusals.Clear(); }
+    { NativeVegetationWindDrawnParts = 0; NativeVegetationWindEligibleMeshes = 0; NativeVegetationWindPendingMeshes = 0; _vegetationWindValidationWork = 0; _vegetationWindRefusals.Clear(); AdvanceNativeVegetationFast(); }
 
     private NativeVegetationWindPrepared? PrepareNativeVegetationWind(GpuMesh mesh)
     {
         if (!NativeVegetationWindEnabled) return null;
+        var fast = PrepareNativeVegetationFast(mesh);
         var materials = mesh.Parts.Select(p => p.Surface?.NativeVegetationWind).ToArray();
+        if (fast is not null && materials.All(m => m is null)) { NativeVegetationWindEligibleMeshes++; return fast; }
         if (!materials.Any(m => m is not null) && !mesh.Parts.Any(p => p.Surface?.NativeVegetationWindRefusal is not null)) return null;
         string? refusal = NativeVegetationWindBridgeSuspended ? "Vegetation wind is suspended during bridge rest-geometry authoring."
             : materials.All(m => m is null) ? mesh.Parts.Select(p => p.Surface?.NativeVegetationWindRefusal).FirstOrDefault(r => r is not null) : null;
-        if (refusal is not null) { Refuse(refusal); return null; }
+        if (refusal is not null) { if (fast is null) Refuse(refusal); return fast; }
         if (!_vegetationWindCache.TryGetValue(mesh, out var cached) || !ReferenceEquals(cached.Matrices, mesh.WindInstances)
             || !cached.Materials.SequenceEqual(materials) || cached.Wind != NativeVegetationWindGlobal || cached.LocalPosition != NativeVegetationWindLocalPosition
             || cached.LocalParameters != NativeVegetationWindLocalParameters)
@@ -65,18 +67,23 @@ public sealed unsafe partial class SceneRenderer
             _vegetationWindCache.Remove(mesh); _vegetationWindCache.Add(mesh, cached);
         }
         if (cached.Prepared is null) Refuse(cached.Reason); else NativeVegetationWindEligibleMeshes++;
-        return cached.Prepared;
+        return cached.Prepared is { } large ? fast is null ? large : MergeFastBounds(large, fast) : fast;
         void Refuse(string reason) => _vegetationWindRefusals[reason] = _vegetationWindRefusals.GetValueOrDefault(reason) + 1;
     }
 
     private void BindNativeVegetationWind(ComPtr<ID3D11DeviceContext> context, GpuMesh mesh, GpuPart part, NativeVegetationWindPrepared? prepared)
     {
         _vegetationWindBindings ??= new VegetationWindBindings(_gpu);
-        var material = prepared is null ? null : part.Surface?.NativeVegetationWind;
+        if (prepared is { FastEnabled: true } && part.Surface?.NativeVegetationFast is { } fast && NativeVegetationFastReady)
+        {
+            _vegetationWindBindings.BindFast(context, fast, NativeVegetationFastOrigin, NativeFastSnapOffset(NativeVegetationFastOrigin), _fastField!.Offset);
+            NativeVegetationWindDrawnParts++; NativeVegetationFastDrawnParts++; return;
+        }
+        var material = prepared is { LargeEnabled: true } ? part.Surface?.NativeVegetationWind : null;
         _vegetationWindBindings.Bind(context, mesh, material, NativeVegetationWindTime, NativeVegetationWindGlobal, NativeVegetationWindLocalPosition, NativeVegetationWindLocalParameters);
         if (material is not null) NativeVegetationWindDrawnParts++;
     }
     private void ResetNativeVegetationWind()
-    { _vegetationWindCache = new(); BeginNativeVegetationWindFrame(); }
-    private void DisposeNativeVegetationWind() => _vegetationWindBindings?.Dispose();
+    { _vegetationWindCache = new(); ResetNativeVegetationFast(); NativeVegetationWindDrawnParts = NativeVegetationWindEligibleMeshes = NativeVegetationWindPendingMeshes = 0; _vegetationWindRefusals.Clear(); }
+    private void DisposeNativeVegetationWind() { _vegetationWindBindings?.Dispose(); DisposeNativeVegetationFast(); }
 }

@@ -130,11 +130,11 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
         DefinitionPartsDrawn = draws.Length;
         var ctx = _gpu.Context11;
         var mainViewport = new Viewport(0, 0, target.Width, target.Height, 0, 1);
-        var resources = stackalloc ID3D11ShaderResourceView*[12];
-        for (int i = 0; i < 12; i++) resources[i] = null;
+        var resources = stackalloc ID3D11ShaderResourceView*[14];
+        for (int i = 0; i < 14; i++) resources[i] = null;
         var renderTargets = stackalloc ID3D11RenderTargetView*[3];
         var samplers = stackalloc ID3D11SamplerState*[3]; samplers[0] = _wrapped.Handle; samplers[1] = _pointClamp.Handle; samplers[2] = _linearClamp.Handle;
-        var nullViews = stackalloc ID3D11ShaderResourceView*[12]; for (int i = 0; i < 12; i++) nullViews[i] = null;
+        var nullViews = stackalloc ID3D11ShaderResourceView*[14]; for (int i = 0; i < 14; i++) nullViews[i] = null;
         float* clear = stackalloc float[4]; for (int i = 0; i < 4; i++) clear[i] = 0;
         _values.AsSpan().Clear(); SetMatrix(16, camera.ViewProjection);
         SetVector(32, new(camera.Position, time));
@@ -219,12 +219,29 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
             ctx.IASetInputLayout(_gridLayout.Handle); ctx.VSSetShader(_gridVs.Handle, null, 0); ctx.PSSetShader(_surfacePs.Handle, null, 0);
             var vertex = _vertices.Handle; uint stride = 4, offset = 0;
             ctx.IASetVertexBuffers(0, 1, &vertex, &stride, &offset); ctx.IASetIndexBuffer(_indices.Handle, Format.FormatR32Uint, 0);
+            bool temporalActive = AdvanceTemporalReflections(camera, time);
+            if (TemporalReflectionsEnabled)
+            {
+                if (temporalActive)
+                {
+                    resources[12] = _reflectionTemporal![(_reflectionFrames - 1) & 1].Radiance.Handle;
+                    resources[13] = _reflectionDepth!.Resource.Handle;
+                    extraDraws += 2;
+                }
+                Upload();
+                ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
+                ctx.RSSetState(_raster.Handle); ctx.OMSetDepthStencilState(_depthState.Handle, 0);
+                ctx.OMSetBlendState((ID3D11BlendState*)null, clear, uint.MaxValue);
+                ctx.IASetInputLayout(_gridLayout.Handle); ctx.VSSetShader(_gridVs.Handle, null, 0); ctx.PSSetShader(_surfacePs.Handle, null, 0);
+                var restore = _constants.Handle; ctx.VSSetConstantBuffers(0, 1, &restore); ctx.PSSetConstantBuffers(0, 1, &restore);
+                ctx.PSSetSamplers(0, 3, samplers); ctx.PSSetShaderResources(0, 14, resources);
+            }
             ctx.DrawIndexed(257 * 257 * 6, 0, 0);
             return draws.Length * 2 + 1 + extraDraws + (FoamEnabled ? draws.Length : 0);
         }
         finally
         {
-            ctx.VSSetShaderResources(0, 12, nullViews); ctx.PSSetShaderResources(0, 12, nullViews);
+            ctx.VSSetShaderResources(0, 14, nullViews); ctx.PSSetShaderResources(0, 14, nullViews);
             var main = target.Rtv.Handle; ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
         }
     }
@@ -342,7 +359,7 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
-        DisposeFoam(); DisposeOptics();
+        DisposeFoam(); DisposeOptics(); DisposeTemporalReflections();
         _mask?.Dispose(); _color?.Dispose(); _flow?.Dispose(); _displacement?.Dispose(); _normal?.Dispose(); _depthView.Dispose(); _depthTexture.Dispose();
         _constants.Dispose(); _vertices.Dispose(); _indices.Dispose(); _lookup.Dispose(); _fineNoise.Dispose(); _definitionLayout.Dispose(); _gridLayout.Dispose();
         _definitionVs.Dispose(); _gridVs.Dispose(); _definitionPs.Dispose(); _wavePs.Dispose(); _surfacePs.Dispose();

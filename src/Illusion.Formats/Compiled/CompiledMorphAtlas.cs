@@ -12,6 +12,15 @@ public sealed class CompiledMorphAtlas
 
     public readonly record struct Influence(int Target, Vector3 Position, Vector2 Normal, Vector2 Tangent);
 
+    /// <summary>Native S_MorphTextureData is uploaded as pixel format27 (DXGI10),
+    /// a tightly packed single-level RGBA16F image, by C_MeshSet::CreateMorphTexture.</summary>
+    public CompiledMorphAtlas(int width, int height, ReadOnlySpan<byte> rgba16f)
+    {
+        if (width != 512 || height <= 0 || height > ushort.MaxValue || rgba16f.Length != checked(width * height * 8))
+            throw new NotSupportedException("Unsupported inline native morph atlas dimensions or payload length.");
+        Width = width; Height = height; _pixels = rgba16f.ToArray();
+    }
+
     public CompiledMorphAtlas(ReadOnlySpan<byte> dds)
     {
         if (dds.Length < 128 || BinaryPrimitives.ReadUInt32LittleEndian(dds) != 0x20534444

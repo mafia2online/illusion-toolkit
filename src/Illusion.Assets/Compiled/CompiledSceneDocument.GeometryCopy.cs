@@ -372,9 +372,14 @@ public sealed partial class CompiledSceneDocument
         {
             var cacheIds = new Dictionary<ulong, ulong>();
             foreach (var source in _elements.Keys.Where(e => e.Event == 2))
+            {
                 foreach (string field in new[] { "m_HashId", "m_ID" })
                     if (Graph.Field(source, field) is { DataSize: 8 } id && Graph.Integer(id) != 0)
                         cacheIds.TryAdd(Graph.Integer(id), Fresh());
+                if (source.TypeId == 0x7ebb5de0 && Graph.Resolve(Graph.Field(source, "m_MorphTextureData")) is { TypeId: 0x3adc2df6 }
+                    && Graph.Field(source, "m_MorphMapHash") is { DataSize: 8 } morph && Graph.Integer(morph) != 0)
+                    cacheIds.TryAdd(Graph.Integer(morph), Fresh());
+            }
             foreach (var (source, clone) in _elements)
             {
                 if (source.Event == 4 && source.DataSize is 8 or 12)
@@ -390,7 +395,7 @@ public sealed partial class CompiledSceneDocument
                     }
                 }
                 if (source.Event != 2) continue;
-                foreach (string field in new[] { "m_HashId", "m_ID", "m_HashName" })
+                foreach (string field in new[] { "m_HashId", "m_ID", "m_HashName", "m_MorphMapHash" })
                     if (Graph.Field(source, field) is { DataSize: 8 } original && cacheIds.TryGetValue(Graph.Integer(original), out ulong cache))
                     {
                         var value = Graph.Field(clone, field)!;

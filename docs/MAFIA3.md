@@ -46,7 +46,7 @@ Implemented:
 The renderer uses toolkit shading. Verified native two/three-layer terrain inputs and blend equations are
 supported. Water uses the actual defining triangles and native mask/color UVs, analytical wave field and
 screen-ray surface grid, with shared viewport depth and toolkit lighting. Water textures retain their native
-mip chains. The isolated wave window also supports manual template weights. Optional captured-scene reflection/refraction uses verified native shoreline depth attenuation and the authored Blinn BRDF. Reflected/transmitted radiance uses editor screen-space traces and toolkit lighting; native environment probes and temporal filtering are not reproduced. Native foam diagnostics and surface composition are opt-in. Explicit contact stamps support native fixed-step ripple propagation and synchronized contact/foam replay, with zero captured height and zero wind stated as boundaries. Automatic actor wakes and the real shoreline height capture remain unsupported. See [contact evidence](MAFIA3-WATER-CONTACT.md).
+mip chains. The isolated wave window also supports manual template weights. Optional captured-scene reflection/refraction uses verified native shoreline depth attenuation and the authored Blinn BRDF. Reflected/transmitted radiance uses editor screen-space traces and toolkit lighting; opt-in native temporal filtering uses verified R11G11B10/R8 history and water BRDF composition. Native environment probes remain unsupported. Native foam diagnostics and surface composition are opt-in. Explicit contact stamps support native fixed-step ripple propagation and the verified PC contact/auxiliary-foam feedback order, with toolkit scene capture and zero wind stated as boundaries. Automatic actor wakes remain unsupported. See [contact evidence](MAFIA3-WATER-CONTACT.md) and [temporal reflection evidence](MAFIA3-REFLECTION-TEMPORAL.md).
 See [surface evidence](MAFIA3-SURFACES.md) and [water evidence](MAFIA3-WATER-EVIDENCE.md).
 
 Additional authoring includes native vehicle cloning/registration, rig bones and poses, paint choices and
@@ -65,13 +65,18 @@ Fixed-topology triangle assets can be recooked with native compression/BVH rebui
 undo. World asset edits affect every instance; verified dynamic compound bounds are refitted when geometry expands beyond its original bounds. See [triangle collision details](MAFIA3-TRIANGLE-COLLISION.md).
 
 Compiled particle libraries expose effect/generation/operator trees and verified reflected parameters, including shared
-constant sources. Native scalar/vector linear and Bezier emission/age curves can be sampled and plotted in the editor, including unsaved edits. Save/build/reload preserves opaque operator data. Verified stationary point/plane/box generations support native burst snapshots and deterministic ordered frame replay, including birth, lifetime, size, packed RGB variation, static multi-cell/random-start atlases, billboard rotation/spin and supported acceleration/damping/culling. Native emitter dimensions/shape and generation scheduling/rendering fields are editable; isolated preview keeps its own local clock. The preview uses toolkit unlit atlas shading; full effect scheduling and native particle pixel shaders remain unsupported.
+constant sources. Native scalar/vector linear and Bezier emission/age curves can be sampled and plotted in the editor, including unsaved edits. Save/build/reload preserves opaque operator data. Verified stationary point/plane/box generations support native burst snapshots and deterministic ordered frame replay, including birth, lifetime, size, packed RGB variation, static multi-cell/random-start atlases, single-cycle animated loop/clamp/ping-pong atlases with quantized frame blending, preload and native random mirroring, billboard rotation/spin and supported acceleration/damping/culling. Native emitter dimensions/shape and generation scheduling/rendering fields are editable; isolated preview keeps its own local clock. The preview uses toolkit unlit atlas shading; full effect scheduling and native particle pixel shaders remain unsupported.
 See [effects evidence](MAFIA3-EFFECTS-EVIDENCE.md). Verified stock traffic markers can also be imported with an explicit editor helper preview;
 their vehicle spawning remains game runtime behavior. See [actor evidence](MAFIA3-NESTED-ACTORS.md).
 
-Additional support includes independent native Car10 placements into city Kits, carrying vehicle/wheel definitions, textures and native resource budgets into the destination archives. Verified StaticEntity32, native Tree22 vegetation and triangle-collision actors can also be duplicated. Animation clips can bind transiently to the selected scene rig and mesh, with exact rewind/restoration and no animation writes to GENR. Native vehicle decal, dirt albedo and dirt-normal stages use verified shader inputs.
+Additional support includes independent native Car10 placements into city Kits, carrying vehicle/wheel definitions, textures and native resource budgets into the destination archives. Verified StaticEntity32, native Tree22 vegetation and triangle-collision actors can also be duplicated. Animation clips can bind transiently to a selected scene rig or a verified prepared fine/far rig pair, with explicit skeleton candidate selection, exact rewind/restoration and no animation writes to GENR. Native vehicle decal, dirt albedo and dirt-normal stages use verified shader inputs.
 
 Native sparse facial morph targets support transient position/TBN preview before skinning through the editors and MCP, with exact restoration and unchanged native resources. Base-frame, skin and topology edits that would invalidate native morph coefficients/envelopes remain guarded. Placed city vehicles remain within the original static district visual footprint; this gate does not rewrite district streaming ownership.
+
+Verified pure Model/Skeleton props with inline morph atlases can also be imported
+into prepared fine/far groups. Both copies own independent native dependencies
+and conservative envelopes for manual weights in [0,1]; manual preview updates
+both visuals together. Mixed physics and weighted morph/skin imports remain guarded.
 
 Still under investigation: additional entity/wrapper families, unrestricted opaque geometry authoring, new facial binding creation/retargeting, full particle effect scheduling/operator coverage, reflection/water shader parity, and navigation topology stitching beyond the verified pair/network operations. Mafia II-specific winter mirroring
 and M2Online conversion remain unsupported for Mafia III. Reparenting requires a compatible hierarchy
@@ -79,6 +84,18 @@ container; deletion refuses externally shared inline definitions. Rebuilt files 
 extraction and reload; no game was launched for these tests.
 
 ## Testing with copies
+
+The follow-up authoring/rendering batch builds in Debug and Release with zero
+warnings or errors. Focused checks pass: effects/editor windows182, FAST
+vegetation13, prior LARGE wind18, native wind field8, prepared morph import10
+and editor/GPU8, inline morph5/GPU2, paired animation5/GPU6, temporal water13,
+and corrected contact feedback8. Actual HTTP acceptance passes animated atlases,
+FAST field/material editing, paired animation and temporal water, including
+the applicable exact Undo and image restoration checks. All60 copied archives
+and the material library still match the installed originals. At the user's
+requested stopping point, the full combined regression on this final batch and
+the new prepared-morph HTTP acceptance remain pending. Earlier checkpoint full
+regression results below do not certify this later batch. No in-game test was run.
 
 Create a separate root with `sds_retail` and copy the archives to test there. Copy
 `edit/materials/default.mtl` as well. Include all three LOD archives of a district and

@@ -15,6 +15,8 @@ public sealed class HavokAnimationPreview
             throw new ArgumentException("The animation binding names a different skeleton.", nameof(skeleton));
         if (clip.TrackToBone.Any(i => i < -1 || i >= skeleton.BoneNames.Length))
             throw new InvalidDataException("Animation track mapping exceeds the bound skeleton.");
+        if (clip.FloatTrackToSlot.Any(i => i < -1 || i >= skeleton.FloatSlotNames.Length))
+            throw new InvalidDataException("Animation float mapping exceeds the bound skeleton.");
         Clip = clip; NativeSkeleton = skeleton;
     }
 

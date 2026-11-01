@@ -7,7 +7,7 @@ public static class NativeWaterContactShader
     public const string Functions = """
 struct NativeWaterContactOutput { float4 State : SV_Target0; float4 Foam : SV_Target1; };
 NativeWaterContactOutput EvaluateNativeWaterContact(Texture2D<float4> previous,
-    Texture2D<float4> previousFoam, Texture2D<float4> heightCapture,
+    Texture2D<float4> previousFoam, Texture2D<float4> foamSource,
     Texture2D<float4> stamp, Texture2D<float4> wind, SamplerState wrapped,
     SamplerState bordered, float2 uv, float4 origins, float2 captureCenter,
     float2 windOrigin, float windStrength, float dt)
@@ -31,7 +31,7 @@ NativeWaterContactOutput EvaluateNativeWaterContact(Texture2D<float4> previous,
             float lengthValue = max(sqrt(dot(direction, direction)), .00001);
             direction *= rsqrt(lengthValue);
             float2 captureUv = mad(direction, float2(.5, -.5), .5);
-            float2 capture = heightCapture.SampleLevel(bordered, captureUv, 0).xz;
+            float2 capture = foamSource.SampleLevel(bordered, captureUv, 0).xz;
             float captureForce = (1 - capture.y) * capture.x;
             float up = previous.SampleLevel(bordered, previousUv, 0, int2(0, -1)).z;
             float left = previous.SampleLevel(bordered, previousUv, 0, int2(-1, 0)).z;

@@ -94,7 +94,14 @@ float3 ComposeWaterOptics(float3 world, float3 normal, float3 coarse, float2 uv,
     if (OpticsState.y != 0)
     {
         float3 reflected;
-        if (TraceWaterRadiance(world + normal * .01, reflect(-view, normal), 0, reflected))
+        bool reflectedHit;
+        if (OpticsState.w == 2)
+        {
+            reflected = TemporalReflection.SampleLevel(LinearClamp, uv, 0).rgb;
+            reflectedHit = ReflectionDepthValidity.SampleLevel(PointClamp, uv, 0).y > .5;
+        }
+        else reflectedHit = TraceWaterRadiance(world + normal * .01, reflect(-view, normal), 0, reflected);
+        if (reflectedHit)
         {
             float fresnel = saturate(NativeWaterDielectricBrdf(OpticsBrdf, LinearClamp, view, normal, normalize(coarse), lerp(1, roughness, depthFade), depthFade, normalize(coarse)));
             float reflectionWeight = depthFade * (depthFade * .75 + .25) * .5;

@@ -11,17 +11,32 @@ public sealed class CompiledAnimationBinding : IDisposable
     private readonly HavokAnimationPreview _preview;
     private readonly int[] _mapping;
     private readonly long _authoredRevision;
+    private readonly CompiledAnimationBinding[] _additional;
+    public int TargetCount => 1 + _additional.Length;
     public int MappedBones => _mapping.Count(i => i >= 0);
     public int RenderBones => _rig.Count;
     public IReadOnlyList<int> RenderToAnimation => _mapping;
     public CompiledAnimationBinding(CompiledVehicleRig rig, HavokAnimationPreview preview)
     {
+        _additional = [];
         _rig = rig; _preview = preview; _authoredRevision = rig.AuthoredRevision;
         var names = preview.NativeSkeleton.BoneNames.Select((name, index) => (Hash: Fnv64.Hash(name, Encoding.UTF8), index))
             .ToDictionary(n => n.Hash, n => n.index);
         _mapping = Enumerable.Range(0, rig.Count).Select(i => i == 0 ? 0 : names.GetValueOrDefault(rig.NameHash(i), -1)).ToArray();
         if (rig.Count < 2 || MappedBones < 2 || (MappedBones - 1) * 2 < rig.Count - 1)
             throw new NotSupportedException("The native animation skeleton does not name enough bones of this render rig.");
+    }
+    public CompiledAnimationBinding(IReadOnlyList<CompiledVehicleRig> rigs, HavokAnimationPreview preview)
+        : this(rigs.Count > 0 ? rigs[0] : throw new ArgumentException("Select a render rig.", nameof(rigs)), preview)
+    {
+        if (rigs.Distinct().Count() != rigs.Count) throw new ArgumentException("Render rigs must be distinct.", nameof(rigs));
+        var rig = rigs[0];
+        _additional = rigs.Skip(1).Select(rig => new CompiledAnimationBinding(rig, preview)).ToArray();
+        foreach (var other in _additional)
+            for (int i = 0; i < rig.Count; i++)
+                if (other._rig.Count != rig.Count || other._rig.NameHash(i) != rig.NameHash(i)
+                    || other._rig.Parent(i) != rig.Parent(i) || other._rig.LocalRest(i) != rig.LocalRest(i))
+                    throw new NotSupportedException("Synchronized render rigs must have identical ordered bone identities, parents and authored local transforms.");
     }
     public Matrix4x4[] Sample(float seconds)
     {
@@ -56,6 +71,15 @@ public sealed class CompiledAnimationBinding : IDisposable
         for (int i = 0; i < models.Length; i++) _ = Model(i);
         return models;
     }
-    public void Seek(float seconds) => _rig.SetAnimationPose(Sample(seconds));
-    public void Dispose() => _rig.SetAnimationPose(null);
+    public void Seek(float seconds)
+    {
+        var bindings = new[] { this }.Concat(_additional).ToArray();
+        var poses = bindings.Select(binding => binding._rig.PrepareAnimationPose(binding.Sample(seconds))).ToArray();
+        for (int i = 0; i < bindings.Length; i++) bindings[i]._rig.CommitAnimationPose(poses[i]);
+    }
+    public void Dispose()
+    {
+        _rig.CommitAnimationPose(null);
+        foreach (var binding in _additional) binding._rig.CommitAnimationPose(null);
+    }
 }

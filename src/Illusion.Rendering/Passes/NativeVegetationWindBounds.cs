@@ -6,6 +6,8 @@ namespace Illusion.Rendering.Passes;
 
 internal sealed record NativeVegetationWindPrepared(NativeLodBounds[] Bounds, NativeLodBounds[] Cells, Vector3 Min, Vector3 Max)
 {
+    public bool LargeEnabled { get; init; } = true;
+    public bool FastEnabled { get; init; }
     public NativeLodBounds FrustumBounds(int index, NativeLodBounds original) => new(Vector3.Min(Bounds[index].Min, original.Min), Vector3.Max(Bounds[index].Max, original.Max));
 }
 

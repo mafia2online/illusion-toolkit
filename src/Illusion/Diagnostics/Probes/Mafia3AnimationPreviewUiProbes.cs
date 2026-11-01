@@ -52,6 +52,7 @@ internal static partial class Mafia3Probes
             window = new AnimationPreviewWindow();
             var previews = (List<(string Label, HavokAnimationPreview Preview)>)typeof(AnimationPreviewWindow).GetField("_previews", flags)!.GetValue(window)!;
             previews.Add(("Copied native Cassandra", new HavokAnimationPreview(clip, nativeSkeleton)));
+            ((List<(int Index, int Count)>)typeof(AnimationPreviewWindow).GetField("_skeletonCandidates", flags)!.GetValue(window)!).Add((0, 1));
             var clips = (ComboBox)typeof(AnimationPreviewWindow).GetField("_clips", flags)!.GetValue(window)!;
             clips.Items.Add("Copied native Cassandra"); window.SelectClip(0);
             // Invoke Loaded without Show/Activate: actual own GPU and render target, no desktop surface.

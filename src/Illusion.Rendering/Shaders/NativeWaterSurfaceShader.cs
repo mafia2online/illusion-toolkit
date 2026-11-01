@@ -43,6 +43,8 @@ Texture2D<float4> FoamNormal : register(t8);
 Texture2D<float4> OpaqueColor : register(t9);
 Texture2D<float> OpaqueDepth : register(t10);
 Texture2D<float4> OpticsBrdf : register(t11);
+Texture2D<float4> TemporalReflection : register(t12);
+Texture2D<float4> ReflectionDepthValidity : register(t13);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
@@ -185,9 +187,28 @@ float4 SurfacePS(GridOut input):SV_Target
         float roughness = FineNormal.z != 0 ? NativeWaterVarianceRoughness(FineNoise, Wrapped,
             input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, FineNormal.x, FineNormal.y, flow) : .5;
         if (composedFoam) roughness = foamRoughness;
+        if (OpticsState.w == 1)
+        {
+            float3 reflected = 0;
+            bool hit = TraceWaterRadiance(input.WorldPosition + normal * .01, reflect(-V, normal), 0, reflected);
+            return float4(reflected, hit ? roughness : -1);
+        }
         lit = ComposeWaterOptics(input.WorldPosition, normal, input.Normal, input.Position.xy * TargetData.xy, depthFade, roughness, lit);
     }
     return float4(lit, 1);
+}
+struct ReflectionCapture { float4 Radiance:SV_Target0; float Roughness:SV_Target1; float4 DepthValidity:SV_Target2; };
+ReflectionCapture ReflectionCapturePS(GridOut input)
+{
+    float scene = OpaqueDepth.SampleLevel(PointClamp, input.Position.xy * TargetData.xy, 0);
+    float sceneZ = OpticsDepth.x * OpticsDepth.y / (OpticsDepth.y - scene * (OpticsDepth.y - OpticsDepth.x));
+    if (dot(input.WorldPosition-CameraTime.xyz, CameraForward.xyz) >= sceneZ) discard;
+    float4 sample = SurfacePS(input);
+    ReflectionCapture o;
+    o.Radiance = float4(sample.xyz, 1);
+    o.Roughness = max(sample.w, 0);
+    o.DepthValidity = float4(dot(input.WorldPosition-CameraTime.xyz, CameraForward.xyz), sample.w >= 0 ? 1 : 0, 0, 0);
+    return o;
 }
 """;
 }

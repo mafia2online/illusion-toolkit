@@ -36,7 +36,7 @@ public sealed class EffectPointTools
     }
 
     [McpServerTool(Name = "effect_point_timeline")]
-    [Description("Replay one verified stationary Mafia III point, plane or box generation for an exact number of native ordered frames. Uses the original birth/aging/expiry/swap-delete/random ordering, including continuous emission where verified. Give copied archive, Generic index, generation GUID, frames, step seconds (default 1/60) and seed. Returns actual float clock, native random state and particles. Includes verified cone speed, acceleration, damping, distance culling, box surface/interior emission and billboard initial rotation/spin with native random variance. Effect hierarchy, external emitter motion and native particle pixel shaders remain outside this isolated preview; files are unchanged.")]
+    [Description("Replay one verified stationary Mafia III point, plane or box generation for an exact number of native ordered frames. Uses the original birth/aging/expiry/swap-delete/random ordering, including continuous emission where verified. Give copied archive, Generic index, generation GUID, frames, step seconds (default 1/60) and seed. Returns actual float clock, native random state and particles. Includes verified cone speed, acceleration, damping, distance culling, box surface/interior emission, billboard rotation/spin and single-cycle loop/clamp/ping-pong animated atlases with native quantized blending and preload. Effect hierarchy, external emitter motion and native particle pixel shaders remain outside this isolated preview; files are unchanged.")]
     public static string Timeline(ArchiveService archives, string sdsPath, int resourceIndex, string generation,
         int frames, float step = 1 / 60f, uint seed = 1)
     {
@@ -96,7 +96,10 @@ public sealed class EffectPointTools
         emitterDimensions = new[] { snapshot.EmitterDimensions.X, snapshot.EmitterDimensions.Y, snapshot.EmitterDimensions.Z },
         particles = snapshot.Particles.Select(p => new { position = new[] { p.Position.X, p.Position.Y, p.Position.Z },
             halfSize = new[] { p.HalfSize.X, p.HalfSize.Y }, color = new[] { p.Color.X, p.Color.Y, p.Color.Z, p.Color.W },
-            atlasFrame = p.AtlasFrame, atlasUv = new[] { p.AtlasUv.X, p.AtlasUv.Y, p.AtlasUv.Z, p.AtlasUv.W }, emissivity = new[] { p.Emissivity.X, p.Emissivity.Y, p.Emissivity.Z },
+            atlasFrame = p.AtlasFrame,atlasNextFrame = p.AtlasNextFrame,atlasBlend = p.AtlasBlend,atlasMirror = p.AtlasMirror,
+            atlasUv = new[] { p.AtlasUv.X, p.AtlasUv.Y, p.AtlasUv.Z, p.AtlasUv.W },
+            nextAtlasUv = p.NextAtlasUv is { } next ? new[] { next.X,next.Y,next.Z,next.W } : null,
+            emissivity = new[] { p.Emissivity.X, p.Emissivity.Y, p.Emissivity.Z },
             normalizedAge = p.NormalizedAge, lifetime = p.Lifetime, ageSeconds = p.AgeSeconds, emissionTime = p.EmissionTime, velocity = new[] { p.Velocity.X, p.Velocity.Y, p.Velocity.Z } }).ToArray()
     };
 }

@@ -146,14 +146,15 @@ public sealed class AuthoringTools
     }
 
     [McpServerTool(Name = "animation_open")]
-    [Description("Open the Mafia III native animation preview in a background window, select a clip and seek/play it. Supports verified Havok 2014.2 spline and interleaved transform tracks with their named skeleton; returns available clips and playback state. Uses read-only source files.")]
+    [Description("Open the Mafia III native animation preview in a background window, select a clip and seek/play it. Supports verified Havok 2014.2 spline and interleaved transform tracks. Duplicate named skeletons require explicit skeletonCandidate: the initial refusal returns candidate rows with catalogue indices, initial bone names/parents and a full ordered name/parent signature; choose a row and its candidate index rather than guessing from Trace or a filename. An explicit choice is a retargeting decision, not proof of the original AnimationProject relationship. Uses read-only source files.")]
     public static async Task<string> AnimationOpen(IEditorSession editor, IUiThreadMarshal ui, string archive = "tables/ingame.sds",
-        int clip = 0, double time = 0, bool playing = false)
+        int clip = 0, double time = 0, bool playing = false, int skeletonCandidate = -1)
     {
         try
         {
             AnimationInfo? result = null;
-            if (await ui.RunAsync(() => editor.AnimationOpen(archive, clip, time, playing, out result)) is { } refusal) return ToolResult.Invalid(refusal);
+            if (await ui.RunAsync(() => editor.AnimationOpen(archive, clip, time, playing, out result, skeletonCandidate)) is { } refusal)
+                return ToolResult.Json(new { success = false, error = refusal, animation = result });
             return ToolResult.Json(new { success = true, animation = result });
         }
         catch (Exception ex) { return ToolResult.Fail(ex); }
@@ -229,7 +230,7 @@ public sealed class AuthoringTools
     }
 
     [McpServerTool(Name = "animation_bind")]
-    [Description("Bind the current native animation preview to a Mafia III scene object's compiled render skeleton. Uses native root/name-hash bone mapping and translation locks; matching facial float slots drive morph targets at native value/100, preserving signed and overshoot weights. Set morphs=false for skeletal playback alone. Mismatched skeletons and unsupported additive facial blending are refused. Playback is transient and does not modify resources. Set enabled=false to restore the authored pose.")]
+    [Description("Bind the selected native clip/skeleton candidate to a Mafia III render rig. A verified prepared family synchronizes BOTH fine and far rigs atomically using identical native bind/name/parent tables. Uses native root/name-hash mapping and translation locks. Selection explicitly requests retargeting; it does not establish the original AnimationProject relationship. Matching facial float slots drive the selected visual at native value/100; paired morph families remain unsupported. Set morphs=false for skeletal playback alone, enabled=false to restore all authored poses. No resources are modified.")]
     public static async Task<string> AnimationBind(IEditorSession editor, IUiThreadMarshal ui, string name, bool enabled = true, bool morphs = true)
     {
         try

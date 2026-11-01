@@ -121,14 +121,19 @@ public sealed class CompiledVehicleRig
     public void SetAnimationPose(IReadOnlyList<Matrix4x4>? models)
     {
         if (models is null) { _animationPose = null; return; }
+        _animationPose = PrepareAnimationPose(models);
+    }
+    internal Matrix4x4[] PrepareAnimationPose(IReadOnlyList<Matrix4x4> models)
+    {
         if (models.Count != Count) throw new ArgumentException("Animation pose count does not match the render rig.", nameof(models));
         var copy = models.ToArray();
         foreach (var matrix in copy)
             if (matrix.M14 != 0 || matrix.M24 != 0 || matrix.M34 != 0 || matrix.M44 != 1
                 || CompiledSceneDocument.WriteMatrix(matrix).Chunk(4).Any(b => !float.IsFinite(BinaryPrimitives.ReadSingleLittleEndian(b))))
                 throw new ArgumentException("Animation pose must be finite.", nameof(models));
-        _animationPose = copy;
+        return copy;
     }
+    internal void CommitAnimationPose(Matrix4x4[]? prepared) => _animationPose = prepared;
     private void SetLocal(int index, Matrix4x4 matrix)
     {
         if (MutationRefusal?.Invoke() is { } refusal) throw new EditRefusedException(refusal);

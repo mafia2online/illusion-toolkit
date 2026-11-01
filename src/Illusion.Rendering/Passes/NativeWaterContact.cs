@@ -10,8 +10,11 @@ namespace Illusion.Rendering.Passes;
 
 /// <summary>Borrowed native PS1754 inputs. The five textures are t050/t051/t052/t256/t247;
 /// samplers are s021/s028. Origins is d272 (currentXY, previousXY), CaptureCenter is
-/// d273.zw, WindOrigin is d217.xy, WindStrength is d119.w and DeltaTime is d274.x.
-/// Capture/stamps/wind and feedback evolution must be supplied by the caller.</summary>
+/// d273.zw. Legacy WindOrigin is d217.xy: native quarter-unit subtexel snap delta,
+/// not an absolute world origin. WindStrength is d119.w and DeltaTime is d274.x.
+/// The legacy HeightCapture name denotes t052, proven on PC to be the preceding blurred
+/// RGBA8 foam-generation source (Renderer+2712), not the R16 water-height texture.
+/// Source/stamps/wind and feedback evolution must be supplied by the caller.</summary>
 public readonly record struct NativeWaterContactInputs(ComPtr<ID3D11ShaderResourceView> PreviousState,
     ComPtr<ID3D11ShaderResourceView> PreviousFoam, ComPtr<ID3D11ShaderResourceView> HeightCapture,
     ComPtr<ID3D11ShaderResourceView> Stamp, ComPtr<ID3D11ShaderResourceView> Wind,

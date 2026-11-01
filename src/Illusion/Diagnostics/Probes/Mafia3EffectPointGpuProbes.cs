@@ -1,4 +1,5 @@
 using System.IO;
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Xml.Linq;
 using Illusion.Assets;
@@ -38,6 +39,41 @@ internal static partial class Mafia3Probes
         check("particle billboard applies native angle to visible geometry", h.Width > h.Height * 3 && v.Height > v.Width * 3
             && Math.Abs(h.Width - v.Height) <= 1 && Math.Abs(h.Height - v.Width) <= 1);
         check("particle billboard angle rewind restores exact pixels", Render([rectangle]).AsSpan().SequenceEqual(horizontal));
+        string atlasPath = Path.Combine(Path.GetTempPath(),$"illusion-particle-atlas-{Guid.NewGuid():N}.dds");
+        try
+        {
+            // Opaque RGBA8 texels isolate the shader's two-frame interpolation
+            // from texture filtering, alpha blending and the authored particle atlas.
+            byte[] atlas = new byte[164];
+            void Header(int offset,uint value) => BinaryPrimitives.WriteUInt32LittleEndian(atlas.AsSpan(offset),value);
+            Header(0,0x20534444);Header(4,124);Header(8,0x100F);Header(12,2);Header(16,2);Header(20,8);Header(28,1);
+            Header(76,32);Header(80,4);Header(84,0x30315844);Header(108,0x1000);
+            Header(128,28);Header(132,3);Header(140,1);
+            Header(148,0xFF0000FF);Header(152,0xFFFF0000);Header(156,0xFF00FF00);Header(160,0xFFFFFFFF);
+            File.WriteAllBytes(atlasPath,atlas);
+            var first = synthetic[0] with { Color = Vector4.One,AtlasUv = new(.25f,.25f,.25f,.25f),NextAtlasUv = new(.75f,.25f,.75f,.25f) };
+            var red = Render([first],atlasPath);var blue = Render([first with { AtlasBlend = 1 }],atlasPath);
+            var mixed = Render([first with { AtlasBlend = 128 / 255f }],atlasPath);
+            check("particle animated atlas selects both explicit frame rectangles",red[center + 2] == 255 && red[center] == 0 && blue[center] == 255 && blue[center + 2] == 0);
+            check("particle animated atlas interpolates the native quantized frame blend",Math.Abs(mixed[center] - 128) <= 1 && Math.Abs(mixed[center + 2] - 127) <= 1 && mixed[center + 1] == 0);
+            check("particle animated atlas rewind restores exact pixels",Render([first],atlasPath).AsSpan().SequenceEqual(red));
+            var square = first with { AtlasUv = new(0,0,1,1) };var normal = Render([square],atlasPath);
+            var flipX = Render([square with { AtlasUv = new(1,0,0,1) }],atlasPath);
+            var flipY = Render([square with { AtlasUv = new(0,1,1,0) }],atlasPath);
+            bool xValid = true,yValid = true;
+            for (int y = 48;y < 80;y++) for (int x = 48;x < 80;x++) for (int c = 0;c < 3;c++)
+            {
+                xValid &= Math.Abs(normal[(y * 128 + x) * 4 + c] - flipX[(y * 128 + 127 - x) * 4 + c]) <= 1;
+                yValid &= Math.Abs(normal[(y * 128 + x) * 4 + c] - flipY[((127 - y) * 128 + x) * 4 + c]) <= 1;
+            }
+            check("particle atlas UV endpoint swaps mirror GPU samples on each axis",xValid && yValid && !normal.AsSpan().SequenceEqual(flipX) && !normal.AsSpan().SequenceEqual(flipY));
+            Render([first],atlasPath);
+            bool refusedBlend = false,refusedUv = false;
+            try { Render([first with { AtlasBlend = float.NaN }],atlasPath); } catch (ArgumentOutOfRangeException) { refusedBlend = true; }
+            try { Render([first with { NextAtlasUv = new(float.NaN,0,0,0) }],atlasPath); } catch (ArgumentOutOfRangeException) { refusedUv = true; }
+            check("particle animated atlas refuses invalid blend and UV before clearing the target",refusedBlend && refusedUv && RenderTargetReadback.Read(gpu,target).AsSpan().SequenceEqual(red));
+        }
+        finally { File.Delete(atlasPath); }
         using (var wide = new SharedRenderTarget(gpu,256,128))
         {
             renderer.Render(wide,[],null,1); byte[] background = RenderTargetReadback.Read(gpu,wide);

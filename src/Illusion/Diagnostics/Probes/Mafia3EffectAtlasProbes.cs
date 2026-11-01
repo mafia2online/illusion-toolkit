@@ -54,7 +54,9 @@ internal static partial class Mafia3Probes
         check("native fixed static atlas matches original ordered Tick over1408800 fields",Digest() == "6CA38A6CA5E07275E24E2EE3764EAB569FE4A247595840F3221036AF22C58D03");
         Set(texture,"m_Cols",0);check("native static atlas rejects invalid grid before replay",!CompiledEffectPointTimeline.TryCreate(graph,generation,out _,out _));Set(texture,"m_Cols",4);
         Set(cycle,"m_StartFrame",13);check("native static atlas rejects an out-of-grid start",!CompiledEffectPointTimeline.TryCreate(graph,generation,out _,out _));Set(cycle,"m_StartFrame",8);
-        resource.Replace(graph.Field(texture,"m_Animated")!,[1]);check("native animated atlas remains explicitly refused",!CompiledEffectPointTimeline.TryCreate(graph,generation,out _,out _));
+        resource.Replace(graph.Field(texture,"m_Animated")!,[1]);Set(cycle,"m_FirstFrame",0);
+        check("native atlas refuses nonpositive first-frame animated cycles",!CompiledEffectPointTimeline.TryCreate(graph,generation,out _,out _));
         check("native atlas probes preserve every original resource byte",original.ToArray().AsSpan().SequenceEqual(before));
+        VerifyCompiledEffectAnimatedAtlas(document,check);
     }
 }

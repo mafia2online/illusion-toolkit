@@ -9,11 +9,13 @@ public sealed unsafe partial class NativeWaterSurface
     private NativeWaterContactPreview? _jointContactPreview;
     private JointFoamState? _jointPriorFoam;
     private bool _jointContactStepping;
+    private ComPtr<ID3D11ShaderResourceView> _jointPreviousContactFoam;
     private sealed record JointFoamState(bool Enabled, int Mode, int Target, uint Seed);
     internal bool JointContactEnabled => _jointContactPreview is not null;
     internal string? ValidateJointContactConfiguration() => FoamConfigured && FineNormalsConfigured ? null : "Joint contact/foam requires configured native foam and fine-normal inputs first.";
     private ComPtr<ID3D11ShaderResourceView> ContactAnalyticalState => _jointContactStepping ? _jointContactPreview!.State : _contactState;
-    private ComPtr<ID3D11ShaderResourceView> JointContactFoam => _jointContactStepping ? _jointContactPreview!.Foam : default;
+    // PC FoamUpdate reads contactFoam[idx^1], even though ContactUpdate has already written idx.
+    private ComPtr<ID3D11ShaderResourceView> JointContactFoam => _jointContactStepping ? _jointPreviousContactFoam : default;
     private Vector4 ContactShaderState => _jointContactStepping ? new(1, _jointContactPreview!.Origin.X, _jointContactPreview.Origin.Y, 0)
         : ContactConfigured ? new(1, _contactOrigin.X, _contactOrigin.Y, 0) : Vector4.Zero;
 
@@ -22,13 +24,13 @@ public sealed unsafe partial class NativeWaterSurface
         if (ValidateJointContactConfiguration() is { } refusal) return refusal;
         EnsureContactSampler();
         _jointPriorFoam = new(FoamEnabled, _foamMode, _foamTarget, _foamSeed);
-        _jointContactPreview = preview; _jointContactStepping = false;
+        _jointContactPreview = preview; _jointContactStepping = false; _jointPreviousContactFoam = default;
         return SetFoamCore(true, FoamEnabled ? null : "surface", preview.TargetFrame, null, true);
     }
     internal void EndJointContactReplay()
     {
         if (_jointContactPreview is null && _jointPriorFoam is null) return;
-        var prior = _jointPriorFoam; _jointContactPreview = null; _jointPriorFoam = null; _jointContactStepping = false;
+        var prior = _jointPriorFoam; _jointContactPreview = null; _jointPriorFoam = null; _jointContactStepping = false; _jointPreviousContactFoam = default;
         ClearContactStateCore(false); _foamGlobals[140] = _foamGlobals[141] = 0;
         if (prior is not null) SetFoamCore(prior.Enabled, prior.Mode switch { 1 => "normals", 2 => "roughness", 3 => "surface", _ => "diffuse" }, prior.Target, prior.Seed, true);
     }
@@ -48,7 +50,7 @@ public sealed unsafe partial class NativeWaterSurface
     internal string? SeekJointContactReplay(int frame, bool reset) => SetJointContactClock(null, null, frame, null, reset);
     private void ResetJointContactReplay()
     {
-        _jointContactStepping = false;
+        _jointContactStepping = false; _jointPreviousContactFoam = default;
         if (_jointContactPreview is { } preview) { preview.Seek(_foamTarget, true); ClearContactStateCore(false); }
     }
     private bool BeginJointContactStep(int frame)
@@ -56,11 +58,14 @@ public sealed unsafe partial class NativeWaterSurface
         if (_jointContactPreview is not { } preview) return true;
         if (preview.Frame != frame - 1 || preview.TargetFrame != _foamTarget)
         { FoamError = "Joint contact/foam clocks lost synchronization; replay will restart."; _foamHasSignature = false; return false; }
-        if (preview.Advance(1) != 1) { FoamError = preview.Error ?? "Joint contact step was refused."; return false; }
+        if (_foam is null) { FoamError = "The previous native foam source is unavailable."; return false; }
+        _jointPreviousContactFoam = preview.Foam;
+        if (preview.AdvanceWithFoamSource(_foam.GeneratedSource, _foam.GeneratedSourceOrigin) != 1)
+        { _jointPreviousContactFoam = default; FoamError = preview.Error ?? "Joint contact step was refused."; return false; }
         _jointContactStepping = true;
         return true;
     }
-    private void EndJointContactStep() => _jointContactStepping = false;
+    private void EndJointContactStep() { _jointContactStepping = false; _jointPreviousContactFoam = default; }
     private void PublishJointContactState()
     {
         _jointContactStepping = false;

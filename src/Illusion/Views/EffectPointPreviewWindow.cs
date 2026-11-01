@@ -270,7 +270,8 @@ public sealed class EffectPointPreviewWindow : Window
                 + (TexturePath is null ? " Atlas unavailable: white helper quads." : "");
             if (_gpuFailure is not null) { _status.Text = _gpuFailure; return; }
             if (_renderer is null || _target is null || _gpu is null) return;
-            var sprites = Snapshot.Particles.Select(p => new PreviewBillboard(Project(p.Position) - _center, p.HalfSize, p.Color, p.AtlasUv) { Rotation = p.Rotation }).ToArray();
+            var sprites = Snapshot.Particles.Select(p => new PreviewBillboard(Project(p.Position) - _center, p.HalfSize, p.Color, p.AtlasUv)
+                { Rotation = p.Rotation,NextAtlasUv = p.NextAtlasUv,AtlasBlend = p.AtlasBlend }).ToArray();
             _renderer.Render(_target, sprites, TexturePath, (_fitExtent ?? OriginExtent) / (float)_zoom.Value);
             byte[] bytes = RenderTargetReadback.Read(_gpu, _target);
             _image.Source = BitmapSource.Create(_target.Width, _target.Height, 96, 96, PixelFormats.Bgra32, null, bytes, _target.Width * 4);

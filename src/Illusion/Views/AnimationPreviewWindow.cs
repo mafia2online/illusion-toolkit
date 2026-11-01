@@ -1,5 +1,7 @@
 using System.IO;
 using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -26,6 +28,7 @@ public sealed partial class AnimationPreviewWindow : Window
     private readonly TextBlock _status = new() { Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap };
     private readonly Button _play = new() { Content = "Play", Margin = new Thickness(6), MinWidth = 60 };
     private readonly List<(string Label, HavokAnimationPreview Preview)> _previews = [];
+    private readonly List<(int Index, int Count)> _skeletonCandidates = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(40) };
     private GpuContext? _gpu;
     private SceneRenderer? _renderer;
@@ -33,7 +36,7 @@ public sealed partial class AnimationPreviewWindow : Window
     private IReadOnlyList<HavokAnimationSkeleton>? _skeletons;
     private bool _updating, _closed;
     private string? _drawRefusal;
-    private CompiledVehicleRig? _sceneRig;
+    private IReadOnlyList<CompiledVehicleRig>? _sceneRigs;
     private CompiledAnimationBinding? _sceneBinding;
     private Action? _sceneChanged;
     private Func<bool>? _sceneValid;
@@ -41,6 +44,7 @@ public sealed partial class AnimationPreviewWindow : Window
     private Action? _sceneMorphClear;
     public int BoundBones => _sceneBinding?.MappedBones ?? 0;
     public int SceneBones => _sceneBinding?.RenderBones ?? 0;
+    public int BoundRigCount => _sceneBinding?.TargetCount ?? 0;
     public string Status => _status.Text;
     private DateTime _lastTick;
     public bool IsPlaying { get; private set; }
@@ -49,6 +53,7 @@ public sealed partial class AnimationPreviewWindow : Window
     public float Duration => (float)_seek.Maximum;
     public string? ArchivePath { get; private set; }
     public IReadOnlyList<string> ClipNames => _previews.Select(p => p.Label).ToArray();
+    public IReadOnlyList<(int Candidate, bool RequiresSelection)> SkeletonChoices => _skeletonCandidates.Select(candidate => (candidate.Index, candidate.Count > 1)).ToArray();
     public (string[] Names, float[] Values) SampleFloatSlots()
     {
         if ((uint)_clips.SelectedIndex >= _previews.Count) throw new InvalidOperationException("Select a native clip first.");
@@ -109,18 +114,21 @@ public sealed partial class AnimationPreviewWindow : Window
     /// <summary>Drive the selected compiled render rig without changing any authored resource.</summary>
     public void BindToSceneRig(CompiledVehicleRig rig, Action? sceneChanged = null, Func<bool>? sceneValid = null,
         Action<HavokAnimationPreview, float>? morphSample = null, Action? morphClear = null)
+        => BindToSceneRigs([rig], sceneChanged, sceneValid, morphSample, morphClear);
+    public void BindToSceneRigs(IReadOnlyList<CompiledVehicleRig> rigs, Action? sceneChanged = null, Func<bool>? sceneValid = null,
+        Action<HavokAnimationPreview, float>? morphSample = null, Action? morphClear = null)
     {
         if ((uint)_clips.SelectedIndex >= _previews.Count) throw new InvalidOperationException("Select a native clip first.");
-        var binding = new CompiledAnimationBinding(rig, _previews[_clips.SelectedIndex].Preview);
+        var binding = new CompiledAnimationBinding(rigs, _previews[_clips.SelectedIndex].Preview);
         _sceneBinding?.Dispose(); _sceneMorphClear?.Invoke(); _sceneChanged?.Invoke();
-        _sceneRig = rig; _sceneBinding = binding; _sceneChanged = sceneChanged; _sceneValid = sceneValid;
+        _sceneRigs = rigs.ToArray(); _sceneBinding = binding; _sceneChanged = sceneChanged; _sceneValid = sceneValid;
         _sceneMorph = morphSample; _sceneMorphClear = morphClear;
         Draw();
     }
     public void ClearSceneBinding()
     {
-        bool hadBinding = _sceneBinding is not null || _sceneRig is not null;
-        _sceneBinding?.Dispose(); _sceneBinding = null; _sceneRig = null;
+        bool hadBinding = _sceneBinding is not null || _sceneRigs is not null;
+        _sceneBinding?.Dispose(); _sceneBinding = null; _sceneRigs = null;
         _sceneMorphClear?.Invoke(); _sceneMorph = null; _sceneMorphClear = null;
         _sceneChanged?.Invoke(); _sceneChanged = null; _sceneValid = null;
         if (hadBinding) _status.Text = "Native clip preview: no scene rig bound.";
@@ -135,9 +143,11 @@ public sealed partial class AnimationPreviewWindow : Window
         if (!float.IsFinite(seconds)) throw new ArgumentOutOfRangeException(nameof(seconds));
         _updating = true; _seek.Value = Math.Clamp(seconds, 0, (float)_seek.Maximum); _updating = false; Draw();
     }
-    public void SelectClip(int index)
+    public void SelectClip(int index, int skeletonCandidate = -1)
     {
         if ((uint)index >= _previews.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        if (_skeletonCandidates[index].Count > 1 && skeletonCandidate != _skeletonCandidates[index].Index)
+            throw new NotSupportedException($"This clip has ambiguous named skeletons. Choose an explicit candidate row and pass its skeletonCandidate index ({_skeletonCandidates[index].Index} for this row). {ClipNames[index]}");
         _clips.SelectedIndex = index;
     }
     public void SaveFrame(string path)
@@ -162,7 +172,7 @@ public sealed partial class AnimationPreviewWindow : Window
         var files = SdsManifest.Load(SdsMeshLoader.EnsureExtracted(archive)).GetFiles("hkAnimation");
         if (_animationDocuments.Values.Any(document => document.IsDirty)) throw new InvalidOperationException("Save or undo animation edits before opening another archive.");
         _animationHistory.Clear(); _animationDocuments.Clear(); _animationSources.Clear();
-        ClearSceneBinding(); _previews.Clear(); _clips.Items.Clear(); int unsupported = 0;
+        ClearSceneBinding(); _previews.Clear(); _skeletonCandidates.Clear(); _clips.Items.Clear(); int unsupported = 0;
         foreach (string path in files)
         {
             IReadOnlyList<HavokAnimationClip> decoded;
@@ -173,19 +183,32 @@ public sealed partial class AnimationPreviewWindow : Window
             foreach (var clip in decoded)
             {
                 nativeClip++;
-                var skeleton = _skeletons.FirstOrDefault(s => s.Name == clip.SkeletonName);
-                if (skeleton is null) { unsupported++; continue; }
+                var candidates = _skeletons.Select((skeleton, index) => (Skeleton: skeleton, Index: index))
+                    .Where(candidate => candidate.Skeleton.Name == clip.SkeletonName
+                        && clip.TrackToBone.All(bone => bone >= -1 && bone < candidate.Skeleton.BoneNames.Length)
+                        && clip.FloatTrackToSlot.All(slot => slot >= -1 && slot < candidate.Skeleton.FloatSlotNames.Length)).ToArray();
+                if (candidates.Length == 0) { unsupported++; continue; }
                 try { _ = clip.Sample(0); }
                 catch (Exception ex) when (ex is NotSupportedException or InvalidDataException) { unsupported++; continue; }
-                string label = Path.GetFileNameWithoutExtension(path) + " / " + clip.SkeletonName;
-                _previews.Add((label, new HavokAnimationPreview(clip, skeleton))); _clips.Items.Add(label);
-                _animationSources.Add((path, nativeClip));
+                foreach (var candidate in candidates)
+                {
+                    string label = Path.GetFileNameWithoutExtension(path) + " / " + clip.SkeletonName;
+                    if (candidates.Length > 1)
+                    {
+                        string signature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\0", candidate.Skeleton.BoneNames)
+                            + "\0parents:" + string.Join(",", candidate.Skeleton.Parents))))[..16];
+                        label += $" / skeleton #{candidate.Index} {candidate.Skeleton.BoneNames.Length} bones [{string.Join(", ", candidate.Skeleton.BoneNames.Take(8))}] parents [{string.Join(",", candidate.Skeleton.Parents.Take(8))}] signature {signature}";
+                    }
+                    _previews.Add((label, new HavokAnimationPreview(clip, candidate.Skeleton))); _clips.Items.Add(label);
+                    _animationSources.Add((path, nativeClip));
+                    _skeletonCandidates.Add((candidate.Index, candidates.Length));
+                }
             }
         }
         Title = "Mafia III animation — " + archive.Name;
         ArchivePath = archive.FullName;
         _status.Text = $"{_previews.Count} playable native clips; {unsupported} unsupported clips. Frame authoring uses native interleaved keys; Save animation then Build its archive.";
-        if (_previews.Count > 0) _clips.SelectedIndex = 0;
+        if (_previews.Count > 0 && !_previews[0].Label.Contains(" / skeleton #", StringComparison.Ordinal)) _clips.SelectedIndex = 0;
         else { _seek.IsEnabled = false; _image.Source = null; }
     }
     private void TryLoad(FileInfo archive)
@@ -199,10 +222,10 @@ public sealed partial class AnimationPreviewWindow : Window
         if ((uint)_clips.SelectedIndex >= _previews.Count) return;
         _sceneBinding?.Dispose(); _sceneBinding = null;
         _sceneMorphClear?.Invoke();
-        if (_sceneRig is { } rig)
+        if (_sceneRigs is { } rigs)
         {
-            try { _sceneBinding = new CompiledAnimationBinding(rig, _previews[_clips.SelectedIndex].Preview); }
-            catch (NotSupportedException ex) { _sceneRig = null; _status.Text = ex.Message; }
+            try { _sceneBinding = new CompiledAnimationBinding(rigs, _previews[_clips.SelectedIndex].Preview); }
+            catch (NotSupportedException ex) { ClearSceneBinding(); _status.Text = ex.Message; }
         }
         _seek.Maximum = _previews[_clips.SelectedIndex].Preview.Clip.Duration; _seek.IsEnabled = true; Seek(0);
     }
@@ -219,7 +242,7 @@ public sealed partial class AnimationPreviewWindow : Window
             if (_sceneBinding is not null) _sceneMorph?.Invoke(preview, CurrentTime);
             _sceneChanged?.Invoke();
             _renderer.SetSkeletonDistrict(this, HelperGlyphBuilder.BuildRig([preview.Sample(CurrentTime)]));
-            if (_sceneBinding is { } binding) _status.Text = $"Native scene playback: {binding.MappedBones}/{binding.RenderBones} mapped render bones. Transient pose; source files unchanged.";
+            if (_sceneBinding is { } binding) _status.Text = $"Native scene playback: {binding.MappedBones}/{binding.RenderBones} mapped render bones across {binding.TargetCount} rig(s). Transient pose; source files unchanged.";
         }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException)
         {

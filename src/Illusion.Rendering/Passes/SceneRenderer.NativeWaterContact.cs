@@ -12,14 +12,15 @@ public sealed unsafe partial class SceneRenderer
     private float? _jointPriorWaterTime;
     private bool _jointPriorPlaying;
     public bool NativeWaterContactJointFoam => _nativeWater?.JointContactEnabled == true;
+    public bool NativeWaterContactZeroFoamSource => _contactPreview?.ZeroFoamSource ?? true;
     public bool NativeWaterContactPreviewEnabled => _contactPreview is not null;
     public bool NativeWaterContactPreviewReady => NativeWaterActive && _contactPreview?.Ready == true && (!NativeWaterContactJointFoam || NativeWaterFoamReady);
     public int NativeWaterContactFrame => _contactPreview?.Frame ?? 0;
     public Vector2 NativeWaterContactOrigin => _contactPreview?.Origin ?? Vector2.Zero;
     public int NativeWaterContactTargetFrame => _contactPreview?.TargetFrame ?? 0;
     public string? NativeWaterContactError => _contactPreviewError ?? _contactPreview?.Error ?? (NativeWaterContactJointFoam ? NativeWaterFoamError : null);
-    public const string NativeWaterContactScope = "Explicit sparse 512² R8 stamp in a fixed 96m world domain; ZERO height capture and ZERO wind. Independent fixed contact clock; no actor physics, shoreline capture or joint foam history.";
-    public const string NativeWaterContactJointScope = "Explicit sparse native contact plus foam in ONE fixed replay clock; ZERO contact height capture and ZERO wind. Toolkit scene capture feeds foam. No actor physics or real contact shoreline capture.";
+    public const string NativeWaterContactScope = "Explicit sparse 512² R8 stamp in a fixed 96m world domain; ZERO auxiliary foam source (t052) and ZERO wind. Independent fixed contact clock; no actor physics or joint foam history.";
+    public const string NativeWaterContactJointScope = "Explicit sparse native contact plus foam in ONE fixed replay clock. PC order: prior blurred RGBA8 foam source feeds contact; prior contact foam plus current analytical field feeds foam generation/history. Toolkit depth/definition capture and seeded noise; ZERO wind. No actor physics or live-game radiance/capture parity.";
     public string? SetNativeWaterContactPreview(Vector2 origin, IReadOnlyList<int> texels, IReadOnlyList<float> influences, int frame, bool jointFoam = false)
     {
         if (_nativeWater is null) return "Native water is unavailable.";

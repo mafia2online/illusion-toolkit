@@ -95,8 +95,8 @@ internal static partial class Mafia3Probes
         check("native contact final clear restores exact baseline after producer disposal", Draw().AsSpan().SequenceEqual(baseline));
         int[] texels = Enumerable.Range(244, 24).SelectMany(y => Enumerable.Range(244, 24).Select(x => y * 512 + x)).ToArray();
         float[] influences = Enumerable.Repeat(.7f, texels.Length).ToArray();
-        check("native sparse contact preview declares zero capture wind and independent clock", renderer.SetNativeWaterContactPreview(origin, texels, influences, 12) is null
-            && SceneRenderer.NativeWaterContactScope.Contains("ZERO height capture", StringComparison.Ordinal)
+        check("native sparse contact preview declares zero auxiliary foam source wind and independent clock", renderer.SetNativeWaterContactPreview(origin, texels, influences, 12) is null
+            && SceneRenderer.NativeWaterContactScope.Contains("ZERO auxiliary foam source", StringComparison.Ordinal)
             && SceneRenderer.NativeWaterContactScope.Contains("ZERO wind", StringComparison.Ordinal));
         Draw(); check("native sparse contact preview advances at most four steps before readiness", renderer.NativeWaterContactFrame == 4 && !renderer.NativeWaterContactPreviewReady && !renderer.NativeWaterContactConfigured);
         Draw(); Draw(); byte[] propagated = Draw();

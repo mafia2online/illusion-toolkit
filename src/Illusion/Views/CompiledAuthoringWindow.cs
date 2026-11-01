@@ -72,6 +72,11 @@ internal sealed class CompiledAuthoringWindow : Window
             if(host.SelectedNode is not{}selected)return "Select an owning Kit in a prepared fine resource.";
             new CompiledProxySkinWindow(host,selected){Owner=this}.Show();return null;
         }));
+        panel.Children.Add(Button("Import verified morph prop under selected Kit...", () =>
+        {
+            if (host.SelectedNode is not { } selected) return "Select an owning Kit in a prepared fine resource.";
+            new CompiledProxyMorphWindow(host, selected) { Owner = this }.Show(); return null;
+        }));
         panel.Children.Add(Button("Make selected visual independent", () => host.SelectedNode is { } selected
             ? host.MakeCompiledMeshUnique(selected) : "Select one visual mesh in the scene tree."));
         panel.Children.Add(Button("Place vehicle archive under selected Kit…", () =>
@@ -111,6 +116,8 @@ internal sealed class CompiledAuthoringWindow : Window
         }, "Analytical wave preview opened."));
         panel.Children.Add(Button("Preview explicit native water contact…", () =>
         { new WaterContactPreviewWindow(host) { Owner = this }.Show(); return null; }, "Explicit contact preview opened."));
+        panel.Children.Add(Button("Preview temporal water reflections…", () =>
+        { new WaterReflectionPreviewWindow(host) { Owner = this }.Show(); return null; }, "Temporal water reflection preview opened."));
         panel.Children.Add(Button("Preview native vegetation wind…", () =>
         { new VegetationWindPreviewWindow(host) { Owner = this }.Show(); return null; }, "Native vegetation wind preview opened."));
         panel.Children.Add(Button("Play water surface", () =>

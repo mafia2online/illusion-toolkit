@@ -20,6 +20,11 @@ public sealed unsafe partial class SceneRenderer
                 if (NativeWaterContactError is { } contactError) return contactError;
                 if (!NativeWaterContactPreviewReady) { if (watch.ElapsedMilliseconds >= 300) break; continue; }
             }
+            if (NativeVegetationFastEnabled && NativeVegetationWindEnabled && !NativeVegetationWindBridgeSuspended)
+            {
+                if (_fastInputsInvalid) return "Native FAST field inputs are unavailable: " + NativeVegetationFastStatus;
+                if (!NativeVegetationFastReady) { if (watch.ElapsedMilliseconds >= 300) break; continue; }
+            }
             if (!NativeWaterFoamEnabled) return null;
             if (!NativeWaterActive) return "Native foam diagnostic is unavailable in this view: supported visible water definitions and perspective shading are required.";
             if (NativeWaterFoamError is { } error) return error;
@@ -28,6 +33,8 @@ public sealed unsafe partial class SceneRenderer
         }
         if (NativeWaterContactPreviewEnabled && !NativeWaterContactPreviewReady)
             return $"Native contact preview is pending at frame {NativeWaterContactFrame}/{NativeWaterContactTargetFrame}; capture budget is eight draws /300ms, at most four contact steps each.";
+        if (NativeVegetationFastEnabled && NativeVegetationWindEnabled && !NativeVegetationWindBridgeSuspended && !NativeVegetationFastReady)
+            return $"Native FAST field capture is pending at frame {NativeVegetationFastFrames}/{NativeVegetationFastTargetFrame}; budget is eight draws /300ms, at most four field steps each. {NativeVegetationFastStatus}";
         return $"Native foam capture replay is pending at frame {NativeWaterFoamFrame}/{NativeWaterFoamTargetFrame}; capture budget is eight draws /300ms, at most four simulation steps each. Reduce the requested frame or use the viewport projection.";
     }
 }

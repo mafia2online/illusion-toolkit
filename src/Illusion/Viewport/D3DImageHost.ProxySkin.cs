@@ -8,7 +8,12 @@ namespace Illusion.Viewport;
 public sealed partial class D3DImageHost
 {
     internal Action<int>? BeforePreparedSkinGpuAllocation { get; set; }
+    internal Action<int>? BeforePreparedMorphGpuAllocation { get; set; }
     internal string? ImportLinkedProxySkin(SceneNode owner,SceneNode parent,string resource,ulong guid,out SceneNode? created)
+        => ImportLinkedProxyDeformed(owner,parent,resource,guid,out created,false);
+    internal string? ImportLinkedProxyMorph(SceneNode owner,SceneNode parent,string resource,ulong guid,out SceneNode? created)
+        => ImportLinkedProxyDeformed(owner,parent,resource,guid,out created,true);
+    private string? ImportLinkedProxyDeformed(SceneNode owner,SceneNode parent,string resource,ulong guid,out SceneNode? created,bool morph)
     {
         created=null;
         if(IsLoading||Rnd is null||BridgeEditedCount>0)return "Wait for loading and end the Blender session before importing a prepared skin.";
@@ -17,7 +22,7 @@ public sealed partial class D3DImageHost
             return "Select a prepared fine owner and a Kit in the same document.";
         var resources=document.Graph.Resources.Select(native=>native.CaptureRevertedMutationCheckpoint()).ToArray();
         var bounds=document.NativeLods?.CaptureRevertedBoundsCheckpoint();var cache=document.CaptureRevertedRigCacheCheckpoint();var carries=document.CaptureRevertedCarryCheckpoint();
-        var mutation=document.ImportPreparedSkinnedProp(resource,guid,source,target,out var refusal);
+        var mutation=morph?document.ImportPreparedMorphProp(resource,guid,source,target,out var refusal):document.ImportPreparedSkinnedProp(resource,guid,source,target,out refusal);
         if(mutation is null)return refusal??"The native prepared skin could not be imported.";
         var meshes=new List<GpuMesh>();IEditAction? rigs=null;
         SceneNode row;SceneNode[] additional;
@@ -27,11 +32,11 @@ public sealed partial class D3DImageHost
             additional=mutation.AdditionalRoots.Select(native=>SceneTree.BuildSceneTree(native,leaves)).ToArray();
             foreach(var leaf in leaves)if(leaf.Pending is{}pending)
             {
-                BeforePreparedSkinGpuAllocation?.Invoke(meshes.Count+1);
+                (morph?BeforePreparedMorphGpuAllocation:BeforePreparedSkinGpuAllocation)?.Invoke(meshes.Count+1);
                 var mesh=Rnd.CreateMeshGpu(pending);meshes.Add(mesh);mesh.Owner=leaf;leaf.Mesh=mesh;leaf.Pending=null;
             }
             var targets=new[]{mutation.Root}.Concat(mutation.AdditionalRoots).Select(native=>native.Source).OfType<IFrameNode>().ToHashSet();
-            BeforePreparedSkinGpuAllocation?.Invoke(meshes.Count+1);
+            (morph?BeforePreparedMorphGpuAllocation:BeforePreparedSkinGpuAllocation)?.Invoke(meshes.Count+1);
             rigs=Streamer.PrepareCompiledRigAuthoringRefresh(documentNode,targets,new[]{row}.Concat(additional).ToArray());
         }
         catch(Exception exception)

@@ -60,6 +60,6 @@ internal sealed class WaterContactPreviewWindow : Window
     private void Inspect() => ShowResult(_host.SetNativeWaterContactPreview(null, null, null, null, false, false, out var info), info);
     private void ShowResult(string? refusal, WaterContactInfo? info)
     {
-        _status.Text = refusal ?? (info is null ? "Native water is unavailable." : $"Enabled {info.Enabled}; ready {info.Ready}; contact frame {info.Frame}/{info.TargetFrame}; joint foam {info.JointFoam}, foam frame {info.FoamFrame}/{info.FoamTargetFrame}. ZERO capture: {info.ZeroHeightCapture}; ZERO wind: {info.ZeroWind}.\n{info.Error ?? info.Scope}");
+        _status.Text = refusal ?? (info is null ? "Native water is unavailable." : $"Enabled {info.Enabled}; ready {info.Ready}; contact frame {info.Frame}/{info.TargetFrame}; joint foam {info.JointFoam}, foam frame {info.FoamFrame}/{info.FoamTargetFrame}. Auxiliary foam source coupled: {info.AuxiliaryFoamSourceCoupled}; ZERO wind: {info.ZeroWind}.\n{info.Error ?? info.Scope}");
     }
 }

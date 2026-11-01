@@ -10,9 +10,14 @@ public static class CompiledSurfaceMaterials
     {
         var info = MafiaMaterials.GetMaterialInfo(material, 0, 0);
         if (info.ShaderId is 0x60912B19336956E4 or 0x46543D8110365C3A)
+        {
+            var values = info.Parameters.FirstOrDefault(p => p.ParamId == "D219")?.Values;
+            var fast = info.ShaderId == 0x60912B19336956E4 && values is { Count: >= 2 } && values.Take(2).All(float.IsFinite)
+                ? new NativeVegetationFastMaterial(new(values[0], values[1])) : null;
             return new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
                 Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One)
-            { NativeVegetationWindRefusal = info.ShaderId == 0x60912B19336956E4 ? "Native FAST vegetation wind texture simulation is unavailable." : "Native SMALL vegetation deformation is not verified." };
+            { NativeVegetationFast = fast, NativeVegetationWindRefusal = info.ShaderId == 0x60912B19336956E4 ? "Native FAST vegetation requires an explicit ready field context." : "Native SMALL vegetation adapter is not verified." };
+        }
         if (CompiledVegetationMaterials.Read(info) is { } wind)
             return new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
                 Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One) { NativeVegetationWind = wind };

@@ -65,7 +65,7 @@ public sealed partial class CompiledEffectPointPreview
     private sealed class TimelineParticle
     {
         public uint Seed;
-        public int AtlasFrame;
+        public int AtlasFrame,TextureFlags;
         public float Age, Life, NormalizedAge, Emission, HalfSize, SizeFactor, SpeedVariation, PreviousSpeed, Rotation, SpinDirection;
         public Vector3 Position, Velocity, Direction;
         public bool Outside;
@@ -106,6 +106,8 @@ public sealed partial class CompiledEffectPointPreview
         var particleRandom = new PointRandom(seed);
         var integerRandom = new PointIntegerRandom(seed);
         var atlas = _texture is null ? default : ReadFixedAtlas(_graph,_texture);
+        float preload = atlas is { Animated: true,RespectPreload: true }
+            ? System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(_graph.Data(_graph.Field(_generation,"m_Data")!)[24..]) : 0;
         uint Next()
         {
             state = unchecked(state * 214013 + 2531011);
@@ -244,18 +246,22 @@ public sealed partial class CompiledEffectPointPreview
                     float variation = Float(_graph, _rotation, "m_InitialRotationVar") * .01745329238474369f;
                     rotation = Rand() * variation + initial;
                 }
-                // Native Texture::ParticleOnce1019D4DB0 consumes one shared Win32 float
-                // draw even for a fixed one-cell atlas. Its independent integer RNG has no
-                // observable output in this supported fixed-frame/no-mirror subset.
-                int atlasFrame = 0;
-                if (_texture is not null)
+                // Native Texture::ParticleOnce1019D4DB0 advances both shared random
+                // streams even for a fixed atlas; the integer draw selects random starts.
+                int atlasFrame = 0,textureFlags = 0;
+                if (atlas is { } textureAtlas)
                 {
-                    uint textureRandom = integerRandom.Next(); Rand();
-                    atlasFrame = Bool(_graph,_texture,"m_RandomStartFrame") ? (int)((textureRandom >> 8) & 127) % atlas.Frames : atlas.Start;
+                    uint textureRandom = integerRandom.Next();
+                    // Native Particle.Init clears the flags; Texture.ParticleOnce only clears
+                    // the reverse bit, never sets it. Its float random draw still advances.
+                    _ = Rand();
+                    if (textureAtlas.Mirror is 1 or 3 && (textureRandom & 1) != 0) textureFlags |= 16;
+                    if (textureAtlas.Mirror == 2 && (textureRandom & 1) != 0 || textureAtlas.Mirror == 3 && (textureRandom & 2) != 0) textureFlags |= 32;
+                    atlasFrame = textureAtlas.RandomStart ? (int)((textureRandom >> 8) & 127) % textureAtlas.Frames : textureAtlas.Start;
                 }
                 var velocity = direction * speed;
                 velocity = new(velocity.X == 0 ? 0 : velocity.X, velocity.Y == 0 ? 0 : velocity.Y, velocity.Z == 0 ? 0 : velocity.Z);
-                particles.Add(new() { Seed = particleSeed, AtlasFrame = atlasFrame, Rotation = rotation, SpinDirection = spinDirection, Direction = direction, PreviousSpeed = speed, SpeedVariation = speedVariation, Velocity = velocity, Age = initialAge, Life = life, NormalizedAge = 0, Emission = clock, HalfSize = half, SizeFactor = sizeFactor, Position = position });
+                particles.Add(new() { Seed = particleSeed, AtlasFrame = atlasFrame, TextureFlags = textureFlags, Rotation = rotation, SpinDirection = spinDirection, Direction = direction, PreviousSpeed = speed, SpeedVariation = speedVariation, Velocity = velocity, Age = initialAge, Life = life, NormalizedAge = 0, Emission = clock, HalfSize = half, SizeFactor = sizeFactor, Position = position });
                 initialAge += spacing;
             }
         }
@@ -267,6 +273,7 @@ public sealed partial class CompiledEffectPointPreview
         for (int i = 0; i < output.Length; i++)
         {
             var p = particles[i];
+            var atlasSample = atlas?.Sample(p.AtlasFrame,p.TextureFlags,p.Age,p.Life,p.NormalizedAge,preload) ?? (p.AtlasFrame,p.AtlasFrame,(byte)0);
             var variation = Vector(_graph.Data(_graph.Field(_color,"m_ColorVariation")!),0,3) * .01f;
             // Original Color::RenderParticle uses VPAND followed directly by MULPS, with
             // no integer-to-float conversion. Preserve its bit reinterpretation exactly.
@@ -278,8 +285,9 @@ public sealed partial class CompiledEffectPointPreview
             var emissivity = _emissivity is null ? Vector3.Zero : Value(_emissivity, "m_Emissivity", p.Emission, p.NormalizedAge);
             uint packed = unchecked((uint)(int)(emissivity.X * 255) << 16 | (uint)(int)(emissivity.Y * 255) << 8 | (uint)(int)(emissivity.Z * 255));
             emissivity = new((packed >> 16 & 255) / 255f, (packed >> 8 & 255) / 255f, (packed & 255) / 255f);
-            output[i] = new(p.Position, new(p.HalfSize), new(color, opacity), _texture is null ? uv : atlas.Regions[p.AtlasFrame], emissivity, p.NormalizedAge, p.Life)
-            { AtlasFrame = p.AtlasFrame, Rotation = p.Rotation, AgeSeconds = p.Age, EmissionTime = p.Emission, Velocity = p.Velocity };
+            output[i] = new(p.Position, new(p.HalfSize), new(color, opacity), atlas is null ? uv : atlas.Region(atlasSample.Item1,p.TextureFlags), emissivity, p.NormalizedAge, p.Life)
+            { AtlasFrame = atlasSample.Item1,AtlasNextFrame = atlasSample.Item2,AtlasBlend = atlasSample.Item3 / 255f,
+                AtlasMirror = p.TextureFlags >> 4 & 3,NextAtlasUv = atlas?.Region(atlasSample.Item2,p.TextureFlags),Rotation = p.Rotation, AgeSeconds = p.Age, EmissionTime = p.Emission, Velocity = p.Velocity };
         }
         return new(GenerationId, MaterialGuid, clock, output) { Frames = steps, RandomState = state, EmitterShape = EmitterShape, EmitterSize = EmitterSize, EmitterDimensions = EmitterDimensions,
             IntegerRandomStateX = integerRandom.X, IntegerRandomStateY = integerRandom.Y };

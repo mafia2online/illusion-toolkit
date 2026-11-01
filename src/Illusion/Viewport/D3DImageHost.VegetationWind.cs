@@ -12,6 +12,7 @@ public sealed partial class D3DImageHost
         if (Rnd is not { } renderer) return "Wait for the viewport to initialize.";
         bool command = enabled is not null || time is not null || globalWind is not null || localPosition is not null || localParameters is not null;
         if (command && IsLoading) return "Wait for scene loading to finish before changing vegetation wind.";
+        if (renderer.NativeVegetationFastEnabled && time is < 0) return "FAST field replay requires a clock within0..600seconds; disable FAST before using a negative LARGE clock.";
         if (globalWind is not null && globalWind.Length != 4 || localPosition is not null && localPosition.Length != 3
             || localParameters is not null && localParameters.Length != 2) return "Provide globalWind[4], localPosition[3], localParameters[2].";
         if (enabled == true && !renderer.NativeVegetationWindEnabled

@@ -150,10 +150,15 @@ public sealed partial class CompiledEffectPointPreview
             var texture = Find(0x21AF2099);
             if (texture is not null)
             {
-                if (Bool(graph, texture, "m_Animated") || Integer(graph, texture, "m_RandomMirror") != 0
-                    || !timeline && (Bool(graph, texture, "m_RandomStartFrame") || Integer(graph, texture, "m_Rows") != 1 || Integer(graph, texture, "m_Cols") != 1))
-                    throw new NotSupportedException("Native texture preview supports static nonmirrored atlases; seedless bursts require one cell without random start.");
-                if (timeline) ReadFixedAtlas(graph,texture);
+                int mirror = Integer(graph,texture,"m_RandomMirror");
+                if (mirror is < 0 or > 3 || !timeline && mirror != 0
+                    || !timeline && (Bool(graph, texture,"m_Animated") || Bool(graph, texture, "m_RandomStartFrame") || Integer(graph, texture, "m_Rows") != 1 || Integer(graph, texture, "m_Cols") != 1))
+                    throw new NotSupportedException("Native texture preview supports single-cycle atlases and mirror modes0–3; seedless bursts require one static cell without random start or mirroring.");
+                if (timeline && ReadFixedAtlas(graph,texture) is { Animated: true,RespectPreload: true })
+                {
+                    float preload = BinaryPrimitives.ReadSingleLittleEndian(data[24..]);
+                    if (!float.IsFinite(preload) || preload < 0) throw new NotSupportedException("Native atlas preload must be finite and nonnegative.");
+                }
             }
             if (timeline && texture is not null && new[] { size, position, speed, rotation }.OfType<CompiledElement>()
                 .Any(op => Array.IndexOf(operators, op) > Array.IndexOf(operators, texture)))
@@ -232,6 +237,10 @@ public sealed partial class CompiledEffectPointPreview
 public sealed record EffectPointParticle(Vector3 Position, Vector2 HalfSize, Vector4 Color, Vector4 AtlasUv, Vector3 Emissivity, float NormalizedAge, float Lifetime)
 {
     public int AtlasFrame { get; init; }
+    public int AtlasNextFrame { get; init; }
+    public float AtlasBlend { get; init; }
+    public int AtlasMirror { get; init; }
+    public Vector4? NextAtlasUv { get; init; }
     public float Rotation { get; init; }
     public float AgeSeconds { get; init; }
     public float EmissionTime { get; init; }

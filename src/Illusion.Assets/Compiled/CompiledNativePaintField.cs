@@ -36,6 +36,14 @@ public sealed class CompiledNativePaintField
     public Vector3 BoundsMax { get; }
     public CompiledPaintCellContext Context { get; }
     public bool NativeBakedBins { get; }
+    /// <summary>Native CreateMeshCell retains aggregate-cell LOD bounds independently of its material-selected matrix route.</summary>
+    public bool AggregateCellLod { get; internal init; }
+    /// <summary>Actual configured template metadata or the explicitly identified native-stock fallback.</summary>
+    public string TemplateFlagSource { get; internal init; } = "";
+    /// <summary>Native minimum/maximum uniform scale used by either proven orientation route.</summary>
+    public Vector2 PlacementScales => new(_minimumScale, _maximumScale);
+    /// <summary>Native authored normal-alignment factor.</summary>
+    public float NormalAlignment => _normalAlignment;
     public CompiledPaintSpacingSettings? Spacing { get; }
     public string? RenderRefusal { get; }
 
@@ -119,6 +127,7 @@ public sealed class CompiledNativePaintField
             if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             var point = ordered[i];
             matrices[i] = NativeBakedBins ? CompiledPaintTransform.ComputeBakedBin(point.Position, point.Normal, _minimumScale, _maximumScale, _normalAlignment, i / chunk)
+                : AggregateCellLod ? CompiledPaintTransform.ComputeInstancedCell(point.Position, point.Normal, _minimumScale, _maximumScale, _normalAlignment)
                 : CompiledPaintTransform.Compute(point.Position, point.Normal, _minimumScale, _maximumScale, _normalAlignment);
         }
         return new(address, RenderRefusal is null && matrices.Length > 0 ? _makeMeshes(matrices, address) : [], candidates, matrices.Length, NativeBakedBins, true, RenderRefusal) { Points = ordered };

@@ -33,17 +33,20 @@ public sealed partial class D3DImageHost
         if (BridgeEditedCount > 0) return "End the Blender edit session before previewing morphs.";
         if (!Tree.IsInScene(node)) return "The selected object is no longer in this scene.";
         if (weights.Count == 0) { ClearMorphGeometry(); return null; }
-        if ((node.GeometrySource ?? node.Source) is not ICompiledMeshSource { GeometryBinding: { } binding } source
+        if ((node.GeometrySource ?? node.Source) is not ICompiledMeshSource { GeometryBinding: { } binding }
             || node.OwningDocumentNode()?.Source is not CompiledSceneDocument document)
             return "Select a compiled visual with a native morph atlas.";
         var prepared = new List<(Illusion.Rendering.Gpu.GpuMesh Original, Illusion.Rendering.Gpu.GpuMesh Preview)>();
         try
         {
+            var targets = document.GetPreparedMorphBindings(binding, out var targetRefusal);
+            if (targetRefusal is not null) return targetRefusal;
             foreach (var mesh in Rnd.Meshes)
-                if (mesh.Owner is SceneNode row && ReferenceEquals(row.GeometrySource ?? row.Source, source))
+                if (mesh.Owner is SceneNode row && (row.GeometrySource ?? row.Source) is ICompiledMeshSource { GeometryBinding: { } targetBinding }
+                    && targets.Contains(targetBinding))
                     prepared.Add((mesh, Rnd.CreateMeshGpu(animated
-                        ? document.PreviewAnimatedMorph(binding, row.Lod, weights)
-                        : document.PreviewMorph(binding, row.Lod, weights))));
+                        ? document.PreviewAnimatedMorph(targetBinding, row.Lod, weights)
+                        : document.PreviewMorph(targetBinding, row.Lod, weights))));
             if (prepared.Count == 0) return "The selected visual has no uploaded geometry.";
             ClearMorphGeometry();
             if (weights.Values.Any(v => v != 0))
@@ -61,8 +64,26 @@ public sealed partial class D3DImageHost
             return "Finish loading and end the Blender edit session before binding animation.";
         var source = node.GeometrySource ?? node.Source;
         var frame = source is ICompiledMeshSource mesh ? mesh.CanonicalFrame : source;
-        if (frame is not CompiledSceneDocument.CompiledFrameNode compiled || compiled.VehicleRig is not { } rig)
+        if (frame is not CompiledSceneDocument.CompiledFrameNode compiled || compiled.VehicleRig is null)
             return "The selected object has no compiled render skeleton.";
+        var ownerDocument = node.OwningDocumentNode()?.Source as CompiledSceneDocument;
+        var targets = ownerDocument?.GetPreparedAnimationTargets(compiled, out _) ?? [compiled];
+        if (targets.Count == 0) return "The prepared animation targets no longer satisfy their native mapping invariants.";
+        var rigs = targets.Select(target => target.VehicleRig).OfType<CompiledVehicleRig>().ToArray();
+        if (rigs.Length != targets.Count) return "A synchronized animation target has no render skeleton.";
+        void RefreshRigs()
+        {
+            foreach (var target in targets)
+            {
+                var row = Tree.Roots.SelectMany(Walk).FirstOrDefault(row => ReferenceEquals(row.Source, target) && row.Kind is not ("Mesh" or "Lod"));
+                if (row is not null) Streamer.RefreshRig(row);
+            }
+        }
+        static IEnumerable<SceneNode> Walk(SceneNode root)
+        {
+            yield return root;
+            foreach (var child in root.Children) foreach (var row in Walk(child)) yield return row;
+        }
         CompiledMorphAnimationBinding? morph = null;
         HavokAnimationPreview? previous = null;
         void SampleMorph(HavokAnimationPreview clip, float seconds)
@@ -83,8 +104,10 @@ public sealed partial class D3DImageHost
                 throw new NotSupportedException(refusal);
         }
         ClearMorphPreview();
-        preview.BindToSceneRig(rig, () => Streamer.RefreshRig(node),
-            () => !IsLoading && BridgeEditedCount == 0 && Tree.IsInScene(node) && ReferenceEquals(compiled.VehicleRig, rig), includeMorphs ? SampleMorph : null,
+        preview.BindToSceneRigs(rigs, RefreshRigs,
+            () => !IsLoading && BridgeEditedCount == 0 && Tree.IsInScene(node)
+                && targets.Select((target, index) => ReferenceEquals(target.VehicleRig, rigs[index])).All(valid => valid)
+                && (ownerDocument is null || ownerDocument.AreAnimationTargetsCurrent(compiled, targets)), includeMorphs ? SampleMorph : null,
             () => { _animationMorphActive = false; _boundAnimationPreview = null; ClearMorphGeometry(); });
         if (preview.BoundBones == 0) return preview.Status;
         _boundAnimationPreview = preview;
