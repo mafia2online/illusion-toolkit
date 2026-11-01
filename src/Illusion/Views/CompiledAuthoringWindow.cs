@@ -108,6 +108,22 @@ internal sealed class CompiledAuthoringWindow : Window
             if (_host.Rnd is { } renderer) renderer.NativeWaterPlaying = false;
             return null;
         }, "Water animation paused."));
+        panel.Children.Add(Button("Foam diffuse diagnostic", () =>
+        {
+            if (_host.ReloadNativeWaterFoamInputs(forceTextureRead: true) is { } refusal) return refusal;
+            if (_host.Rnd is not { } renderer) return "Viewport unavailable.";
+            if (renderer.SetNativeWaterFoam(true, "diffuse", 24, 1, true) is { } error) return error;
+            renderer.NativeWaterTime = .4f; renderer.NativeWaterPlaying = false; return null;
+        }, "Native foam diffuse diagnostic: fixed replay catches up at most four steps per draw; no native final lighting or SSR."));
+        panel.Children.Add(Button("Foam normal diagnostic", () =>
+        {
+            if (_host.ReloadNativeWaterFoamInputs(forceTextureRead: true) is { } refusal) return refusal;
+            if (_host.Rnd is not { } renderer) return "Viewport unavailable.";
+            if (renderer.SetNativeWaterFoam(true, "normals", 24, 1, true) is { } error) return error;
+            renderer.NativeWaterPlaying = false; return null;
+        }, "Native authored foam normals at the explicit deep-water material boundary."));
+        panel.Children.Add(Button("Foam diagnostic off", () => _host.Rnd?.SetNativeWaterFoam(false, null, null, null, false),
+            "Ordinary analytical water rendering restored."));
         panel.Children.Add(Button("Edit navigation vertices...", () =>
         {
             new CompiledNavigationVertexWindow(host) { Owner = this }.Show(); return null;

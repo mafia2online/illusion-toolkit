@@ -14,10 +14,10 @@ namespace Illusion.Rendering.Passes;
 /// <summary>Three-stage analytical water surface: definition UV raster, native analytical field,
 /// screen-ray grid. User-owned lookup/material inputs only. Toolkit lighting; no dynamic
 /// ripples, height/shoreline simulation, SSR, refraction or foam.</summary>
-public sealed unsafe class NativeWaterSurface : IDisposable
+public sealed unsafe partial class NativeWaterSurface : IDisposable
 {
     private const int FieldSize = 256;
-    private const int ConstantFloats = 212;
+    private const int ConstantFloats = 224;
     private readonly GpuContext _gpu;
     private readonly float[] _values = new float[ConstantFloats];
     private ComPtr<ID3D11Buffer> _constants, _vertices, _indices;
@@ -35,7 +35,15 @@ public sealed unsafe class NativeWaterSurface : IDisposable
     public bool SetFineNormalParameters(float scale, float intensity)
     {
         _fineParametersValid = float.IsFinite(scale) && float.IsFinite(intensity);
-        if (_fineParametersValid) { _fineScale = scale; _fineIntensity = intensity; }
+        if (_fineParametersValid)
+        {
+            _fineScale = scale; _fineIntensity = intensity;
+            if (_foamDetailParameters.Y != scale || _foamDetailParameters.W != intensity)
+            {
+                _foamDetailParameters.Y = scale; _foamDetailParameters.W = intensity;
+                InvalidateFoamSource(); _foamHasSignature = false;
+            }
+        }
         return FineNormalsEnabled;
     }
     public bool FineNormalsConfigured => FineNormalsEnabled;
@@ -63,11 +71,12 @@ public sealed unsafe class NativeWaterSurface : IDisposable
     private ComPtr<ID3D11DepthStencilView> _depthView;
     private FieldTarget? _mask, _color, _displacement, _normal, _flow;
     public int FlowPartsDrawn { get; private set; }
+    public int DefinitionPartsDrawn { get; private set; }
     private bool _disposed;
     public LightingConstants Lighting { get; set; } = LightingConstants.Default;
     public bool DebugNormals { get; set; }
     public bool ShowNormals { get => DebugNormals; set => DebugNormals = value; }
-    public const string Description = "Native analytical waves, camera-projected definition masks and screen-ray surface; toolkit lighting. Dynamic ripples/height, SSR, refraction and foam are absent.";
+    public const string Description = "Native analytical waves, camera-projected definition masks and screen-ray surface; toolkit lighting. Optional deep-water foam material diagnostic is OFF by default. Dynamic ripples, native final lighting/SSR and refraction are absent.";
 
     public NativeWaterSurface(GpuContext gpu, IReadOnlyList<ReadOnlyMemory<byte>> lookupMips)
     {
@@ -114,17 +123,18 @@ public sealed unsafe class NativeWaterSurface : IDisposable
     public int Render(SharedRenderTarget target, IEnumerable<GpuMesh> definitions, ReadOnlySpan<float> packed,
         Camera camera, float time, Vector3 lightDir, RenderMode mode)
     {
-        FlowPartsDrawn = 0;
+        FlowPartsDrawn = 0; DefinitionPartsDrawn = 0;
         if (!CanRender(camera, packed, mode) || !float.IsFinite(time)) return 0;
         var draws = definitions.SelectMany(mesh => mesh.Parts.Where(part => Supports(mesh, part)).Select(part => (Mesh: mesh, Part: part))).ToArray();
         if (draws.Length == 0) return 0;
+        DefinitionPartsDrawn = draws.Length;
         var ctx = _gpu.Context11;
         var mainViewport = new Viewport(0, 0, target.Width, target.Height, 0, 1);
-        var resources = stackalloc ID3D11ShaderResourceView*[6];
-        for (int i = 0; i < 6; i++) resources[i] = null;
+        var resources = stackalloc ID3D11ShaderResourceView*[9];
+        for (int i = 0; i < 9; i++) resources[i] = null;
         var renderTargets = stackalloc ID3D11RenderTargetView*[3];
         var samplers = stackalloc ID3D11SamplerState*[3]; samplers[0] = _wrapped.Handle; samplers[1] = _pointClamp.Handle; samplers[2] = _linearClamp.Handle;
-        var nullViews = stackalloc ID3D11ShaderResourceView*[6]; for (int i = 0; i < 6; i++) nullViews[i] = null;
+        var nullViews = stackalloc ID3D11ShaderResourceView*[9]; for (int i = 0; i < 9; i++) nullViews[i] = null;
         float* clear = stackalloc float[4]; for (int i = 0; i < 4; i++) clear[i] = 0;
         _values.AsSpan().Clear(); SetMatrix(16, camera.ViewProjection);
         SetVector(32, new(camera.Position, time));
@@ -179,19 +189,34 @@ public sealed unsafe class NativeWaterSurface : IDisposable
             }
             ctx.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null);
             ctx.PSSetShaderResources(0, 6, nullViews);
+            int extraDraws = AdvanceFoam(target, camera, draws, t => DrawFoamAnalytical(draws, t));
+            if (FoamEnabled) DrawFoamAnalytical(draws, FoamReady ? FoamFrame / 60f : time);
+            if (FoamReady && FoamEnabled)
+            {
+                SetVector(212, new(1, _foamMode, _foamOrigin.X, _foamOrigin.Y));
+                SetVector(216, _foamColor); SetVector(220, _foamDetailParameters);
+                resources[6] = _foam!.Output.Handle; resources[7] = _foamDetail.Handle; resources[8] = _foamNormal.Handle;
+            }
+            if (FoamEnabled)
+            {
+                ctx.RSSetState(_raster.Handle); ctx.OMSetDepthStencilState(_depthState.Handle, 0);
+                ctx.IASetPrimitiveTopology(D3DPrimitiveTopology.D3D11PrimitiveTopologyTrianglelist);
+                var restore = _constants.Handle; ctx.VSSetConstantBuffers(0, 1, &restore); ctx.PSSetConstantBuffers(0, 1, &restore);
+                ctx.PSSetSamplers(0, 3, samplers); ctx.VSSetSamplers(0, 3, samplers); Upload();
+            }
             var main = target.Rtv.Handle; ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
             resources[0] = _displacement.Resource.Handle; resources[1] = _normal.Resource.Handle; resources[2] = null; resources[3] = null;
             ctx.VSSetShaderResources(0, 6, resources); resources[0] = null; resources[1] = null; resources[2] = _color.Resource.Handle; resources[4] = _fineNoise.Handle; resources[5] = _flow.Resource.Handle;
-            ctx.PSSetShaderResources(0, 6, resources);
+            ctx.PSSetShaderResources(0, 9, resources);
             ctx.IASetInputLayout(_gridLayout.Handle); ctx.VSSetShader(_gridVs.Handle, null, 0); ctx.PSSetShader(_surfacePs.Handle, null, 0);
             var vertex = _vertices.Handle; uint stride = 4, offset = 0;
             ctx.IASetVertexBuffers(0, 1, &vertex, &stride, &offset); ctx.IASetIndexBuffer(_indices.Handle, Format.FormatR32Uint, 0);
             ctx.DrawIndexed(257 * 257 * 6, 0, 0);
-            return draws.Length * 2 + 1;
+            return draws.Length * 2 + 1 + extraDraws + (FoamEnabled ? draws.Length : 0);
         }
         finally
         {
-            ctx.VSSetShaderResources(0, 6, nullViews); ctx.PSSetShaderResources(0, 6, nullViews);
+            ctx.VSSetShaderResources(0, 9, nullViews); ctx.PSSetShaderResources(0, 9, nullViews);
             var main = target.Rtv.Handle; ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
         }
     }
@@ -309,6 +334,7 @@ public sealed unsafe class NativeWaterSurface : IDisposable
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
+        DisposeFoam();
         _mask?.Dispose(); _color?.Dispose(); _flow?.Dispose(); _displacement?.Dispose(); _normal?.Dispose(); _depthView.Dispose(); _depthTexture.Dispose();
         _constants.Dispose(); _vertices.Dispose(); _indices.Dispose(); _lookup.Dispose(); _fineNoise.Dispose(); _definitionLayout.Dispose(); _gridLayout.Dispose();
         _definitionVs.Dispose(); _gridVs.Dispose(); _definitionPs.Dispose(); _wavePs.Dispose(); _surfacePs.Dispose();

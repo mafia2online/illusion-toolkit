@@ -887,7 +887,11 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     /// undo/redo, so the Materials tab tiles and the editor window refresh. UI thread.</summary>
     public event Action? MaterialsChanged;
 
-    internal void RaiseMaterialsChanged() => MaterialsChanged?.Invoke();
+    internal void RaiseMaterialsChanged()
+    {
+        Rnd?.NotifyNativeWaterFoamSourceChanged();
+        MaterialsChanged?.Invoke();
+    }
 
     /// <inheritdoc cref="MaterialEditController.SetTexture"/>
     public bool SetMaterialTexture(ulong hash, string slotId, string textureName) =>
@@ -1631,6 +1635,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     // arriving, a scene reset, geometry pushed. Rebuilding it is one walk and one buffer upload.
     internal void RaiseSceneChanged()
     {
+        Rnd?.NotifyNativeWaterFoamSourceChanged();
         HitBoxes.Redraw();
         RefreshCompiledNavigation();
         SceneChanged?.Invoke();
@@ -1646,6 +1651,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
 
     internal void RaiseSelectionTransformChanged()
     {
+        Rnd?.NotifyNativeWaterFoamSourceChanged();
         CarCollisionEditing.RefreshOverlay();
         SelectionTransformChanged?.Invoke();
     }

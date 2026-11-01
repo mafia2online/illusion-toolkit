@@ -56,6 +56,9 @@ internal static partial class Mafia3Probes
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
             TestNativeWaterFoam(Check);
+            TestNativeWaterFoamContext(Check);
+            TestNativeWaterFoamSurface(Check);
+            TestNativeWaterFoamViewport(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);
@@ -218,6 +221,9 @@ internal static partial class Mafia3Probes
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
             TestNativeWaterFoam(Check);
+            TestNativeWaterFoamContext(Check);
+            TestNativeWaterFoamSurface(Check);
+            TestNativeWaterFoamViewport(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);

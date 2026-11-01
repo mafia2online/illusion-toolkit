@@ -23,6 +23,9 @@ cbuffer WaterConstants : register(b0)
     float4 SpecParams;
     float4 Gamma;
     float4 FineNormal;
+    float4 FoamState;
+    float4 FoamColor;
+    float4 FoamControls;
 };
 Texture2D<float4> Tex0 : register(t0);
 Texture2D<float4> Tex1 : register(t1);
@@ -30,6 +33,9 @@ Texture2D<float4> Tex2 : register(t2);
 Texture2D<float2> Lookup : register(t3);
 Texture2D<float4> FineNoise : register(t4);
 Texture2D<float4> FlowField : register(t5);
+Texture2D<float4> FoamHistory : register(t6);
+Texture2D<float4> FoamDetail : register(t7);
+Texture2D<float4> FoamNormal : register(t8);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
@@ -67,7 +73,7 @@ DefinitionTargets DefinitionPS(DefinitionOut input)
 }
 """;
 
-    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + NativeWaterFineNormalShader.Functions + """
+    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + NativeWaterFineNormalShader.Functions + NativeWaterFoamSurfaceShader.Functions + """
 struct WaveTargets { float4 Displacement:SV_Target0; float4 Normal:SV_Target1; };
 WaveTargets WavePS(DefinitionOut input)
 {
@@ -107,6 +113,15 @@ float4 SurfacePS(GridOut input):SV_Target
     float3 normal = normalize(input.Normal);
     float4 flowData = FlowField.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0);
     float2 flow = flowData.z > .5 ? flowData.xy * 2 - 1 : 0;
+    if (FoamState.x != 0)
+    {
+        NativeWaterFoamMaterial foam = EvaluateNativeWaterFoamMaterial(FineNoise, FoamDetail, FoamNormal,
+            FoamHistory, Wrapped, LinearClamp, input.WorldPosition.xy - input.Displacement * .5,
+            normal, flow, CameraTime.w, 0, FoamState.zw, 0, FoamColor, FoamControls, 1, 1, 0);
+        if (FoamState.y == 1) return float4(foam.Normal * .5 + .5, 1);
+        if (FoamState.y == 2) return float4(saturate(foam.Roughness).xxx, 1);
+        return float4(foam.DiffuseDiagnostic, 1);
+    }
     if (FineNormal.z != 0) normal = EvaluateNativeWaterFineNormal(FineNoise, Wrapped,
         input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y, flow);
     if (FieldData.z != 0) return float4(normal * .5 + .5, 1);

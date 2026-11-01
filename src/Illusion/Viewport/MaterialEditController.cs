@@ -333,14 +333,25 @@ internal sealed class MaterialEditController
     private void AfterMaterialChanged(ulong hash)
     {
         RefreshMeshesUsing(hash);
+        RefreshNativeWaterRuntime(hash);
+        _host.RaiseMaterialsChanged();
+        _host.RaiseDirtyChanged();
+    }
+
+    private void RefreshNativeWaterRuntime(ulong hash)
+    {
         if (hash == 0x1A227ADE53424B91 && _host.Rnd is { } renderer)
         {
             var detail = Catalog.GetParameter(hash, "D267");
             renderer.SetNativeWaterFineNormalParameters(detail is { Count: >= 4 } ? detail[1] : float.NaN,
                 detail is { Count: >= 4 } ? detail[3] : float.NaN);
         }
-        _host.RaiseMaterialsChanged();
-        _host.RaiseDirtyChanged();
+        if (hash is 0x1A227ADE53424B91 or 0x0B2348BC137E2526 or 0x304B24141FEA1E4B && _host.Rnd is { } foamRenderer)
+        {
+            foamRenderer.InvalidateNativeWaterFoamInputs();
+            if (foamRenderer.NativeWaterFoamEnabled && _host.ReloadNativeWaterFoamInputs() is { } foamError)
+                _host.RaiseNotice(foamError, isError: true);
+        }
     }
 
     // A rename moves the material to a new hash identity: parts bound to either side re-resolve (the old
@@ -349,6 +360,8 @@ internal sealed class MaterialEditController
     {
         RefreshMeshesUsing(oldHash);
         RefreshMeshesUsing(newHash);
+        RefreshNativeWaterRuntime(oldHash);
+        if (newHash != oldHash) RefreshNativeWaterRuntime(newHash);
         _host.RaiseMaterialsChanged();
         _host.RaiseDirtyChanged();
     }

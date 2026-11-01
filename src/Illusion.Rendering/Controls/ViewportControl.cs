@@ -581,12 +581,25 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     /// or null before the pipeline exists. The picture is independent of the control's own size, and the
     /// surface the window shows is left alone — the next regular frame restores the camera's aspect.
     /// </summary>
-    public byte[]? CaptureFrame(int width, int height)
+    public byte[]? CaptureFrame(int width, int height, CancellationToken cancellationToken = default)
     {
         if (Renderer == null || _gpu == null) return null;
         using var target = new SharedRenderTarget(_gpu, width, height);
-        Renderer.Render(target);
-        return RenderTargetReadback.Read(_gpu, target);
+        float aspect = Renderer.Camera.AspectRatio; bool playing = Renderer.NativeWaterPlaying;
+        bool projectionChanged = _surface?.Target is not { } actual || actual.Width != width || actual.Height != height;
+        try
+        {
+            Renderer.NativeWaterPlaying = false;
+            if (Renderer.RenderForCapture(target, cancellationToken) is { } refusal) throw new InvalidOperationException(refusal);
+            return RenderTargetReadback.Read(_gpu, target);
+        }
+        finally
+        {
+            Renderer.NativeWaterPlaying = playing;
+            projectionChanged |= Renderer.Camera.AspectRatio != aspect;
+            Renderer.Camera.AspectRatio = aspect;
+            if (projectionChanged && Renderer.NativeWaterFoamEnabled) Renderer.NotifyNativeWaterFoamSourceChanged();
+        }
     }
 
     private void UpdateCameraTween(float dt)

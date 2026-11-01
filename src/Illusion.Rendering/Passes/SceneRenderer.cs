@@ -13,7 +13,7 @@ namespace Illusion.Rendering.Passes;
 /// Draws loaded Mafia meshes into a shared target: the shared Mafia-look shader,
 /// depth test, free camera. Culling is disabled (winding in SDS is not guaranteed).
 /// </summary>
-public sealed unsafe class SceneRenderer : IDisposable
+public sealed unsafe partial class SceneRenderer : IDisposable
 {
     private readonly GpuContext _gpu;
     private readonly MeshShader _shader;
@@ -51,11 +51,38 @@ public sealed unsafe class SceneRenderer : IDisposable
     public bool NativeWaterActive => NativeWaterEnabled && _nativeWaterActive && NativeWaterPartsDrawn > 0;
     public int NativeWaterPartsDrawn { get; private set; }
     public int NativeWaterFlowPartsDrawn => NativeWaterActive ? _nativeWater?.FlowPartsDrawn ?? 0 : 0;
+    public bool NativeWaterFoamConfigured => _nativeWater?.FoamConfigured ?? false;
+    public bool NativeWaterFoamEnabled => _nativeWater?.FoamEnabled ?? false;
+    public bool NativeWaterFoamReady => NativeWaterActive && _nativeWater?.FoamReadyFor(Camera) == true;
+    public int NativeWaterFoamFrame => _nativeWater?.FoamFrame ?? 0;
+    public int NativeWaterFoamTargetFrame => _nativeWater?.FoamTargetFrame ?? 0;
+    public uint NativeWaterFoamSeed => _nativeWater?.FoamSeed ?? 1;
+    public string NativeWaterFoamMode => _nativeWater?.FoamMode ?? "diffuse";
+    public string? NativeWaterFoamError => _nativeWater?.FoamError;
+    public bool ConfigureNativeWaterFoam(byte[]? detail, byte[]? normal, NativeWaterFoamParameters parameters, Vector4 color, Vector4 controls)
+        => _nativeWater?.ConfigureFoam(detail, normal, parameters, color, controls) ?? false;
+    public string? SetNativeWaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset)
+    {
+        if (_nativeWater is not { } water) return "Native water is unavailable.";
+        if (enabled == true && frame is null && _nativeWaterTime > 600) return "Foam replay is bounded to 600 seconds /36000frames.";
+        if (enabled == true && !water.FoamEnabled && frame is null) frame = (int)MathF.Round(_nativeWaterTime * 60);
+        string? refusal = water.SetFoam(enabled, mode, frame, seed, reset);
+        if (refusal is null && frame is { } f) _nativeWaterTime = f / 60f;
+        return refusal;
+    }
+    /// <summary>O(1), CPU-only; the next draw resets at most once before its four-step budget.</summary>
+    public void NotifyNativeWaterFoamSourceChanged() => _nativeWater?.InvalidateFoamSource();
+    public void InvalidateNativeWaterFoamInputs() => _nativeWater?.InvalidateFoamInputs();
     public float NativeWaterTime
     {
         get => _nativeWaterTime;
-        set => _nativeWaterTime = float.IsFinite(value) && value >= 0 && value <= 1000000
-            ? value : throw new ArgumentOutOfRangeException(nameof(value), "Water preview time must be finite in 0–1000000 seconds.");
+        set
+        {
+            if (!float.IsFinite(value) || value < 0 || value > 1000000 || (NativeWaterFoamEnabled && value > 600))
+                throw new ArgumentOutOfRangeException(nameof(value), "Water time must be finite in 0–1000000 seconds (foam replay: 0–600).");
+            if (NativeWaterFoamEnabled) _nativeWater!.SetFoam(null, null, (int)MathF.Round(value * 60), null, false);
+            _nativeWaterTime = value;
+        }
     }
     public bool NativeWaterNormals
     {
@@ -72,7 +99,15 @@ public sealed unsafe class SceneRenderer : IDisposable
     public void AdvanceNativeWater(float seconds)
     {
         if (NativeWaterPlaying && float.IsFinite(seconds) && seconds > 0)
-            _nativeWaterTime = (_nativeWaterTime + seconds) % 1000000;
+        {
+            if (NativeWaterFoamEnabled)
+            {
+                _nativeWaterTime = MathF.Min(600, _nativeWaterTime + seconds);
+                _nativeWater!.SetFoam(null, null, (int)MathF.Round(_nativeWaterTime * 60), null, false);
+                if (_nativeWaterTime == 600) NativeWaterPlaying = false;
+            }
+            else _nativeWaterTime = (_nativeWaterTime + seconds) % 1000000;
+        }
     }
 
     /// <summary>Whether to show debug loading-zone boxes (UI toggle). Off by default.</summary>
@@ -433,8 +468,9 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// last user is among the disposed meshes are evicted by the library's lease accounting.</summary>
     public void Clear()
     {
+        NotifyNativeWaterFoamSourceChanged(); _nativeWaterActive = false; NativeWaterPartsDrawn = 0;
         _selectionMeshes.Clear(); // the selected mesh is among those about to be disposed
-        foreach (GpuMesh m in _meshes) m.Dispose();
+        foreach (GpuMesh m in _meshes) { m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged; m.Dispose(); }
         _meshes.Clear();
         DrawnMeshes = 0;
         TotalTriangles = 0;
@@ -450,13 +486,16 @@ public sealed unsafe class SceneRenderer : IDisposable
         var set = new HashSet<GpuMesh>(meshes);
         if (set.Count == 0) return 0;
         _selectionMeshes.RemoveAll(set.Contains); // drop any selected mesh that's being disposed
-        return _meshes.RemoveAll(m =>
+        int removed = _meshes.RemoveAll(m =>
         {
             if (!set.Remove(m)) return false;
             TotalTriangles -= (long)m.TriangleCount * m.InstanceCount;
+            m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged;
             m.Dispose();
             return true;
         });
+        if (removed != 0) NotifyNativeWaterFoamSourceChanged();
+        return removed;
     }
 
     /// <summary>Removes meshes from the render list WITHOUT disposing them (for an undoable delete — the edit
@@ -470,9 +509,11 @@ public sealed unsafe class SceneRenderer : IDisposable
         _meshes.RemoveAll(m =>
         {
             if (!set.Contains(m)) return false;
+            m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged;
             TotalTriangles -= (long)m.TriangleCount * m.InstanceCount;
             return true;
         });
+        NotifyNativeWaterFoamSourceChanged();
     }
 
     /// <summary>Restores the relative draw order of surviving meshes after an undoable replacement.
@@ -498,6 +539,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         ArgumentNullException.ThrowIfNull(mesh);
         mesh.SetInstances(_gpu, instances, drawDistances);
+        NotifyNativeWaterFoamSourceChanged();
     }
 
     /// <summary>Registers an already-created mesh with the render list. UI thread only —
@@ -506,8 +548,11 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         // Meshes arriving during bridge edit mode (streaming, undo re-attach) join the ghost side
         // unless they belong to the edited set.
+        gm.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged;
+        gm.RenderInputsChanged += NotifyNativeWaterFoamSourceChanged;
         gm.Ghost = _ghostFocus != null && !_ghostFocus.Contains(gm);
         _meshes.Add(gm);
+        NotifyNativeWaterFoamSourceChanged();
         TotalTriangles += (long)gm.TriangleCount * gm.InstanceCount;
     }
 
@@ -581,7 +626,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             _nativeWater!.Lighting = lighting;
             int waterDrawCalls = _nativeWater!.Render(target, _meshes, _nativeWaterWaves!, Camera, NativeWaterTime, lightDir, Mode);
             DrawCalls += waterDrawCalls;
-            NativeWaterPartsDrawn = waterDrawCalls > 0 ? (waterDrawCalls - 1) / 2 : 0;
+            NativeWaterPartsDrawn = waterDrawCalls > 0 ? _nativeWater.DefinitionPartsDrawn : 0;
             drawn += NativeWaterPartsDrawn;
             // Water owns several MRTs, shaders and texture slots. Restore the ordinary mesh pipeline
             // before blended surfaces, ghost meshes and overlays continue drawing.
@@ -976,7 +1021,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     public void Dispose()
     {
         _nativeWater?.Dispose();
-        foreach (GpuMesh m in _meshes) m.Dispose();
+        foreach (GpuMesh m in _meshes) { m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged; m.Dispose(); }
         _meshes.Clear();
         Textures.Dispose();
         _sampler.Dispose();

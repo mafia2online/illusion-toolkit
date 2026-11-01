@@ -55,7 +55,14 @@ public sealed unsafe class GpuMesh : IDisposable
     public ComPtr<ID3D11Buffer> VertexBuffer;
     public ComPtr<ID3D11Buffer> IndexBuffer;
     public Matrix4x4 World;
-    public bool Visible = true;
+    private bool _visible = true;
+    private bool _ghost;
+    internal event Action? RenderInputsChanged;
+    public bool Visible
+    {
+        get => _visible;
+        set { if (_visible == value) return; _visible = value; RenderInputsChanged?.Invoke(); }
+    }
     public NativeLodMembership? NativeLod { get; private set; }
     public bool NativeLodVisible { get; private set; } = true;
     public bool RenderVisible => Visible && NativeLodVisible;
@@ -64,7 +71,11 @@ public sealed unsafe class GpuMesh : IDisposable
 
     /// <summary>Bridge edit mode: true renders the mesh desaturated/translucent in a separate pass
     /// (it is NOT part of the set currently open in Blender). Managed by SceneRenderer.SetGhostFocus.</summary>
-    public bool Ghost;
+    public bool Ghost
+    {
+        get => _ghost;
+        set { if (_ghost == value) return; _ghost = value; RenderInputsChanged?.Invoke(); }
+    }
     public Vector3 BoundsMin;
     public Vector3 BoundsMax;
     public int TriangleCount;
@@ -580,6 +591,7 @@ public sealed unsafe class GpuMesh : IDisposable
         if (_disposed) return; // several owners may dispose (render list, delete edit, stale load) — once only
         _vertexPreview?.Dispose();
         _disposed = true;
+        RenderInputsChanged = null;
         VertexBuffer.Dispose();
         IndexBuffer.Dispose();
         if (Instanced) InstanceBuffer.Dispose();

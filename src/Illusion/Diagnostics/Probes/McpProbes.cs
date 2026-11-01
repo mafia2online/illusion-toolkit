@@ -46,6 +46,7 @@ internal static class McpProbes
         "effect_point_sample", "effect_point_preview", "effect_point_screenshot", "effect_point_timeline",
         "water_wave_preview", "water_wave_screenshot",
         "water_surface",
+        "water_foam",
         "morph_channels", "morph_preview",
         // EffectsTools
         "parse_effects_file", "parse_effects_from_bytes",

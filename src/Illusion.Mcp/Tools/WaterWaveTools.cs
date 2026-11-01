@@ -6,8 +6,21 @@ namespace Illusion.Mcp.Tools;
 [McpServerToolType]
 public sealed class WaterWaveTools
 {
+    [McpServerTool(Name = "water_foam")]
+    [Description("Opt in to an isolated Mafia III viewport foam diagnostic. Default OFF. mode=diffuse shows the native authored T000/D265 foam term; normals/roughness show native pre-lighting material inputs at an explicit deep-water boundary. Actual opaque depth, water-definition height and analytical displacement feed fixed 1/60 simulation with explicit seed and zero dynamic ripples. Frame seek0–36000 is bounded to at most4steps per render; check foamReady and actual/target frames. Backward seek/reset/seed/source changes reset deterministic history. No SSR, native final lighting or white fallback is invented; no resource writes.")]
+    public static async Task<string> Foam(IEditorSession editor, IUiThreadMarshal ui, bool? enabled = null,
+        string? mode = null, int? frame = null, uint? seed = null, bool reset = false)
+    {
+        try
+        {
+            WaterSurfaceInfo? result = null;
+            if (await ui.RunAsync(() => editor.WaterFoam(enabled, mode, frame, seed, reset, out result)) is { } refusal) return ToolResult.Invalid(refusal);
+            return ToolResult.Json(new { success = true, scope = "native foam material diagnostic; deep-water input boundary, no native final lighting/SSR", surface = result });
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
     [McpServerTool(Name = "water_surface")]
-    [Description("Inspect or control the Mafia III analytical water surface in the current viewport. Optional enabled, playing, time and normals change only preview state; reload rereads wave configuration and lookup files. Actual defining triangles supply native mask/color UVs and screen-space reconstruction. Active requires supported visible definitions, inputs and perspective shading. Uses toolkit lighting; dynamic ripples, shoreline height, SSR, foam and refraction are excluded. No game resources are modified.")]
+    [Description("Inspect or control the Mafia III analytical water surface in the current viewport. Optional enabled, playing, time and normals change only preview state; reload rereads wave configuration and lookup files. Actual defining triangles supply native mask/color UVs and screen-space reconstruction. Active requires supported visible definitions, inputs and perspective shading. Uses toolkit lighting; dynamic ripples, SSR and refraction are excluded. Foam is a separate opt-in water_foam material diagnostic, default OFF; its replay is bounded to600seconds. No game resources are modified.")]
     public static async Task<string> Surface(IEditorSession editor, IUiThreadMarshal ui, bool? enabled = null,
         bool? playing = null, float? time = null, bool? normals = null, bool reload = false)
     {

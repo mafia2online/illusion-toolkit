@@ -28,7 +28,7 @@ public sealed unsafe class NativeWaterFoam : IDisposable
 {
     public const int Size = 512;
     private readonly GpuContext _gpu;
-    private readonly NativeWaterFoamParameters _parameters;
+    private NativeWaterFoamParameters _parameters;
     private ComPtr<ID3D11VertexShader> _vertex;
     private ComPtr<ID3D11PixelShader> _generation, _blur, _history;
     private ComPtr<ID3D11Buffer> _materialBuffer, _viewBuffer, _globalBuffer, _decayBuffer, _blurBuffer;
@@ -77,13 +77,22 @@ public sealed unsafe class NativeWaterFoam : IDisposable
         return values.All(float.IsFinite) && p.Breaking.X > 0 && p.Noise.X > 0 && p.Decay.X > 0 && p.Decay.Y > 0;
     }
 
+    /// <summary>Reuses compiled programs and texture storage; valid parameter changes restart history.</summary>
+    public bool SetParameters(NativeWaterFoamParameters parameters)
+    {
+        if (_disposed || !ValidParameters(parameters)) return false;
+        if (_parameters == parameters) return true;
+        _parameters = parameters; Reset(Seed); return true;
+    }
+
     /// <summary>Resets clock/history and regenerates native low-byte CRT-random 32-cube noise with an
     /// explicit seed. This reproduces the procedure, not the live game's prior global CRT state.</summary>
     public void Reset(uint seed)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _gpu.Context11.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null);
-        Unbind(); _noise.Dispose(); _noise = CreateNoise(seed);
+        Unbind();
+        if (_noise.Handle == null || seed != Seed) { _noise.Dispose(); _noise = CreateNoise(seed); }
         float* clear = stackalloc float[4]; for (int i = 0; i < 4; i++) clear[i] = 0;
         foreach (var field in _histories) _gpu.Context11.ClearRenderTargetView(field!.View.Handle, clear);
         _gpu.Context11.ClearRenderTargetView(_current!.View.Handle, clear);

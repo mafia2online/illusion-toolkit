@@ -145,6 +145,8 @@ public interface IEditorSession
     string? WaterWaveScreenshot(string path) => "analytical water preview is unavailable";
     string? WaterSurface(bool? enabled, bool? playing, float? time, bool? normals, bool reload, out WaterSurfaceInfo? result)
     { result = null; return "native water surface preview is unavailable"; }
+    string? WaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset, out WaterSurfaceInfo? result)
+    { result = null; return "native water foam diagnostics are unavailable"; }
     string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
         => "whole-map streaming control is unavailable";
     string? NativeLodStatus(out IReadOnlyList<NativeLodInfo> groups)
