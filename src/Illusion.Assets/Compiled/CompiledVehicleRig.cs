@@ -21,6 +21,7 @@ public sealed class CompiledVehicleRig
     private readonly CompiledElement _rest, _inverse, _parents, _names, _bounds;
     private readonly Bone[] _bones;
     private Matrix4x4[]? _animationPose;
+    internal Func<string?>? MutationRefusal { get; set; }
     internal long AuthoredRevision { get; private set; }
     public int Count => _bones.Length;
     public IReadOnlyList<Matrix4x4> LiveRest { get; }
@@ -112,6 +113,7 @@ public sealed class CompiledVehicleRig
     }
     private void SetLocal(int index, Matrix4x4 matrix)
     {
+        if (MutationRefusal?.Invoke() is { } refusal) throw new EditRefusedException(refusal);
         byte[] value = CompiledSceneDocument.WriteMatrix(matrix);
         if (!Matrix4x4.Invert(matrix, out _) || value.Chunk(4).Any(b => !float.IsFinite(BinaryPrimitives.ReadSingleLittleEndian(b))))
             throw new ArgumentException("A bone transform must be finite and invertible.", nameof(matrix));
@@ -124,6 +126,7 @@ public sealed class CompiledVehicleRig
     /// <summary>Append a new unused bone without changing any existing bone index or inverse bind.</summary>
     public CompiledResource Append(string name, int parent, Matrix4x4 local, float reach)
     {
+        if (MutationRefusal?.Invoke() is { } refusal) throw new EditRefusedException(refusal);
         if (Count >= 255 || parent < 0 || parent >= Count) throw new ArgumentOutOfRangeException(nameof(parent));
         if (string.IsNullOrWhiteSpace(name) || name.Contains('\0') || Find(name) >= 0) throw new ArgumentException("Bone name is empty or already present.", nameof(name));
         if (!Matrix4x4.Invert(local, out _) || CompiledSceneDocument.WriteMatrix(local).Chunk(4)

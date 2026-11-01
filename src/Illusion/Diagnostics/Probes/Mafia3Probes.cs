@@ -29,6 +29,8 @@ internal static partial class Mafia3Probes
             TestStructuralEdits(Check);
             TestPropImport(Check);
             TestCompiledAuthoring(Check);
+            TestCompiledSceneCollections(Check);
+            TestCompiledSceneCollectionGuards(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
@@ -43,6 +45,9 @@ internal static partial class Mafia3Probes
             TestCompiledEffects(Check);
             TestCompiledWaterWaves(Check);
             TestCompiledWaterWavePreview(Check);
+            TestCompiledWaterGeometryAuthoring(Check);
+            TestNativeWaterSurface(Check);
+            TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);
             TestCompiledAnimationPreviewUi(Check);
@@ -177,6 +182,8 @@ internal static partial class Mafia3Probes
             TestStructuralEdits(Check);
             TestPropImport(Check);
             TestCompiledAuthoring(Check);
+            TestCompiledSceneCollections(Check);
+            TestCompiledSceneCollectionGuards(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
@@ -191,6 +198,9 @@ internal static partial class Mafia3Probes
             TestCompiledEffects(Check);
             TestCompiledWaterWaves(Check);
             TestCompiledWaterWavePreview(Check);
+            TestCompiledWaterGeometryAuthoring(Check);
+            TestNativeWaterSurface(Check);
+            TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);
             TestCompiledAnimationPreviewUi(Check);

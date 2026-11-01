@@ -147,6 +147,8 @@ public sealed partial class CompiledSceneDocument
         { refusal = "Inline-owned geometry needs an ownership transfer before isolation."; return null; }
         var frame = _frames.Values.FirstOrDefault(f => Components(f.Element).SelectMany(c => Graph.Items(Graph.Field(c, "m_Visuals")))
             .Any(i => ReferenceEquals(Graph.Resolve(i), visual)));
+        if (frame is not null && ValidateSceneCollectionMutation(frame) is { } guardRefusal)
+        { refusal = guardRefusal; return null; }
         var binding = _visualGeometry.FirstOrDefault(p => ReferenceEquals(p.Key.Visual, visual)).Value?.GeometryBinding ?? frame?.GeometryBinding;
         if (binding is null) { refusal = "This visual has no loaded geometry binding."; return null; }
         int levels = Graph.Items(Graph.Field(Graph.Resolve(Graph.Field(visual, "m_MeshSet")), "m_LODs")).Count;

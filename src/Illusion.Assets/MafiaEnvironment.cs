@@ -32,8 +32,9 @@ public static class MafiaEnvironment
 
     public static string CityFolder => Path.Combine(ArchiveFolder, "city");
 
-    /// <summary>The shared <c>city_univers</c> SDS (AREA volumes + <c>missions\CITY\cityareas.bin</c>).</summary>
-    public static string CityUniversSds => Path.Combine(ArchiveFolder, "city_univers", "city_univers.sds");
+    /// <summary>The base world's shared city archive. Mafia III's Bourbon archive uses its native bc_ prefix.</summary>
+    public static string CityUniversSds => Path.Combine(ArchiveFolder, "city_univers",
+        Profile.Variant == GameVariant.MafiaIII ? "bc_city_univers.sds" : "city_univers.sds");
 
     /// <summary>Resolves <c>cityareas.bin</c> (AREA targets + district adjacency) out of <c>city_univers</c>, or null.</summary>
     public static string? TryGetCityAreasBin(Func<FileInfo, string> ensureExtracted)

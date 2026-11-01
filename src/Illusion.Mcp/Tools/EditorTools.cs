@@ -31,6 +31,38 @@ public sealed class EditorTools
 
     private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(250);
 
+    [McpServerTool(Name = "editor_stream_world")]
+    [Description("Open the map editor and set its Whole map streaming control. Loads shared city layers and streams districts around the camera. enabled=false returns to the selected area. Refuses Blender sessions or replacement of unsaved edits unless discardUnsavedEdits=true. Camera and scene tools then target the map editor.")]
+    public static async Task<string> StreamWorld(IEditorSession editor, IUiThreadMarshal ui, bool enabled = true,
+        bool winter = false, bool discardUnsavedEdits = false, int timeoutSeconds = 180)
+    {
+        try
+        {
+            if (await ui.RunAsync(editor.EnsureEditor) is { } cannotOpen) return ToolResult.Invalid(cannotOpen);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+            while ((await ui.RunAsync(editor.Areas)).Count == 0)
+            {
+                if (DateTime.UtcNow > deadline) return ToolResult.Invalid("The editor's area catalogue did not finish loading.");
+                await Task.Delay(Poll);
+            }
+            if (await ui.RunAsync(() => editor.StreamWorld(enabled, winter, discardUnsavedEdits)) is { } refusal)
+                return ToolResult.Invalid(refusal);
+            deadline = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 5, 600));
+            DateTime quietSince = DateTime.UtcNow; int lastMeshes = -1;
+            while (true)
+            {
+                await Task.Delay(Poll);
+                var status = await ui.RunAsync(editor.Status);
+                if (status.Loading || status.Meshes != lastMeshes) { quietSince = DateTime.UtcNow; lastMeshes = status.Meshes; }
+                if (!status.Loading && status.Meshes > 0 && DateTime.UtcNow - quietSince > TimeSpan.FromSeconds(1.5))
+                    return ToolResult.Json(new { success = true, status });
+                if (DateTime.UtcNow > deadline)
+                    return ToolResult.Json(new { success = false, error = "Timed out waiting for map streaming.", status });
+            }
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
+
     [McpServerTool(Name = "editor_status")]
     [Description("What the map editor is doing: whether it is open, the loaded area, whether it is still loading, the selection, unsaved edits, archives waiting for a Build, how many objects are open in Blender, and the shading mode. Call this first.")]
     public static async Task<string> Status(IEditorSession editor, IUiThreadMarshal ui)

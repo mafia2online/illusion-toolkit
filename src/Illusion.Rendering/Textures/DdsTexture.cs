@@ -9,7 +9,7 @@ namespace Illusion.Rendering.Textures;
 /// Minimal DDS loader → ID3D11ShaderResourceView. Supports BC1/2/3 (DXT1/3/5), BC4/5 (ATI1/2),
 /// the extended DX10 header and 32-bit uncompressed. Loads only mip0 (enough for the viewport).
 /// </summary>
-public static unsafe class DdsTexture
+public static unsafe partial class DdsTexture
 {
     private const uint DXT1 = 0x31545844, DXT3 = 0x33545844, DXT5 = 0x35545844, DX10 = 0x30315844;
     private const uint ATI1 = 0x31495441, ATI2 = 0x32495441;

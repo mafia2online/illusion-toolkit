@@ -45,6 +45,7 @@ public sealed partial class CompiledSceneDocument
 
     private bool WriteMaterials(CompiledElement scene, IReadOnlyList<ulong[]> table, CompiledElement? visual = null)
     {
+        if (_frames.TryGetValue(scene, out var frame) && ValidateSceneCollectionMutation(frame) is not null) return false;
         var elements = EditableMaterialTables(scene, visual);
         if (table.Count == 0 || table.Count != elements.Count) return false;
         var replacements = new List<(CompiledElement Element, byte[] Bytes)>();
@@ -108,6 +109,7 @@ public sealed partial class CompiledSceneDocument
 
         public bool SetSlotTable(IReadOnlyList<ulong[]> table)
         {
+            if (SceneCollectionMutationRefusal is not null) return false;
             var elements = _document.EditableMaterialTables(Element);
             if (table.Count == 0 || table.Count != elements.Count) return false;
             var replacements = new List<(CompiledElement Element, byte[] Bytes)>();

@@ -284,6 +284,10 @@ internal sealed class MaterialEditController
     /// </summary>
     public string? SlotAssignObstacle(SceneNode node)
     {
+        var source = node.GeometrySource ?? node.Source;
+        var frame = source is Assets.Compiled.ICompiledMeshSource visual ? visual.CanonicalFrame : source as IFrameNode;
+        if (frame is not null && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
+            && document.ValidateSceneCollectionMutation(frame) is { } refusal) return refusal;
         if ((node.GeometrySource ?? node.Source) is Assets.Compiled.ICompiledMeshSource && (node.GeometrySource ?? node.Source) is IMaterialSlotEditor compiled
             && compiled.GetSlotTable().Count == 0)
             return "Select an independent compiled visual with supported face groups.";

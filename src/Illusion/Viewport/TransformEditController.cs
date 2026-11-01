@@ -220,8 +220,11 @@ internal sealed class TransformEditController
     }
 
     private static string? ValidateTransform(SceneNode node, IFrameNode frame, Matrix4x4 local)
-        => node.OwningDocumentNode()?.Source is CompiledSceneDocument document
-            ? document.ValidateVehiclePlacementTransform(frame is ICompiledMeshSource visual ? visual.CanonicalFrame : frame, local) : null;
+    {
+        if (node.OwningDocumentNode()?.Source is not CompiledSceneDocument document) return null;
+        var canonical = frame is ICompiledMeshSource visual ? visual.CanonicalFrame : frame;
+        return document.ValidateSceneCollectionMutation(canonical) ?? document.ValidateVehiclePlacementTransform(canonical, local);
+    }
 
     private void CaptureGizmoBaseline()
     {

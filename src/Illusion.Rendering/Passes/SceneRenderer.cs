@@ -36,6 +36,38 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
+    private NativeWaterSurface? _nativeWater;
+    private float[]? _nativeWaterWaves;
+    private bool _nativeWaterActive;
+    private float _nativeWaterTime;
+    public bool NativeWaterEnabled { get; set; } = true;
+    public bool NativeWaterPlaying { get; set; }
+    public bool NativeWaterAvailable => _nativeWater is not null;
+    public bool NativeWaterActive => NativeWaterEnabled && _nativeWaterActive && NativeWaterPartsDrawn > 0;
+    public int NativeWaterPartsDrawn { get; private set; }
+    public float NativeWaterTime
+    {
+        get => _nativeWaterTime;
+        set => _nativeWaterTime = float.IsFinite(value) && value >= 0 && value <= 1000000
+            ? value : throw new ArgumentOutOfRangeException(nameof(value), "Water preview time must be finite in 0–1000000 seconds.");
+    }
+    public bool NativeWaterNormals
+    {
+        get => _nativeWater?.ShowNormals ?? false;
+        set { if (_nativeWater is not null) _nativeWater.ShowNormals = value; }
+    }
+    public void ConfigureNativeWater(ReadOnlySpan<float> waves, IReadOnlyList<ReadOnlyMemory<byte>> lookupMips)
+    {
+        if (waves.Length != 128 || waves.ToArray().Any(value => !float.IsFinite(value)))
+            throw new ArgumentException("Expected 128 finite native wave constants.", nameof(waves));
+        var fresh = new NativeWaterSurface(_gpu, lookupMips);
+        _nativeWater?.Dispose(); _nativeWater = fresh; _nativeWaterWaves = waves.ToArray();
+    }
+    public void AdvanceNativeWater(float seconds)
+    {
+        if (NativeWaterPlaying && float.IsFinite(seconds) && seconds > 0)
+            _nativeWaterTime = (_nativeWaterTime + seconds) % 1000000;
+    }
 
     /// <summary>Whether to show debug loading-zone boxes (UI toggle). Off by default.</summary>
     public bool ShowZones { get; set; }
@@ -513,6 +545,9 @@ public sealed unsafe class SceneRenderer : IDisposable
         // read for one thing (the view vector the specular and the rim are shaped by), so it is the SHADING eye:
         // under a parallel projection the highlight is a uniform band, not a glare fanning out of a point.
         var lighting = Lighting with { CameraPos = new Vector4(Camera.ShadingEye, 0f) };
+        _nativeWaterActive = NativeWaterEnabled && _nativeWaterWaves is not null
+            && _nativeWater?.CanRender(Camera, _meshes, _nativeWaterWaves, Mode) == true;
+        NativeWaterPartsDrawn = 0;
 
         int drawn = 0;
         DrawCalls = 0;
@@ -521,6 +556,20 @@ public sealed unsafe class SceneRenderer : IDisposable
         // Opaque pass: everything not ghosted, then its instanced counterpart.
         drawn += DrawMeshPass(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false, PartFilter.Solid);
         drawn += RenderInstanced(ctx, viewProj, frustum, lightDir, baseColor, lighting, ghostPass: false);
+
+        if (_nativeWaterActive)
+        {
+            _nativeWater!.Lighting = lighting;
+            int waterDrawCalls = _nativeWater!.Render(target, _meshes, _nativeWaterWaves!, Camera, NativeWaterTime, lightDir, Mode);
+            DrawCalls += waterDrawCalls;
+            NativeWaterPartsDrawn = waterDrawCalls > 0 ? (waterDrawCalls - 1) / 2 : 0;
+            drawn += NativeWaterPartsDrawn;
+            // Water owns several MRTs, shaders and texture slots. Restore the ordinary mesh pipeline
+            // before blended surfaces, ghost meshes and overlays continue drawing.
+            ctx.OMSetRenderTargets(1, &rtv, target.Dsv); ctx.RSSetViewports(1, &vp);
+            ctx.RSSetState(wire ? _rasterWire : _raster); ctx.OMSetDepthStencilState(_depthState, 0);
+            _shader.Bind(ctx); ctx.PSSetSamplers(0, 1, &samp); _surfaceBindings.Invalidate();
+        }
 
         // Blended pass: the parts whose material the game alpha-blends (glass), over everything opaque —
         // depth-tested so walls still hide them, never written so one pane does not hide the next. Not sorted:
@@ -711,6 +760,7 @@ public sealed unsafe class SceneRenderer : IDisposable
             if (mesh.IsSkinned) mesh.RefreshPose();
             if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // frustum culling
             if (!HasPart(mesh, filter)) continue;
+            if (_nativeWaterActive && !ghostPass && mesh.Parts.All(part => NativeWaterSurface.Supports(mesh, part))) continue;
             drawn++;
 
             var consts = new FrameConstants
@@ -755,6 +805,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             foreach (GpuPart part in mesh.Parts)
             {
+                if (_nativeWaterActive && !ghostPass && NativeWaterSurface.Supports(mesh, part)) continue;
                 _surfaceBindings.Bind(ctx, part, mesh.HasDecalUvs);
                 if (filter != PartFilter.All && part.Blended != (filter == PartFilter.Blended)) continue;
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
@@ -905,6 +956,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
     public void Dispose()
     {
+        _nativeWater?.Dispose();
         foreach (GpuMesh m in _meshes) m.Dispose();
         _meshes.Clear();
         Textures.Dispose();

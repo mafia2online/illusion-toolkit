@@ -78,6 +78,7 @@ public sealed partial class CompiledSceneDocument
         for (var ancestor = parent; ancestor is not null; ancestor = ancestor.ParentFrame)
             if (ReferenceEquals(ancestor, child)) return false;
         if (ReferenceEquals(child.ParentFrame, parent)) return true;
+        if (ValidateSceneCollectionMutation(child) is not null || parent is not null && ValidateSceneCollectionMutation(parent) is not null) return false;
 
         var oldContainer = child.ParentFrame is { } oldParent ? Hierarchy(oldParent) : null;
         var newContainer = parent is not null ? Hierarchy(parent) : null;

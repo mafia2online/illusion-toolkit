@@ -22,12 +22,12 @@ public partial class ResourceEditorWindow
             { MessageBox.Show(this, ex.Message, "Native particle curves", MessageBoxButton.OK, MessageBoxImage.Information); }
         };
         tools.Items.Add(item);
-        var points = new MenuItem { Header = "Native point-burst preview…" };
+        var points = new MenuItem { Header = "Native particle preview…" };
         points.Click += (_, _) =>
         {
             try { OpenEffectPointPreview(); }
             catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or NotSupportedException or ArgumentException)
-            { MessageBox.Show(this, ex.Message, "Native point bursts", MessageBoxButton.OK, MessageBoxImage.Information); }
+            { MessageBox.Show(this, ex.Message, "Native particle preview", MessageBoxButton.OK, MessageBoxImage.Information); }
         };
         tools.Items.Add(points);
     }

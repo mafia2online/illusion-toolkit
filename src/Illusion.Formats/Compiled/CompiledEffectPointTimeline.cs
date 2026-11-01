@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Illusion.Formats.Compiled;
 
-/// <summary>Native ordered fixed-step replay of one stationary point generation. External effect
+/// <summary>Native ordered fixed-step replay of one stationary point or interior-plane generation. External effect
 /// scheduling, emitter motion, child spawning and particle lighting are outside this isolated clock.</summary>
 public sealed class CompiledEffectPointTimeline
 {
@@ -10,14 +10,16 @@ public sealed class CompiledEffectPointTimeline
     private readonly CompiledElement _generation;
     public ulong GenerationId => _generation.ObjectId;
     public ulong MaterialGuid { get; }
-    private CompiledEffectPointTimeline(CompiledGraph graph, CompiledElement generation, ulong material)
-    { _graph = graph; _generation = generation; MaterialGuid = material; }
+    public string EmitterShape { get; }
+    public Vector2 EmitterSize { get; }
+    private CompiledEffectPointTimeline(CompiledGraph graph, CompiledElement generation, CompiledEffectPointPreview config)
+    { _graph = graph; _generation = generation; MaterialGuid = config.MaterialGuid; EmitterShape = config.EmitterShape; EmitterSize = config.EmitterSize; }
 
     public static bool TryCreate(CompiledGraph graph, CompiledElement generation, out CompiledEffectPointTimeline? preview, out string? refusal)
     {
         preview = null;
         if (!CompiledEffectPointPreview.TryCreateTimeline(graph, generation, out var config, out refusal)) return false;
-        preview = new(graph, generation, config!.MaterialGuid);
+        preview = new(graph, generation, config!);
         return true;
     }
 
@@ -189,6 +191,9 @@ public sealed partial class CompiledEffectPointPreview
                 if (!float.IsFinite(half)) throw new NotSupportedException("Native point size overflowed the finite preview range.");
                 // Even speed zero has native direction-based newborn subframe displacement.
                 var position = Vector3.Zero;
+                // Native Position::ParticleOnce1019DBB70 consumes two LCG draws after Scale.
+                if (_planeSize is { } extent)
+                    position = new(Rand() * (extent.X * .5f), Rand() * (extent.Y * .5f), 0);
                 var direction = Vector3.Zero;
                 float speed = 0;
                 if (_speed is not null)
@@ -198,7 +203,8 @@ public sealed partial class CompiledEffectPointPreview
                     {
                         direction = NativePointConeDirection(symmetric, unit, divergence);
                         var offset = direction * initialAge;
-                        position = new(offset.X == 0 ? 0 : offset.X, offset.Y == 0 ? 0 : offset.Y, offset.Z == 0 ? 0 : offset.Z);
+                        position = _planeSize.HasValue ? position + offset
+                            : new(offset.X == 0 ? 0 : offset.X, offset.Y == 0 ? 0 : offset.Y, offset.Z == 0 ? 0 : offset.Z);
                     }
                     speed = (Scalar(_speed, "m_Speed") + speedVariation * Scalar(_speed, "m_SpeedVar"))
                         * Scalar(_speed, "m_SpeedMultiplier");
@@ -226,7 +232,7 @@ public sealed partial class CompiledEffectPointPreview
             output[i] = new(p.Position, new(p.HalfSize), new(color, opacity), uv, emissivity, p.NormalizedAge, p.Life)
             { AgeSeconds = p.Age, EmissionTime = p.Emission, Velocity = p.Velocity };
         }
-        return new(GenerationId, MaterialGuid, clock, output) { Frames = steps, RandomState = state };
+        return new(GenerationId, MaterialGuid, clock, output) { Frames = steps, RandomState = state, EmitterShape = EmitterShape, EmitterSize = EmitterSize };
         }
         return new(Step, Snapshot);
     }

@@ -10,8 +10,8 @@ internal static partial class Mafia3Probes
     {
         var graph = document.Graph;
         var library = new CompiledEffectLibraryData(graph);
-        check("native point timeline preflight accepts14 verified generations", library.Effects.SelectMany(library.Generations)
-            .Count(g => CompiledEffectPointTimeline.TryCreate(graph, g, out _, out _)) == 14);
+        check("native point/plane timeline preflight accepts20 verified generations", library.Effects.SelectMany(library.Generations)
+            .Count(g => CompiledEffectPointTimeline.TryCreate(graph, g, out _, out _)) == 20);
         var generation = graph.Objects[0x1065E033E7A12ADD];
         var resource = graph.Owner(generation); var before = resource.ToArray();
         check("native continuous random-rate point generation is available", CompiledEffectPointTimeline.TryCreate(graph, generation, out var timeline, out _));
@@ -58,5 +58,6 @@ internal static partial class Mafia3Probes
         check("continuous point timeline rejects invalid step values", refused);
         check("continuous point timeline never changes compiled bytes", resource.ToArray().AsSpan().SequenceEqual(before));
         VerifyCompiledEffectMotion(document, check);
+        VerifyCompiledEffectPlane(document, check);
     }
 }

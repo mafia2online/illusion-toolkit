@@ -418,6 +418,13 @@ public sealed unsafe class GpuMesh : IDisposable
 
     private static ComPtr<ID3D11ShaderResourceView>[]? AcquireSurface(TextureLibrary textures, SurfaceMaterial? surface, List<TextureLease> leases)
     {
+        if (surface?.NativeWaterDefinition is { } water)
+        {
+            var views = new ComPtr<ID3D11ShaderResourceView>[8];
+            views[0] = textures.AcquireMipmapped(water.ColorTexture, leases);
+            views[1] = textures.AcquireMipmapped(water.MaskTexture, leases);
+            return views;
+        }
         if (surface is { Layers: < 0 } && (surface.VehicleDirt is not null || surface.VehicleDecal is not null))
         {
             var result = new ComPtr<ID3D11ShaderResourceView>[8];

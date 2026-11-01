@@ -53,6 +53,9 @@ public sealed partial class CompiledMeshBinding
             return $"m3:{frame.GeometryArchivePath}:{identity}:rig";
         }
     }
+    private string? MutationRefusal => (_frame as ICompiledMeshSource)?.CanonicalFrame is CompiledSceneDocument.CompiledFrameNode frame
+        ? frame.SceneCollectionMutationRefusal : null;
+
     public int LodCount => _graph.Items(_graph.Field(_graph.Resolve(_graph.Field(_visual, "m_MeshSet")), "m_LODs")).Count;
 
     private Context Read(int lod)
@@ -199,6 +202,8 @@ public sealed partial class CompiledMeshBinding
 
     public BridgeMeshApplier.ApplyResult? TryApply(MeshObjectPayload payload, int lod, out string? reason)
     {
+        if (MutationRefusal is { } refusal)
+        { reason = refusal; return null; }
         try
         {
             if ((payload.BoneIndices.Length != 0 || payload.BoneWeights.Length != 0) && payload.SkeletonId is null)

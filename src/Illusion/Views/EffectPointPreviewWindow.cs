@@ -56,11 +56,11 @@ public sealed class EffectPointPreviewWindow : Window
 
     public EffectPointPreviewWindow(CompiledSceneDocument document)
     {
-        Document = document; Title = "Mafia III isolated point generations"; Width = 820; Height = 660;
+        Document = document; Title = "Mafia III isolated particle generations"; Width = 820; Height = 660;
         foreach (var generation in document.Graph.NodesOfType(0x46DE2E52))
             if (CompiledEffectPointPreview.TryCreate(document.Graph, generation, out _, out _) || CompiledEffectPointTimeline.TryCreate(document.Graph, generation, out _, out _))
             { _ids.Add(generation.ObjectId); _generations.Items.Add(generation.ObjectId.ToString("X16")); }
-        if (_ids.Count == 0) throw new NotSupportedException("This library has no verified point generations.");
+        if (_ids.Count == 0) throw new NotSupportedException("This library has no verified point or plane generations.");
         foreach (string folder in document.Graph.Resources.Select(r => Path.GetDirectoryName(r.Path)!).Distinct(StringComparer.OrdinalIgnoreCase))
             foreach (var row in XElement.Load(Path.Combine(folder, "SDSContent.xml")).Elements("ResourceEntry"))
                 if (row.Element("Type")?.Value == "Texture" && ulong.TryParse(row.Attribute("FileHash")?.Value, out ulong hash)
@@ -89,7 +89,7 @@ public sealed class EffectPointPreviewWindow : Window
         Loaded += (_, _) =>
         {
             try { _gpu = new(); _renderer = new(_gpu); _target = new(_gpu, 720, 480); _last = DateTime.UtcNow; _timer.Start(); Draw(); }
-            catch (Exception ex) { _gpuFailure = "Point preview GPU: " + ex.Message; _status.Text = _gpuFailure; }
+            catch (Exception ex) { _gpuFailure = "Particle preview GPU: " + ex.Message; _status.Text = _gpuFailure; }
         };
         Closed += (_, _) =>
         {
@@ -123,7 +123,7 @@ public sealed class EffectPointPreviewWindow : Window
     /// <summary>Preflights and commits a request. Long seeks remain pending; await WaitForReadyAsync before consuming the frame.</summary>
     public void Configure(ulong generation, float time, bool timeline = false, int frames = 0, float step = 1 / 60f, uint seed = 1, string plane = "xz", float zoom = 1)
     {
-        if (_closed) throw new InvalidOperationException("The point preview is closed.");
+        if (_closed) throw new InvalidOperationException("The particle preview is closed.");
         if (plane is not ("xz" or "xy" or "yz") || !float.IsFinite(zoom) || zoom < .1f || zoom > 10) throw new ArgumentException("Choose plane xz/xy/yz and zoom between .1 and 10.");
         if (!float.IsFinite(time) || time < 0 || time > 3600 || frames < 0 || frames > 36000 || !float.IsFinite(step) || step <= 0 || step > 1)
             throw new ArgumentOutOfRangeException(nameof(time));
@@ -220,17 +220,17 @@ public sealed class EffectPointPreviewWindow : Window
             {
                 var state = await Dispatcher.InvokeAsync<(bool Done, string? Error)>(() =>
                 {
-                    if (_closed) return (Done: true, Error: (string?)"The point preview closed while replaying.");
-                    if (request != _request || view != _viewRevision) return (true, "The point preview configuration changed while replaying.");
+                    if (_closed) return (Done: true, Error: (string?)"The particle preview closed while replaying.");
+                    if (request != _request || view != _viewRevision) return (true, "The particle preview configuration changed while replaying.");
                     if (!Matches(revisions)) { _replayCancellation.Cancel(); _session = null; Fail("Particle sources changed while replaying; retry the preview."); return (true, _failure); }
                     if (_failure is not null) return (true, _failure);
                     if (_pending && clock.Elapsed > TimeSpan.FromSeconds(45)) { _replayCancellation.Cancel(); _session = null; Fail("Point replay timed out; request a nearer frame or fewer particles."); return (true, _failure); }
                     if (_pending) Draw();
-                    return _pending ? (false, (string?)null) : (true, _failure ?? (Snapshot is null ? "No evaluated point frame is available." : _gpuFailure));
+                    return _pending ? (false, (string?)null) : (true, _failure ?? (Snapshot is null ? "No evaluated particle frame is available." : _gpuFailure));
                 }, DispatcherPriority.Background);
                 if (state.Done) return state.Error;
             }
-            catch (TaskCanceledException) { return "The point preview dispatcher closed while replaying."; }
+            catch (TaskCanceledException) { return "The particle preview dispatcher closed while replaying."; }
             await Task.Delay(1).ConfigureAwait(false);
         }
     }
@@ -262,7 +262,7 @@ public sealed class EffectPointPreviewWindow : Window
             MafiaMaterials.EnsureLoaded();
             var texture = MafiaMaterials.Collection?.FindByHash(Snapshot.MaterialGuid)?.GetTextureByID("T000");
             TexturePath = texture is null ? null : _textures.GetValueOrDefault(texture.Hash) ?? TextureSearchIndex.FindPath(texture.String);
-            _status.Text = $"{Snapshot.Particles.Count} particles at {Snapshot.Time:0.000}s{(_timeline.IsChecked == true ? $" / frame {Snapshot.Frames}" : "")}; material {Snapshot.MaterialGuid:X16}. Native isolated local operators; toolkit unlit atlas/alpha shading, without effect hierarchy or native particle pixel shaders."
+            _status.Text = $"{Snapshot.EmitterShape}: {Snapshot.Particles.Count} particles at {Snapshot.Time:0.000}s{(_timeline.IsChecked == true ? $" / frame {Snapshot.Frames}" : "")}; material {Snapshot.MaterialGuid:X16}. Native isolated local operators; toolkit unlit atlas/alpha shading, without effect hierarchy or native particle pixel shaders."
                 + (TexturePath is null ? " Atlas unavailable: white helper quads." : "");
             if (_gpuFailure is not null) { _status.Text = _gpuFailure; return; }
             if (_renderer is null || _target is null || _gpu is null) return;
@@ -276,9 +276,9 @@ public sealed class EffectPointPreviewWindow : Window
     }
     public void SaveFrame(string path)
     {
-        if (_closed || _pending || Snapshot is null || !Matches(_revisions)) throw new InvalidOperationException("Wait for a current complete point frame before taking its screenshot.");
+        if (_closed || _pending || Snapshot is null || !Matches(_revisions)) throw new InvalidOperationException("Wait for a current complete particle frame before taking its screenshot.");
         if (_renderDirty) RenderView();
-        if (_image.Source is not BitmapSource frame) throw new InvalidOperationException("No evaluated point GPU frame is available.");
+        if (_image.Source is not BitmapSource frame) throw new InvalidOperationException("No evaluated particle GPU frame is available.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(frame)); using var output = File.Create(path); encoder.Save(output);
     }

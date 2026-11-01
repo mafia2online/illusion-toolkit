@@ -310,12 +310,27 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
         }
         // An object carried in from another archive takes the collision it was given along — those hulls
         // stand where it stood and are nothing without it.
-        ClearMorphPreview();
         List<SceneNode> selected = [.. Selection.Selected];
         var held = new HashSet<SceneNode>(selected);
         List<SceneNode> linked = [.. LinkedCollision(selected).Values.SelectMany(hulls => hulls).Where(n => !held.Contains(n)).Distinct()];
         int before = Editing.History.UndoCount;
         var deleteTargets = selected.Concat(linked).ToArray();
+        foreach (var node in deleteTargets)
+        {
+            var frame = (node.GeometrySource ?? node.Source) switch
+            {
+                Assets.Compiled.ICompiledMeshSource mesh => mesh.CanonicalFrame,
+                IFrameNode native => native,
+                _ => null
+            };
+            if (frame is not null && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument document
+                && document.ValidateSceneCollectionMutation(frame) is { } lodRefusal)
+            {
+                refusal = "Nothing was deleted: " + lodRefusal;
+                RaiseNotice(refusal, isError: true); return false;
+            }
+        }
+        ClearMorphPreview();
         var compiledVolumes = deleteTargets.Where(node => node.Kind == "Collision volume"
             && node.OwningDocumentNode()?.Source is Assets.Compiled.CompiledSceneDocument).ToArray();
         if (compiledVolumes.Length > 0 && RemoveCompiledCollisions(compiledVolumes) is { } collisionRefusal)
@@ -1219,6 +1234,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     protected override void OnSceneInitialized()
     {
         Renderer!.Textures.SetFallbackResolver(Assets.Textures.TextureSearchIndex.FindPath);
+        if (Assets.MafiaEnvironment.Profile.ArchiveVersion == 20) ReloadNativeWaterInputs();
         Catalogs.InitAsync(IsMapViewport);
     }
 
@@ -1226,6 +1242,7 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     protected override void OnFrameUpdate(float dt)
     {
         Streamer.Tick(dt);
+        Renderer?.AdvanceNativeWater(dt);
         CarCollisionEditing.RefreshSharedWorldChanges();
     }
 

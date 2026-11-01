@@ -23,6 +23,7 @@ Implemented:
 - Stream districts by camera position in Whole map mode, using cached compiled visual bounds.
 - Export and apply static and supported skinned mesh position, normal, all native UV sets, vertex color, topology and weight edits through the Blender bridge.
   Verified collision/render subdivision layouts are conservatively refitted; unsupported layouts are refused.
+  Linked coarse/fine scenery is protected until both representations can be rebuilt together; see [native scene collections](MAFIA3-SCENE-COLLECTIONS.md).
   Compression lattices and native bounds expand when required. Per-visual copy-on-write isolates shared vehicle parts.
   Packed channels, skin palettes and face groups are retained or rebuilt; unsafe empty BPA groups are refused.
 - Assemble vehicle wheels from `cars_universal.sds`, including mirrored wheel halves. Vehicle doors,
@@ -42,9 +43,10 @@ Implemented:
   cameras and viewport screenshots.
 
 The renderer uses toolkit shading. Verified native two/three-layer terrain inputs and blend equations are
-supported. Water-definition previews retain color and avoid interpreting flow as a normal map. A separate
-analytical wave preview uses the native configuration, lookup texture, mip filtering and four template weights;
-the runtime ocean grid, ripples, depth and screen-space reflections remain separate unimplemented passes.
+supported. Water uses the actual defining triangles and native mask/color UVs, analytical wave field and
+screen-ray surface grid, with shared viewport depth and toolkit lighting. Water textures retain their native
+mip chains. The isolated wave window also supports manual template weights. Ripple simulation, shoreline
+height, SSR, foam and refraction remain separate unsupported passes.
 See [surface evidence](MAFIA3-SURFACES.md).
 
 Additional authoring includes native vehicle cloning/registration, rig bones and poses, paint choices and
@@ -151,6 +153,8 @@ native allocation/subdivision evidence, vehicle layouts and individual test scen
 The extended-authoring checkpoint passes 1,699 copied-file assertions with zero failures across 48 copied retail archives. This covers native curve and particle playback, morph preview, streamed navigation topology and representative costs, compound collision growth, native vehicle placement and nested component imports. The bridge payload probe passes 19 checks and the existing Mafia II export probe passes 46. The final dependency-order and reciprocal-cost validation changes pass 641 focused editing checks and 204 real HTTP MCP checks, with zero failures. Live MCP native point-timeline sampling, GPU expiration and byte-exact rewind also pass in the final build. All 48 copied SDS inputs and the material library still match their installed originals by SHA-256.
 
 The subsequent facial/water preview build passes 1,753 copied-file assertions and 209 real HTTP MCP checks with zero failures across 49 archives. This adds real facial float-track playback, posed GPU bounds/picking, the analytical water window and animation-window failure cleanup. Live MCP facial playback, exact GPU rewind/unbind and resource preservation pass; analytical water time/mode/weight changes and exact restoration pass. All 49 copied archives still match the installed originals; native rendering oracles and proprietary inputs remain outside the repository.
+
+The viewport-water checkpoint passes 1,862 full copied-file assertions, 786 focused editing checks and 214 HTTP MCP checks with zero failures across 50 archives. Actual map and resource editors pass water animation, exact rewind, mode fallback, move/save/build, independent compressed reload and exact GENR/manifest/image undo. Water geometry editing also survives compressed parsing and exact undo. Native mip upload/cache checks pass for all copied water texture levels. Typed linked-LOD guards reject unsafe placement, geometry, material, hierarchy and shared-rig changes without changing files or history. Bridge compatibility remains 19/19 and Mafia II export remains 46/46; all 50 archives and the material library still match their installed originals.
 
 Actual background resource-editor/MCP tests cover native edge flips, count-growing face subdivision and boundary extrusion: candidate discovery, live tree count refresh, GPU overlay changes, Save/Build, compressed fresh parsing and exact working-file/manifest/PNG undo. World-collision growth crosses the previous bounds, refits native dynamic compounds and survives an independent fresh compressed load.
 

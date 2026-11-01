@@ -73,6 +73,17 @@ internal sealed class CompiledAuthoringWindow : Window
             }
             _waterWaves.Show(); _waterWaves.Activate(); return null;
         }, "Analytical wave preview opened."));
+        panel.Children.Add(Button("Play water surface", () =>
+        {
+            if (_host.Rnd is not { NativeWaterAvailable: true } renderer)
+                return _host.NativeWaterInputError ?? "Water wave inputs are unavailable.";
+            renderer.NativeWaterEnabled = true; renderer.NativeWaterPlaying = true; return null;
+        }, "Analytical water animation is playing."));
+        panel.Children.Add(Button("Pause water surface", () =>
+        {
+            if (_host.Rnd is { } renderer) renderer.NativeWaterPlaying = false;
+            return null;
+        }, "Water animation paused."));
         panel.Children.Add(Button("Edit navigation vertices...", () =>
         {
             new CompiledNavigationVertexWindow(host) { Owner = this }.Show(); return null;

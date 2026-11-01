@@ -110,9 +110,11 @@ public sealed unsafe class TextureLibrary : IDisposable
         if (string.IsNullOrEmpty(name)) return;
         lock (_sync)
         {
-            if (!_cache.Remove(name, out Entry? entry)) return;
-            if (entry.Srv.Handle == _white.Handle) return; // a cached miss — nothing to keep alive
-            _retired[(nint)entry.Srv.Handle] = entry;
+            foreach (string key in new[] { name, MipmappedKey(name) })
+            {
+                if (!_cache.Remove(key, out Entry? entry) || entry.Srv.Handle == _white.Handle) continue;
+                _retired[(nint)entry.Srv.Handle] = entry;
+            }
         }
     }
 
@@ -127,18 +129,30 @@ public sealed unsafe class TextureLibrary : IDisposable
     /// recorded for an empty name or an uncached miss). Pass the leases back via <see cref="Release"/> when
     /// the owning mesh is disposed.</summary>
     public ComPtr<ID3D11ShaderResourceView> Acquire(string? name, List<TextureLease> leases)
+        => AcquireCore(name, leases, mipmapped: false);
+
+    /// <summary>Acquires every authored DDS mip for native water sampling. Its cache and leases are
+    /// independent of the ordinary mip0-only acquisition; invalidation refreshes both variants.
+    /// Missing or invalid DDS returns null without a lease, so native water can refuse a fake mask.</summary>
+    public ComPtr<ID3D11ShaderResourceView> AcquireMipmapped(string? name, List<TextureLease> leases)
+        => AcquireCore(name, leases, mipmapped: true);
+
+    private static string MipmappedKey(string name) => "\0mips:" + name;
+
+    private ComPtr<ID3D11ShaderResourceView> AcquireCore(string? name, List<TextureLease> leases, bool mipmapped)
     {
-        if (string.IsNullOrEmpty(name)) return _white;
+        if (string.IsNullOrEmpty(name)) return mipmapped ? default : _white;
+        string key = mipmapped ? MipmappedKey(name) : name;
 
         string[] folders;
         Func<string, string?>? resolver;
         int version;
         lock (_sync)
         {
-            if (_cache.TryGetValue(name, out Entry? cached))
+            if (_cache.TryGetValue(key, out Entry? cached))
             {
                 cached.Refs++;
-                leases.Add(new TextureLease(name, (nint)cached.Srv.Handle));
+                leases.Add(new TextureLease(key, (nint)cached.Srv.Handle));
                 return cached.Srv;
             }
             folders = _folders.ToArray(); // snapshot: file IO must not run under the lock
@@ -153,7 +167,8 @@ public sealed unsafe class TextureLibrary : IDisposable
             if (!File.Exists(path)) continue;
             try
             {
-                srv = DdsTexture.Load(_gpu, File.ReadAllBytes(path));
+                byte[] bytes = File.ReadAllBytes(path);
+                srv = mipmapped ? DdsTexture.LoadMipmapped(_gpu, bytes) : DdsTexture.Load(_gpu, bytes);
             }
             catch
             {
@@ -168,7 +183,8 @@ public sealed unsafe class TextureLibrary : IDisposable
         {
             try
             {
-                srv = DdsTexture.Load(_gpu, File.ReadAllBytes(resolved));
+                byte[] bytes = File.ReadAllBytes(resolved);
+                srv = mipmapped ? DdsTexture.LoadMipmapped(_gpu, bytes) : DdsTexture.Load(_gpu, bytes);
             }
             catch
             {
@@ -179,23 +195,24 @@ public sealed unsafe class TextureLibrary : IDisposable
         lock (_sync)
         {
             // Another caller may have loaded the same name while we did IO — keep the first, drop ours.
-            if (_cache.TryGetValue(name, out Entry? existing))
+            if (_cache.TryGetValue(key, out Entry? existing))
             {
                 if (srv.Handle != null && srv.Handle != existing.Srv.Handle) srv.Dispose();
                 existing.Refs++;
-                leases.Add(new TextureLease(name, (nint)existing.Srv.Handle));
+                leases.Add(new TextureLease(key, (nint)existing.Srv.Handle));
                 return existing.Srv;
             }
             if (srv.Handle == null)
             {
+                if (mipmapped) return default;
                 // A folder registered while we searched may contain this texture: caching the stale miss
                 // would repoison the negative cache right after AddFolder purged it, whitening the texture
                 // for the whole session. Return white UNCACHED — the next Acquire retries with the new folder.
                 if (version != _foldersVersion) return _white;
                 srv = _white; // not found / failed — white
             }
-            _cache[name] = new Entry { Srv = srv, Refs = 1 };
-            leases.Add(new TextureLease(name, (nint)srv.Handle));
+            _cache[key] = new Entry { Srv = srv, Refs = 1 };
+            leases.Add(new TextureLease(key, (nint)srv.Handle));
             return srv;
         }
     }

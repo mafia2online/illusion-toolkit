@@ -8,6 +8,7 @@ public sealed partial class CompiledMeshBinding
     /// <summary>Persists the previously visible triangle partition after independent geometry isolation.</summary>
     public BridgeMeshApplier.ApplyResult? CompactIsolatedView(MeshData originalView, int lod, out string? reason)
     {
+        if (MutationRefusal is { } refusal) { reason = refusal; return null; }
         try
         {
             var context = Read(lod); var mesh = context.Mesh;

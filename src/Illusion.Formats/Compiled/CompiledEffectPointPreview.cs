@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Illusion.Formats.Compiled;
 
-/// <summary>Verified stationary point-burst operators in an isolated, unit-scale generation.
+/// <summary>Verified stationary point bursts and point/plane timelines in an isolated, unit-scale generation.
 /// This does not run effect scheduling, external forces or the game's particle shaders.</summary>
 public sealed partial class CompiledEffectPointPreview
 {
@@ -11,15 +11,18 @@ public sealed partial class CompiledEffectPointPreview
     private readonly CompiledElement _generation;
     private readonly CompiledElement _birth, _size, _color;
     private readonly CompiledElement? _texture, _emissivity, _speed, _acceleration;
+    private readonly Vector2? _planeSize;
     public ulong GenerationId => _generation.ObjectId;
     public ulong MaterialGuid { get; }
     public int BurstCount { get; }
+    public string EmitterShape => _planeSize.HasValue ? "plane" : "point";
+    public Vector2 EmitterSize => _planeSize ?? Vector2.Zero;
 
     private CompiledEffectPointPreview(CompiledGraph graph, CompiledElement generation, CompiledElement birth,
-        CompiledElement size, CompiledElement color, CompiledElement? texture, CompiledElement? emissivity, CompiledElement? speed, CompiledElement? acceleration, ulong material, int count)
+        CompiledElement size, CompiledElement color, CompiledElement? texture, CompiledElement? emissivity, CompiledElement? speed, CompiledElement? acceleration, ulong material, int count, Vector2? planeSize)
     {
         _graph = graph; _generation = generation; _birth = birth; _size = size; _color = color;
-        _texture = texture; _emissivity = emissivity; _speed = speed; _acceleration = acceleration; MaterialGuid = material; BurstCount = count;
+        _texture = texture; _emissivity = emissivity; _speed = speed; _acceleration = acceleration; MaterialGuid = material; BurstCount = count; _planeSize = planeSize;
     }
 
     public static bool TryCreate(CompiledGraph graph, CompiledElement generation, out CompiledEffectPointPreview? preview, out string? refusal)
@@ -44,8 +47,19 @@ public sealed partial class CompiledEffectPointPreview
             var emitterData = graph.Data(graph.Field(emitterComponent, "m_Data")!);
             // Original S_Data reflection101801DD0: emitter type72, local-space74; native
             // Position::GenerationContinues copies type to its dispatch byte, case0 zeros XYZ.
-            if (emitterData.Length != 128 || emitterData[72] != 0)
-                throw new NotSupportedException("Only native point emitters are verified for this isolated preview.");
+            if (emitterData.Length != 128 || emitterData[72] != 0 && !(timeline && emitterData[72] == 1))
+                throw new NotSupportedException("Only native point and stationary interior-plane timelines are verified for this isolated preview.");
+            Vector2? planeSize = null;
+            if (emitterData[72] == 1)
+            {
+                // S_Data::RegisterAttributes101801DD0: shape variation48, size60, local-space74.
+                float width = BinaryPrimitives.ReadSingleLittleEndian(emitterData[60..]);
+                float height = BinaryPrimitives.ReadSingleLittleEndian(emitterData[64..]);
+                if (!float.IsFinite(width) || !float.IsFinite(height) || width < 0 || height < 0
+                    || emitterData[74] == 0 || Vector(emitterData, 48, 3) != Vector3.Zero)
+                    throw new NotSupportedException("Plane preview requires finite nonnegative dimensions, local space and zero shape-scale variation.");
+                planeSize = new(width, height);
+            }
             var data = graph.Data(graph.Field(generation, "m_Data")!);
             if (data.Length != 44 || data[40] != 0 || data[41] != 0)
                 throw new NotSupportedException("Ribbon and scale-to-motion generations require their native runtime.");
@@ -60,6 +74,13 @@ public sealed partial class CompiledEffectPointPreview
             var size = Find(0x3040651E) ?? throw new NotSupportedException("A native scalar size operator is required.");
             var color = Find(0x35C27036) ?? throw new NotSupportedException("A native RGB color operator is required.");
             var position = Find(0x51491D77) ?? throw new NotSupportedException("A native position operator is required.");
+            if (planeSize.HasValue && (Integer(graph, position, "m_Distribution") is not (0 or 3)
+                || Array.IndexOf(operators, birth) > Array.IndexOf(operators, size)
+                || Array.IndexOf(operators, size) > Array.IndexOf(operators, position)
+                || Find(0x16EA57CD) is not null
+                || Find(0x45EA6434) is { } planeSpeed && (Array.IndexOf(operators, position) > Array.IndexOf(operators, planeSpeed)
+                    || CompiledEffectCurve.FromParameter(graph, planeSpeed, "m_DivergencyY").Sample(0).X >= 0)))
+                throw new NotSupportedException("Plane preview requires interior distribution0/3, ordered birth/size/position, no acceleration and only ensuing verified cone speed.");
             if (Bool(graph, position, "m_AttachToCamera")) throw new NotSupportedException("Camera-attached particle emitters require the runtime camera contract.");
             foreach (string field in timeline ? ["m_AmountVar", "m_SpawnNumber", "m_SpawnNumberVar"] : new[] { "m_Rate", "m_RateVar", "m_AmountVar", "m_LifeVar", "m_SpawnNumber", "m_SpawnNumberVar" })
                 RequireZero(graph, birth, field);
@@ -117,7 +138,7 @@ public sealed partial class CompiledEffectPointPreview
                 CompiledEffectCurve.FromParameter(graph, op, field).Sample(0);
             var emissivity = Find(0x0D9D4DF9);
             if (emissivity is not null) CompiledEffectCurve.FromParameter(graph, emissivity, "m_Emissivity").Sample(0);
-            preview = new(graph, generation, birth, size, color, texture, emissivity, speed, acceleration, material, (int)count);
+            preview = new(graph, generation, birth, size, color, texture, emissivity, speed, acceleration, material, (int)count, planeSize);
             return true;
         }
         catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or InvalidOperationException or ArgumentException)
@@ -140,7 +161,7 @@ public sealed partial class CompiledEffectPointPreview
         // followed by the native1e-4 lower bound. No authored values are changed.
         if (lifetime <= 1e-8f) lifetime = 100000000;
         lifetime = MathF.Max(lifetime, 1e-4f);
-        if (time >= lifetime) return new(GenerationId, MaterialGuid, time, []);
+        if (time >= lifetime) return new(GenerationId, MaterialGuid, time, []) { EmitterShape = EmitterShape, EmitterSize = EmitterSize };
         float age = NormalizeAge(time, lifetime);
         float half = Curve(_size, "m_Size", age).X * .5f;
         var color = Vector3.Clamp(Curve(_color, "m_Color", age), Vector3.Zero, Vector3.One);
@@ -155,7 +176,7 @@ public sealed partial class CompiledEffectPointPreview
         uint packedEmissivity = unchecked((uint)(int)(emissivity.X * 255) << 16 | (uint)(int)(emissivity.Y * 255) << 8 | (uint)(int)(emissivity.Z * 255));
         emissivity = new((packedEmissivity >> 16 & 255) / 255f, (packedEmissivity >> 8 & 255) / 255f, (packedEmissivity & 255) / 255f);
         var particle = new EffectPointParticle(Vector3.Zero, new(half), new(color, opacity), uv, emissivity, age, lifetime) { AgeSeconds = time, EmissionTime = 0 };
-        return new(GenerationId, MaterialGuid, time, Enumerable.Repeat(particle, BurstCount).ToArray());
+        return new(GenerationId, MaterialGuid, time, Enumerable.Repeat(particle, BurstCount).ToArray()) { EmitterShape = EmitterShape, EmitterSize = EmitterSize };
     }
 
     private static float NormalizeAge(float age, float life)
@@ -189,6 +210,8 @@ public sealed record EffectPointParticle(Vector3 Position, Vector2 HalfSize, Vec
 }
 public sealed record EffectPointSnapshot(ulong GenerationId, ulong MaterialGuid, float Time, IReadOnlyList<EffectPointParticle> Particles)
 {
+    public string EmitterShape { get; init; } = "point";
+    public Vector2 EmitterSize { get; init; }
     public uint RandomState { get; init; }
     public int Frames { get; init; }
 }

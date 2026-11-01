@@ -2,7 +2,7 @@
 
 ## Implemented scope
 
-`CompiledWaterWaves` reads the user-owned `edit/config/render_config.xml` native `m_WaterParams` configuration. `CompiledWaterWaveLookup` validates and exposes all mips of the user-owned `edit/maps/engine/sincos.dds`; no texture or compiled shader bytes are included in the toolkit. `AnalyticalWaterShader.Functions` reproduces the analytical displacement and local normal component of native pixel shader7139. The standalone preview represents an isolated field, not the game's global ocean renderer. Dynamic ripple history, shoreline/depth interaction, reflection/refraction, foam and complete forward lighting are separate passes.
+`CompiledWaterWaves` reads the user-owned `edit/config/render_config.xml` native `m_WaterParams` configuration. `CompiledWaterWaveLookup` validates and exposes all mips of the user-owned `edit/maps/engine/sincos.dds`; no texture or compiled shader bytes are included in the toolkit. `AnalyticalWaterShader.Functions` reproduces the analytical displacement and local normal component of native pixel shader7139. The standalone preview represents an isolated field. The separate `NativeWaterSurface` map pass rasterizes actual canonical definition geometry before reconstructing its analytical screen-ray surface. Dynamic ripple history, shoreline/depth interaction, reflection/refraction, foam and complete forward lighting are separate passes.
 
 ## Configuration and packing
 
@@ -28,8 +28,35 @@ Main-water material2D8D2F8B667F4D1C (`water_defining_mesh__main_water`) binds T0
 
 Native `C_ScreenSpaceWaterRenderer::CreateGeometry`1027B8140 creates258x258 screen-space vertices and257x257x6 u32 indices. UV coordinates include half-cell overscan `(i-.5)/256`; native packed vertex positions are u16XY. Main water VS7164/hash4E27252B samples t251 displacement/ray-distance and t252 normal. It reconstructs a world camera ray from screenUV, projection parameters and camera basis, places it at sampled distance, and adds the analytical displacement. `RenderScreenSpaceGrid` uses material1A227ADE53424B91 (`water_surface`). It is not a stock placed ocean mesh and does not justify deforming arbitrary defining meshes in place.
 
-Next map integration requires locating the actual defining instances, reproducing their native UV/projection MRT raster, and supplying ray-distance/coverage before the screen grid. With flat height0 the isolated PS7139 ray distance reduces to the distance from defining world position to camera. Other height/shoreline cases remain separate proof work.
+Map integration uses the actual defining instances and their native UV/projection MRT raster, supplying ray-distance/coverage before the screen grid. With flat height0 the isolated PS7139 ray distance reduces to the distance from defining world position to camera. Other height/shoreline cases remain separate proof work.
 
 ## Durable checks and safety
 
 Eight CPU checks cover native packing parity, incomplete templates, nonfinite/overflow fields, exact user RG8 payload, truncated mips, overflowing mip count and incompatible dimensions. Standalone GPU/UI/MCP verification is maintained separately by the preview integration. All native code, compiled shader bytes, configuration and textures used by the oracles remain in ignored scratch folders. Installed game files were read/copied only; no game launch or foreground UI input was used.
+
+
+## Actual map geometry and three-stage GPU proof
+
+The stock main-water definition was located in `bc_city_univers.sds`, resource `Generic_273_AAD7EF8BEB4871EB.genr`, native prefix72D9EA8F, under `C_SceneCollection`8FA874C4 GUID0E21ACF92C368126. Its SceneObject is1F256C63762B8230, RenderComponent1F256C63762B8108, visual1F256C63762A80EC. It has only the render component and bone binding0. Its2413vertices/2189faces use a world transform translating(507.76572,-492.85843,4.8223095). Mesh UVs are not an affine worldXY mapping: fitting all used vertices leaves normalized U/V errors up to.614/.724. Actual barycentric rasterization is required. Native SceneCollection activation is documented separately in MAFIA3-SCENE-COLLECTIONS.md; canonical document loading now exposes these definitions.
+
+An isolated copied-resource GPU oracle executed native PS713 on the actual definition triangles and T032, then native PS7139 versus the source analytical function, then original VS7164 versus a source screen-ray grid. It used a wide top-down camera, a near top-down camera and an oblique16:9 camera. Corresponding analytic covered-pixel counts were6210,65536,62879; native grid covered-pixel counts were4928,65536,62599. The source analytic pass matched displacementXYZ and ray-distanceW exactly, with encoded normalRGB error at most1.3328004e-7. The source grid matched native coverage, normal visualization and reconstructed worldXYZ exactly for every rendered pixel in all three views. Native/source saved PNGs were byte-identical. Ripple and height inputs were explicitly zero; no shoreline-depth, SSR or full forward-lighting equivalence is claimed.
+
+Implemented map composition consumes canonical `GpuMesh` definition geometry and per-part T031/T032 paths. It rasterizes definition masks/color with real UVs and camera projection, analytically fills displacement/normal MRTs, reconstructs the native screen grid using sampled ray distance, and depth-tests an explicitly toolkit-lit or normal visualization surface against ordinary scene geometry. Definition meshes must be excluded from ordinary visual shading only while this pass is active, with existing preview fallback when required user assets are unavailable. No arbitrary planar mask projection or generated ocean plane is justified by this evidence.
+
+
+## Production map pass and durable GPU checks
+
+`NativeWaterSurface` uses existing canonical `GpuMesh` buffers and per-part `NativeWaterDefinition` material metadata. Its persistent256x256 prepass preserves camera aspect through the view projection, not by assigning arbitrary world UVs. The final screen grid renders into the main target with its depth buffer. Surface color is explicitly toolkit Lambert lighting of T031 with the analytical normal; a normal diagnostic is available. This does not reproduce native water reflection, Fresnel/refraction, foam, dynamic ripple or shoreline passes.
+
+Static, visible, non-ghost, non-instanced parts with both required SRVs are eligible. Orthographic and wireframe views, missing mask inputs, skinned/instanced/ghost parts retain ordinary definition rendering. Supported parts are skipped in the ordinary pass only when the water pass is active. SRV hazards, render target and viewport bindings are restored at pass boundaries. One supported part generates two definition/field draws plus a single shared grid draw.
+
+An actual canonical four-definition test loaded native T031/T032 textures: time0 to1.25 changed51,681 output pixels; rewind restored every pixel exactly. An opaque red foreground blocker retained all380 pixels unchanged by water composition, validating shared main depth. Fifteen durable tests use only generated textures/waves/lookup: pipeline activation, alpha-as-data, motion, rewind, normal diagnostics, shared gamma/sun/hemisphere controls, exact lighting restoration, full versus simple toolkit shading, ghost/instanced eligibility, exact missing-mask fallback, depth occlusion, orthographic and wireframe fallback. These tests require no installed retail data.
+
+T031/T032 now use the water-only full-mip texture acquisition path; other viewport materials retain their existing upload policy. All sin/cos lookup mips are present and native implicit derivative sampling is retained. Texture inputs remain user-owned runtime data.
+
+
+### Full authored mip chains and definition color
+
+An additional native/source definition prepass oracle supplied all ten mips of the actual512x512T031 andT032 textures. Production `DefinitionPS` matched original PS713 in every R8G8B8A8 output byte for both mask and color over the complete256x256 actual-mesh oblique raster. The T031 dither formula was ported with native d996 explicitly fixed to0; no mapping from preview seconds to an unknown engine frame phase is invented. The downstream field and screen-ray oracle retained displacement/ray-depth/grid errors0 and encoded normal error at most1.3328004e-7. These controlled comparisons supply identical linear BC3 texture views and sampler states to native/source shaders; full in-game color-management and runtime pixel-shader parity remain outside the claim.
+
+The final surface shader now consumes the same toolkit scene lighting block as ordinary geometry: hemisphere ambient, directional sun, Phong/rim in Render/Solid, simple diffuse in MaterialPreview, and output gamma. These are explicitly toolkit display choices, not an implementation of native PS1078 water reflections.

@@ -143,6 +143,10 @@ public interface IEditorSession
         float displacementScale, out string? description)
     { description = null; return "analytical water preview is unavailable"; }
     string? WaterWaveScreenshot(string path) => "analytical water preview is unavailable";
+    string? WaterSurface(bool? enabled, bool? playing, float? time, bool? normals, bool reload, out WaterSurfaceInfo? result)
+    { result = null; return "native water surface preview is unavailable"; }
+    string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
+        => "whole-map streaming control is unavailable";
     string? EffectPreviewScreenshot(string path) => "native effect preview is unavailable";
     string? MorphChannels(string name, int lod, out MorphInfo? result)
     { result = null; return "native morph preview is unavailable"; }

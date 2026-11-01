@@ -14,6 +14,8 @@ public sealed record SurfaceMaterial(int Layers, string? Layer2Diffuse, string? 
     public VehicleDirtMaterial? VehicleDirt { get; init; }
     /// <summary>Verified vehicle T018 decal and C062 alpha, sampled with native TEXCOORD2.</summary>
     public VehicleDecalMaterial? VehicleDecal { get; init; }
+    /// <summary>Verified native water defining-pass T031 color and T032 template weights.</summary>
+    public NativeWaterDefinitionMaterial? NativeWaterDefinition { get; init; }
 }
 
 public sealed record VehicleDirtMaterial(string MaskTexture, Vector3 PaletteA0, Vector3 PaletteA1,
@@ -27,3 +29,5 @@ public sealed record VehicleDirtNormalMaterial(string Texture, string SecondaryM
     float ThresholdOffset, float NativeAmountZ, float NativeSmoothnessZ);
 
 public sealed record VehicleDecalMaterial(string Texture, float Opacity);
+
+public sealed record NativeWaterDefinitionMaterial(string ColorTexture, string MaskTexture);

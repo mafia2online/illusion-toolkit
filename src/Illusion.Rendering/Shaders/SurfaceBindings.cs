@@ -32,6 +32,7 @@ internal sealed unsafe class SurfaceBindings : IDisposable
     private bool _lastHasDecalUvs;
     private readonly nint[] _lastViews = new nint[8];
     public SurfaceBindings(GpuContext gpu) => _buffer = GpuBuffers.CreateConstant<Constants>(gpu);
+    public void Invalidate() => _initialized = false;
 
     public void Bind(ComPtr<ID3D11DeviceContext> context, GpuPart part, bool hasDecalUvs)
     {

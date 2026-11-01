@@ -145,8 +145,13 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         // Standalone asset definitions are templates; placed scenes supersede matching template roots.
         var templates = NestedModelTemplateScenes();
         var candidates = _frames.Values.Where(f => f.Parent is null && !templates.Contains(f.Element) && sceneResources.Contains(Graph.Owner(f.Element))).ToList();
-        var named = activeScenes.Count > 0
-            ? candidates.Where(f => activeScenes.Values.Contains(Graph.Owner(f.Element))).ToList()
+        RegisterSceneCollectionProxyGroups(PlacedSceneCollectionObjects(sceneResources));
+        // Other physical LOD archives are loaded for GUID dependencies, not activated as scenes.
+        var collectionScenes = PlacedSceneCollectionObjects(sceneResources.Where(resource =>
+            _archives[resource].FullName.Equals(SourceArchive.FullName, StringComparison.OrdinalIgnoreCase)));
+        _sceneCollectionAuthoringOrigins.UnionWith(collectionScenes.Where(scene => !activeScenes.Values.Contains(Graph.Owner(scene))));
+        var named = activeScenes.Count > 0 || collectionScenes.Count > 0
+            ? candidates.Where(f => activeScenes.Values.Contains(Graph.Owner(f.Element)) || collectionScenes.Contains(f.Element)).ToList()
             : candidates.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.Last()).ToList();
         var decoder = new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive));
         var claimed = new HashSet<CompiledFrameNode>();
@@ -483,6 +488,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
             get => ReadMatrix(_document.Graph.Data(LinkTransform ?? _document.Graph.Field(Element, "m_Transform")!));
             set
             {
+                if (_document.ValidateSceneCollectionMutation(this) is { } collectionRefusal) throw new EditRefusedException(collectionRefusal);
                 if (_document.ValidateVehiclePlacementTransform(this, value) is { } refusal) throw new EditRefusedException(refusal);
                 var graph = _document.Graph;
                 if (LinkTransform is not null) graph.Owner(LinkTransform).Replace(LinkTransform, WriteMatrix(value));

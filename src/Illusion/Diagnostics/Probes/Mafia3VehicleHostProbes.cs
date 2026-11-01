@@ -14,7 +14,7 @@ internal static partial class Mafia3Probes
         var ancestors = new HashSet<IFrameNode>();
         for (IFrameNode? frame = car; frame is not null; frame = frame.Parent) ancestors.Add(frame);
         var other = EntityCreationRows(document.Roots).Select(r => r.Source).OfType<CompiledSceneDocument.CompiledFrameNode>()
-            .First(f => f.Parent is null && !ancestors.Contains(f));
+            .First(f => f.Parent is null && !ancestors.Contains(f) && document.ValidateSceneCollectionMutation(f) is null);
         using var host = new D3DImageHost();
         var owner = new SceneNode("FrameResource", "FrameResource", true) { Source = document };
         var staticRow = new SceneNode("independent static object", "Compiled object", true) { Source = other };

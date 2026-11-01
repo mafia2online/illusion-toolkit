@@ -18,7 +18,16 @@ public sealed partial class CompiledSceneDocument
     {
         if (!_vehicleRigs.TryGetValue(frame.Element, out var rig))
             _vehicleRigs[frame.Element] = rig = CompiledVehicleRig.TryCreate(Graph, frame.Element, frame, frame.Name);
+        if (rig is not null) rig.MutationRefusal = () => ValidateSkeletonProxyMutation(rig.Immutable);
         return rig;
+    }
+
+    private string? ValidateSkeletonProxyMutation(CompiledElement immutable)
+    {
+        foreach (var owner in _frames.Values)
+            if (Components(owner.Element).Any(component => ReferenceEquals(Graph.Resolve(Graph.Field(component, "m_ImmutableData")), immutable))
+                && ValidateSceneCollectionMutation(owner) is { } refusal) return refusal;
+        return null;
     }
 
     public SkeletonData? VehicleSkeleton(CompiledFrameNode frame) => VehicleRig(frame)?.Skeleton;

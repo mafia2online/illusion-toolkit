@@ -14,7 +14,7 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
 
     private bool SafeHierarchy(CompiledFrameNode frame, HashSet<CompiledFrameNode> visited, HashSet<CompiledElement>? actorScope = null)
     {
-        if (!visited.Add(frame) || _deleted.Contains(frame)) return false;
+        if (!visited.Add(frame) || _deleted.Contains(frame) || ValidateSceneCollectionMutation(frame) is not null) return false;
         if (CompiledVehiclePlacementSupport.Supported(Graph, frame.Element))
         {
             var owned = CurrentDescendants(frame.Element).Where(n => n.TypeId == 0x4403597e).ToHashSet();
@@ -48,7 +48,8 @@ public sealed partial class CompiledSceneDocument : IFrameDuplicationProvider
 
     private IFrameDuplication? DuplicateCore(IFrameNode source, out string? refusal)
     {
-        refusal = null;
+        refusal = ValidateSceneCollectionMutation(source);
+        if (refusal is not null) return null;
         if (!CanDuplicate(source)) { refusal = "This hierarchy contains an unsupported entity, deformation or ownership boundary."; return null; }
         var frame = (CompiledFrameNode)source;
         var resource = Graph.Owner(frame.Element);
