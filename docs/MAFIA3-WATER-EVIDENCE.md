@@ -24,7 +24,7 @@ Original PS7139 was loaded only from the copied user shader cache for an isolate
 
 ## Actual authored mask and global surface boundary
 
-Main-water material2D8D2F8B667F4D1C (`water_defining_mesh__main_water`) binds T032 `water_defining_mesh__main_water_rgba_masks---d.dds`, hashE327033E54838931. A copied fixture contains it as `city_univers/bc_city_univers.sds/Texture_209_E327033E54838931.dds`. Native defining PS713 writes T032 into WaterPaintBlendTexture, T031 color into WaterPaintColorTexture and T003 flow into another target. These are rasterized using defining-mesh UVs and the current prepass projection. Mask UV coordinates alone do not establish a global worldXY mapping.
+Main-water material2D8D2F8B667F4D1C (`water_defining_mesh__main_water`) binds T032 `water_defining_mesh__main_water_rgba_masks---d.dds`, hashE327033E54838931. A copied fixture contains it as `city_univers/bc_city_univers.sds/Texture_209_E327033E54838931.dds`. Native defining PS713 writes T032 into WaterPaintBlendTexture, T031 color into WaterPaintColorTexture and exposes T003.xyxy at shader output2. This does not prove that the native defining pass binds that third render target. These are rasterized using defining-mesh UVs and the current prepass projection. Mask UV coordinates alone do not establish a global worldXY mapping.
 
 Native `C_ScreenSpaceWaterRenderer::CreateGeometry`1027B8140 creates258x258 screen-space vertices and257x257x6 u32 indices. UV coordinates include half-cell overscan `(i-.5)/256`; native packed vertex positions are u16XY. Main water VS7164/hash4E27252B samples t251 displacement/ray-distance and t252 normal. It reconstructs a world camera ray from screenUV, projection parameters and camera basis, places it at sampled distance, and adds the analytical displacement. `RenderScreenSpaceGrid` uses material1A227ADE53424B91 (`water_surface`). It is not a stock placed ocean mesh and does not justify deforming arbitrary defining meshes in place.
 
@@ -93,3 +93,58 @@ Logs and proprietary oracle inputs remain ignored scratch files under
 synthetic complete mips, negative intensity, invalid/missing input fallback,
 actual GPU lighting changes and pixel-exact fallback restoration. All prior
 15 water GPU checks also pass. Actual copied retail lookup preflight passes.
+
+
+### Query texture binding audit
+
+Do not equate the native Mac WaterQueryBlend render target with PC PS1078
+normal flow. The literal parameter IDs in the global constructor prove
+Renderer337 -> context81 -> global5296 is **t259**, not t258. Context80 /
+global5184 is t257 (foam ping-pong), and context79 / global5240 is t256
+(external query texture). PS1078 consumes t258 at texture11 using screen UV;
+its actual producer must be established separately. The copied Mac binary
+contains no literal t258 registration found by exact-byte search.
+
+`ProcessAddEntity`10266FBA0 maintains scene-manager vector80 only for native
+C_RenderVisual subtype4 with renderer flag0x1000. `SynchronizeFlags`102008460
+maps that from core WaterDefining0x200000. `UpdateWaterHeightTexture`102810C50
+starts from that water-only list, additionally checking enabled flag0x1000000
+and local bounds. Enabled is distinct from WaterDefining. It renders height
+with fixed material653D1D7A0F670640, then rerenders original materials into the
+single-slot t259 WaterQueryBlend target. Backend10262DC20 directly binds RTs
+from slot0 with32-byte descriptors, stopping at null; no hidden Target2 remap
+was found. This audit does not authorize projecting T003 over the world as flow.
+
+
+### PC authored flow producer (distinct from Mac t259 query capture)
+
+The PC binary contains a feature absent from the symbolized Mac build.
+PC constructor1429D8BE0 registers literal t258 at group4296, between t252
+and t253. InitRT142A2B280 creates `WaterFlowTexture` at Renderer2672,
+256-square native pixel-format16 (RG8 UNORM; native format switch maps16
+to DXGI49). SetupFrame142A82B30 binds it through context496.
+PC defining pass142A93930 binds **three** targets in the original camera
+projection: Renderer2688(mask),2680(color),2672(flow). Consequently native
+PS713 Target2=T003.xyxy is the verified flow producer. Native clear color
+is(.5,.5,.5,.5), and PS1078 samples t258 at the screen UV emitted by VS7164,
+using linear-clamp explicitLOD0. This is unrelated to the top-down t259 query
+pass audited above. Mac-to-PC layout extrapolation was explicitly insufficient.
+
+The pass now rasterizes authored T003 with real definition UVs into a third
+camera-space target, then evaluates native phase0=frac(time*.125),
+phase1=frac(time*.125+.5), blend=2*abs(phase0-.5). The XY flow (2*stored-1)
+shifts both drifting noise paths; native strength is intensity*(length(flow)+1).
+Toolkit uses RGBA8 storage: RG have the same8-bit UNORM quantization as the
+native RG8 target; B is a toolkit validity marker to preserve explicit zero-flow
+fallback for a missing/invalid optional texture or uncovered pixel. That marker
+is not claimed as native output. No wind override, foam or reflection is invented.
+
+An isolated GPU oracle compared actual copied main-water geometry and T003
+with unmodified original PS713: all third-MRT RG bytes matched exactly;
+T031/T032 also remained byte exact with all authored mips. OriginalVS7164
+screen-grid coverage and world/color outputs remained exact. Direct production
+fine-normal helper vs unmodified PS1078 with500 randomized nonzero flows and
+banked coarse normals /128000pixels had maximum RGB-vector error0.00021143198
+(~0.0001221/channel),17pixels above0.00005, all below one8-bit output quantum.
+Three durable checks add third-MRT activation, missing-flow fallback without
+hiding geometry, and exact GPU restoration. All28 water GPU checks pass.

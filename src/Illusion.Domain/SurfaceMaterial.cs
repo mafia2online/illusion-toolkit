@@ -30,4 +30,4 @@ public sealed record VehicleDirtNormalMaterial(string Texture, string SecondaryM
 
 public sealed record VehicleDecalMaterial(string Texture, float Opacity);
 
-public sealed record NativeWaterDefinitionMaterial(string ColorTexture, string MaskTexture);
+public sealed record NativeWaterDefinitionMaterial(string ColorTexture, string MaskTexture, string? FlowTexture = null);

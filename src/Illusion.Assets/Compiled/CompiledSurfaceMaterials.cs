@@ -39,9 +39,12 @@ public static class CompiledSurfaceMaterials
         }
         // Defining textures are deferred water data, not alpha-tested surface albedo.
         if (info.ShaderId == 0x82b040224bf06119)
+        {
+            var flow = texture("T003");
             return texture("T031") is { } color && texture("T032") is { } weights
                 && File.Exists(color) && File.Exists(weights)
-                ? WaterDefinition with { NativeWaterDefinition = new(color, weights) } : WaterDefinition;
+                ? WaterDefinition with { NativeWaterDefinition = new(color, weights, flow is not null && File.Exists(flow) ? flow : null) } : WaterDefinition;
+        }
         int layers = info.ShaderId switch { 0x74f47efd17233c39 => 2, 0x3f92297c3b5e2837 => 3, _ => 0 };
         if (layers == 0) return null;
         Vector2 Scale(string id)

@@ -1,4 +1,5 @@
 namespace Illusion.Mcp;
 
 public sealed record WaterSurfaceInfo(bool Available, bool Enabled, bool Active, bool Playing,
-    float Time, bool Normals, int DefinitionPartsDrawn, string? InputError, bool FineNormalsConfigured = false);
+    float Time, bool Normals, int DefinitionPartsDrawn, string? InputError, bool FineNormalsConfigured = false,
+    int FlowPartsDrawn = 0);

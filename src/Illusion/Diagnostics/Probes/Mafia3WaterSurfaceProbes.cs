@@ -38,7 +38,7 @@ internal static partial class Mafia3Probes
         using var target = new SharedRenderTarget(gpu, 256, 144);
         renderer.Textures.AddFolder(directory);
         renderer.Camera.LookAt(new(0, -5, 4), Vector3.Zero);
-        var surface = CompiledSurfaceMaterials.WaterDefinition with { NativeWaterDefinition = new(color, mask) };
+        var surface = CompiledSurfaceMaterials.WaterDefinition with { NativeWaterDefinition = new(color, mask, Dds("authored-flow", 235, 30, 0, 255)) };
         var mesh = new MeshData
         {
             Name = "synthetic-water-definition", World = Matrix4x4.Identity,
@@ -74,6 +74,12 @@ internal static partial class Mafia3Probes
         finePass.ConfigureFineNormals(variance, .175f, 3);
         var detailedFine = FineDraw(0);
         check("native fine water normals alter actual GPU toolkit shading", !detailedFine.AsSpan().SequenceEqual(analyticFine));
+        check("native PC water flow uses the third definition MRT", finePass.FlowPartsDrawn == 1);
+        var flowView = uploaded.Parts[0].SurfaceSrvs![2]; uploaded.Parts[0].SurfaceSrvs![2] = default;
+        var zeroFlowFine = FineDraw(0);
+        check("native PC water missing flow falls back without hiding definitions", finePass.FlowPartsDrawn == 0 && !zeroFlowFine.AsSpan().SequenceEqual(detailedFine));
+        uploaded.Parts[0].SurfaceSrvs![2] = flowView;
+        check("native PC water flow restoration is pixel exact", FineDraw(0).AsSpan().SequenceEqual(detailedFine));
         finePass.ConfigureFineNormals(null, .175f, 3);
         check("native fine water analytic fallback restores exact GPU pixels", FineDraw(0).AsSpan().SequenceEqual(analyticFine));
         check("native water three-stage surface accepts static definition geometry", renderer.NativeWaterActive && NativeWaterSurface.Supports(uploaded, uploaded.Parts[0]));

@@ -50,6 +50,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         => _nativeWater?.SetFineNormalParameters(scale, intensity) ?? false;
     public bool NativeWaterActive => NativeWaterEnabled && _nativeWaterActive && NativeWaterPartsDrawn > 0;
     public int NativeWaterPartsDrawn { get; private set; }
+    public int NativeWaterFlowPartsDrawn => NativeWaterActive ? _nativeWater?.FlowPartsDrawn ?? 0 : 0;
     public float NativeWaterTime
     {
         get => _nativeWaterTime;

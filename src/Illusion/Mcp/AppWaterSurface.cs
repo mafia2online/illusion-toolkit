@@ -17,7 +17,8 @@ internal sealed partial class AppEditorSession
         if (normals is { } n) renderer.NativeWaterNormals = n;
         result = new(renderer.NativeWaterAvailable, renderer.NativeWaterEnabled, renderer.NativeWaterActive,
             renderer.NativeWaterPlaying, renderer.NativeWaterTime, renderer.NativeWaterNormals,
-            renderer.NativeWaterPartsDrawn, host.NativeWaterInputError, renderer.NativeWaterFineNormalsConfigured);
+            renderer.NativeWaterPartsDrawn, host.NativeWaterInputError, renderer.NativeWaterFineNormalsConfigured,
+            renderer.NativeWaterFlowPartsDrawn);
         return null;
     }
 }

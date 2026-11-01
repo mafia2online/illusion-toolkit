@@ -29,6 +29,7 @@ Texture2D<float4> Tex1 : register(t1);
 Texture2D<float4> Tex2 : register(t2);
 Texture2D<float2> Lookup : register(t3);
 Texture2D<float4> FineNoise : register(t4);
+Texture2D<float4> FlowField : register(t5);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
@@ -48,11 +49,13 @@ DefinitionOut DefinitionVS(VertexIn input)
     o.Binormal = mul(float4(input.Binormal, 0), World).xyz;
     return o;
 }
-struct DefinitionTargets { float4 Mask:SV_Target0; float4 Color:SV_Target1; };
+struct DefinitionTargets { float4 Mask:SV_Target0; float4 Color:SV_Target1; float4 Flow:SV_Target2; };
 DefinitionTargets DefinitionPS(DefinitionOut input)
 {
     DefinitionTargets o;
     o.Mask = Tex1.Sample(Wrapped, input.UV);
+    float2 flow = FineNormal.w != 0 ? Tex2.Sample(Wrapped, input.UV).xy : float2(.5, .5);
+    o.Flow = float4(flow, FineNormal.w, 1);
     // Alpha is authored water data, never an opacity/discard test.
     float4 color = Tex0.Sample(Wrapped, input.UV);
     // Native d996 dither phase is deliberately fixed to zero: no invented frame clock.
@@ -102,8 +105,10 @@ GridOut GridVS(uint4 packedPosition:POSITION)
 float4 SurfacePS(GridOut input):SV_Target
 {
     float3 normal = normalize(input.Normal);
+    float4 flowData = FlowField.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0);
+    float2 flow = flowData.z > .5 ? flowData.xy * 2 - 1 : 0;
     if (FineNormal.z != 0) normal = EvaluateNativeWaterFineNormal(FineNoise, Wrapped,
-        input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y);
+        input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y, flow);
     if (FieldData.z != 0) return float4(normal * .5 + .5, 1);
     float3 color = Tex2.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0).rgb;
     if (LightMode.w == 2) color = float3(.80, .81, .83);
