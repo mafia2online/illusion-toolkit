@@ -60,3 +60,36 @@ T031/T032 now use the water-only full-mip texture acquisition path; other viewpo
 An additional native/source definition prepass oracle supplied all ten mips of the actual512x512T031 andT032 textures. Production `DefinitionPS` matched original PS713 in every R8G8B8A8 output byte for both mask and color over the complete256x256 actual-mesh oblique raster. The T031 dither formula was ported with native d996 explicitly fixed to0; no mapping from preview seconds to an unknown engine frame phase is invented. The downstream field and screen-ray oracle retained displacement/ray-depth/grid errors0 and encoded normal error at most1.3328004e-7. These controlled comparisons supply identical linear BC3 texture views and sampler states to native/source shaders; full in-game color-management and runtime pixel-shader parity remain outside the claim.
 
 The final surface shader now consumes the same toolkit scene lighting block as ordinary geometry: hemisphere ambient, directional sun, Phong/rim in Render/Solid, simple diffuse in MaterialPreview, and output gamma. These are explicitly toolkit display choices, not an implementation of native PS1078 water reflections.
+
+
+### Optional native fine normals (PS1078, zero query flow)
+
+`NativeWaterSurface.ConfigureFineNormals` accepts the user-owned engine
+`water_normal_variance.dds`: 256-square physical RGBA8, eight authored mips.
+Native `InitSystemTextures` (1027CB0D0) and `SetupDefaultGlobalTextures`
+(10280E930) register this static texture as T261. G/A encode fine normal XY;
+R/B contain minification variance (zero at mip0, nonzero in lower mips).
+The source helper uses G/A only; no fabricated roughness/reflection term is added.
+S023 is anisotropic16/wrap. D267.y is UV scale and D267.w is intensity.
+WorldXY is adjusted by half the analytical displacement, matching the native
+forward input. Two UV paths drift by time * -.375 / +.375. With explicit
+query flow zero, both native .125 phase samples coincide, so their crossfade
+cancels. Deep-water depth attenuation is explicitly .5. Fine slopes use the
+native tangent/binormal derived from the coarse analytical normal, then normalize.
+Toolkit lighting and diagnostic normals consume the result; reflection, foam,
+SSR, shoreline/depth attenuation and dynamic query flow remain absent.
+Missing/malformed lookup or nonfinite material values disable detail. Finite
+negative material values are preserved. No lookup/shader bytes are distributed.
+
+The unmodified original PS1078 oracle uses actual user-owned eight-mip noise
+and static `env_brdf_lut_blinn.dds` (T902), with controlled white reflection
+**only as a diagnostic output boundary**. The production helper was compiled
+into that source oracle for 500 varied banked coarse normals / 128,000 pixels.
+Maximum RGB-vector error was 0.00041868282 (~0.0002417 per channel), below one
+8-bit output quantum; 28 pixels exceeded vector 0.00005. This is a bounded
+rendering-precision comparison, not a claim of bit-exact native forward shading.
+Logs and proprietary oracle inputs remain ignored scratch files under
+`.scratch/water-detail-native`. Ten new durable checks cover CPU-only parameter refresh/recovery and independent
+synthetic complete mips, negative intensity, invalid/missing input fallback,
+actual GPU lighting changes and pixel-exact fallback restoration. All prior
+15 water GPU checks also pass. Actual copied retail lookup preflight passes.

@@ -28,6 +28,10 @@ public sealed class MeshData
     /// however high the request was). Everything that edits the mesh writes back into THIS level.</summary>
     public int Lod { get; init; }
 
+    /// <summary>Optional native visual coarse/fine hierarchy membership. Manual tree visibility and
+    /// editor-helper geometry remain independent; null preserves the ordinary rendering policy.</summary>
+    public NativeLodMembership? NativeLod { get; set; }
+
     /// <summary>
     /// Per-vertex bone influences, four per vertex, flattened: vertex i owns [4i, 4i+4). Null for a mesh with
     /// no skin, which is nearly everything — only a skinned model has these.

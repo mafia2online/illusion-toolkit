@@ -89,6 +89,6 @@ public sealed partial class CompiledMeshBinding
         Binormals = mesh.Binormals?.Select(n => Vector3.TransformNormal(n, transform)).ToArray(),
         Indices = mesh.Indices, Parts = mesh.Parts, Lod = mesh.Lod,
         BoneIndices = mesh.BoneIndices, BoneWeights = mesh.BoneWeights, Skeleton = mesh.Skeleton, LiveRest = mesh.LiveRest,
-        Instances = mesh.Instances, InstanceDrawDistances = mesh.InstanceDrawDistances
+        Instances = mesh.Instances, InstanceDrawDistances = mesh.InstanceDrawDistances, NativeLod = mesh.NativeLod
     };
 }

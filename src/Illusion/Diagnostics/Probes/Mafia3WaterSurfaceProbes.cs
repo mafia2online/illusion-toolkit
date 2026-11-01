@@ -50,7 +50,32 @@ internal static partial class Mafia3Probes
         var uploaded = renderer.AddMesh(mesh);
         renderer.ConfigureNativeWater(packed, new ReadOnlyMemory<byte>[] { lookup });
         byte[] Draw() { renderer.Render(target); return RenderTargetReadback.Read(gpu, target); }
+        using var finePass = new NativeWaterSurface(gpu, new ReadOnlyMemory<byte>[] { lookup });
+        var variance = new byte[349648];
+        void V(int at, uint value) => BinaryPrimitives.WriteUInt32LittleEndian(variance.AsSpan(at), value);
+        V(0, 0x20534444); V(4, 124); V(8, 0x2100f); V(12, 256); V(16, 256); V(20, 1024); V(28, 8);
+        V(76, 32); V(80, 0x41); V(88, 32); V(92, 0xff); V(96, 0xff00); V(100, 0xff0000); V(104, 0xff000000); V(108, 0x401008);
+        for (int i = 128; i < variance.Length; i += 4) { variance[i + 1] = 220; variance[i + 3] = 80; }
+        check("native fine water normals accept a complete independently authored variance mip chain", finePass.ConfigureFineNormals(variance, .175f, 3) && finePass.FineNormalsConfigured);
+        check("native fine water material parameters refresh without asset recreation", finePass.SetFineNormalParameters(.25f, 2) && finePass.FineNormalScale == .25f && finePass.FineNormalIntensity == 2);
+        check("native fine water nonfinite refresh disables detail", !finePass.SetFineNormalParameters(.25f, float.PositiveInfinity) && !finePass.FineNormalsConfigured);
+        check("native fine water valid refresh restores retained lookup", finePass.SetFineNormalParameters(.175f, 3) && finePass.FineNormalsConfigured);
+        check("native fine water normals preserve finite negative authored intensity", finePass.ConfigureFineNormals(variance, .175f, -3));
+        check("native fine water normals reject nonfinite parameters with analytic fallback", !finePass.ConfigureFineNormals(variance, float.NaN, 3) && !finePass.FineNormalsConfigured);
+        check("native fine water normals reject truncated mip chains", !finePass.ConfigureFineNormals(variance.AsMemory(0, variance.Length - 4), .175f, 3));
+        check("native fine water normals allow missing optional lookup", !finePass.ConfigureFineNormals(null, .175f, 3));
         var first = Draw();
+        byte[] FineDraw(float time)
+        {
+            Draw(); finePass.Render(target, new[] { uploaded }, packed, renderer.Camera, time, new(0, 0, -1), RenderMode.MaterialPreview);
+            return RenderTargetReadback.Read(gpu, target);
+        }
+        var analyticFine = FineDraw(0);
+        finePass.ConfigureFineNormals(variance, .175f, 3);
+        var detailedFine = FineDraw(0);
+        check("native fine water normals alter actual GPU toolkit shading", !detailedFine.AsSpan().SequenceEqual(analyticFine));
+        finePass.ConfigureFineNormals(null, .175f, 3);
+        check("native fine water analytic fallback restores exact GPU pixels", FineDraw(0).AsSpan().SequenceEqual(analyticFine));
         check("native water three-stage surface accepts static definition geometry", renderer.NativeWaterActive && NativeWaterSurface.Supports(uploaded, uploaded.Parts[0]));
         check("native water definition alpha remains data rather than opacity", Enumerable.Range(0, target.Width * target.Height)
             .Count(i => first[i * 4 + 1] > first[i * 4] * 1.5 && first[i * 4 + 1] > first[i * 4 + 2] * 2) > 100);

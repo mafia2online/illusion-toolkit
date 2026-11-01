@@ -31,6 +31,8 @@ internal static partial class Mafia3Probes
             TestCompiledAuthoring(Check);
             TestCompiledSceneCollections(Check);
             TestCompiledSceneCollectionGuards(Check);
+            TestCompiledNativeLod(Check);
+            TestCompiledNativeLodGpu(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
@@ -184,6 +186,8 @@ internal static partial class Mafia3Probes
             TestCompiledAuthoring(Check);
             TestCompiledSceneCollections(Check);
             TestCompiledSceneCollectionGuards(Check);
+            TestCompiledNativeLod(Check);
+            TestCompiledNativeLodGpu(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);

@@ -147,6 +147,8 @@ public interface IEditorSession
     { result = null; return "native water surface preview is unavailable"; }
     string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
         => "whole-map streaming control is unavailable";
+    string? NativeLodStatus(out IReadOnlyList<NativeLodInfo> groups)
+    { groups = []; return "native LOD inspection is unavailable"; }
     string? EffectPreviewScreenshot(string path) => "native effect preview is unavailable";
     string? MorphChannels(string name, int lod, out MorphInfo? result)
     { result = null; return "native morph preview is unavailable"; }

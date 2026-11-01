@@ -100,7 +100,7 @@ public static class Picking
     /// Nearest pickable mesh hit by the ray, or null. Broad phase sorts candidates by AABB entry distance and
     /// prunes any whose box starts beyond the best confirmed triangle hit — so dense scenes stay responsive.
     /// </summary>
-    public static GpuMesh? Pick(IReadOnlyList<GpuMesh> meshes, Vector3 origin, Vector3 dir, out float bestT)
+    public static GpuMesh? Pick(IReadOnlyList<GpuMesh> meshes, Vector3 origin, Vector3 dir, out float bestT, Vector3? lodPoint = null)
     {
         bestT = float.PositiveInfinity;
         GpuMesh? best = null;
@@ -109,7 +109,8 @@ public static class Picking
         var candidates = new List<(GpuMesh Mesh, float TEnter)>();
         foreach (GpuMesh m in meshes)
         {
-            if (!m.Visible || m.Instanced || m.PickPositions == null || m.PickIndices == null) continue;
+            m.RefreshNativeLod(lodPoint ?? origin);
+            if (!m.RenderVisible || m.Instanced || m.PickPositions == null || m.PickIndices == null) continue;
             m.RefreshPose();
             if (IntersectAabb(origin, dir, m.BoundsMin, m.BoundsMax, out float tEnter))
             {

@@ -144,11 +144,13 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         }
         // Standalone asset definitions are templates; placed scenes supersede matching template roots.
         var templates = NestedModelTemplateScenes();
+        InitializeNativeLods(sceneResources);
         var candidates = _frames.Values.Where(f => f.Parent is null && !templates.Contains(f.Element) && sceneResources.Contains(Graph.Owner(f.Element))).ToList();
         RegisterSceneCollectionProxyGroups(PlacedSceneCollectionObjects(sceneResources));
-        // Other physical LOD archives are loaded for GUID dependencies, not activated as scenes.
+        // Activate physical companion collections only when their native hierarchy was validated.
+        // Unknown metadata retains the primary-only fallback instead of overlapping proxy meshes.
         var collectionScenes = PlacedSceneCollectionObjects(sceneResources.Where(resource =>
-            _archives[resource].FullName.Equals(SourceArchive.FullName, StringComparison.OrdinalIgnoreCase)));
+            NativeLodMetadataReady || _archives[resource].FullName.Equals(SourceArchive.FullName, StringComparison.OrdinalIgnoreCase)));
         _sceneCollectionAuthoringOrigins.UnionWith(collectionScenes.Where(scene => !activeScenes.Values.Contains(Graph.Owner(scene))));
         var named = activeScenes.Count > 0 || collectionScenes.Count > 0
             ? candidates.Where(f => activeScenes.Values.Contains(Graph.Owner(f.Element)) || collectionScenes.Contains(f.Element)).ToList()
@@ -273,7 +275,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         var skin = VehicleSkin(frame, visual, level, bindToLocal);
         var decoded = decoder.Decode(visual, frame.Name, frame.WorldTransform, level, mask, bindToLocal,
             skin.Palette, skin.Skeleton, skin.Live, morphChannels, morphWeights);
-        if (decoded is not null) ApplyVehiclePaint(decoded, frame);
+        if (decoded is not null) { ApplyVehiclePaint(decoded, frame); AttachNativeLod(decoded, frame, visual); }
         return decoded;
     }
 

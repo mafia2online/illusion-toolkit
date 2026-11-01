@@ -6,6 +6,18 @@ namespace Illusion.Mcp.Tools;
 [McpServerToolType]
 public sealed class AuthoringTools
 {
+    [McpServerTool(Name = "lod_status")]
+    [Description("Inspect Mafia III native coarse/fine LOD groups in the current viewport: hierarchy, world bounds, squared switch distance, child-completer readiness and actual mesh visibility at the camera. Read-only. Manual tree visibility remains separate from native LOD selection.")]
+    public static async Task<string> LodStatus(IEditorSession editor, IUiThreadMarshal ui)
+    {
+        try
+        {
+            IReadOnlyList<NativeLodInfo> groups = [];
+            if (await ui.RunAsync(() => editor.NativeLodStatus(out groups)) is { } refusal) return ToolResult.Invalid(refusal);
+            return ToolResult.Json(new { success = true, groups });
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
     [McpServerTool(Name = "car_place")]
     [Description("Place an independent verified Mafia III type-10 vehicle under an existing city Kit. archive is a car name or archive path in the configured game's cars folder. Copies native geometry, rig, collision, prefab and wheel templates plus textures/memory resources into the destination archives, with native resource budgets. Optional name renames the scene placement; position is world [x,y,z], defaulting to the parent position, and yaw is degrees about Z. Uses editor Undo/Redo and Save/Build. This creates an actual native vehicle entity, distinct from a traffic marker.")]
     public static async Task<string> PlaceVehicle(IEditorSession editor, IUiThreadMarshal ui, string parent, string archive,

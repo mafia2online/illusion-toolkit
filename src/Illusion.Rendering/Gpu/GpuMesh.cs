@@ -56,6 +56,11 @@ public sealed unsafe class GpuMesh : IDisposable
     public ComPtr<ID3D11Buffer> IndexBuffer;
     public Matrix4x4 World;
     public bool Visible = true;
+    public NativeLodMembership? NativeLod { get; private set; }
+    public bool NativeLodVisible { get; private set; } = true;
+    public bool RenderVisible => Visible && NativeLodVisible;
+    public void RefreshNativeLod(Vector3 point, float switchScale = 1)
+        => NativeLodVisible = NativeLod is not { } native || native.Graph.IsVisible(native.Group, point, switchScale);
 
     /// <summary>Bridge edit mode: true renders the mesh desaturated/translucent in a separate pass
     /// (it is NOT part of the set currently open in Blender). Managed by SceneRenderer.SetGhostFocus.</summary>
@@ -203,6 +208,7 @@ public sealed unsafe class GpuMesh : IDisposable
         var result = new GpuMesh
         {
             World = mesh.World,
+            NativeLod = mesh.NativeLod,
             BoundsMin = bmin,
             BoundsMax = bmax,
             _localMin = lmin,

@@ -216,11 +216,11 @@ float4 PSMain(VOut i) : SV_TARGET
         // eye toggle can hide/show the selected mesh after it was selected — the outline follows automatically.
         bool any = false;
         foreach (GpuMesh m in meshes)
-            if (m.Visible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
+            if (m.RenderVisible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
         if (!any && placements != null)
         {
             foreach ((GpuMesh m, _) in placements)
-                if (m.Visible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
+                if (m.RenderVisible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
         }
         if (!any) return;
 
@@ -250,7 +250,7 @@ float4 PSMain(VOut i) : SV_TARGET
         uint offset = 0;
         foreach (GpuMesh mesh in meshes)
         {
-            if (!mesh.Visible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
+            if (!mesh.RenderVisible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
             var consts = new OutlineMaskConstants { Wvp = mesh.World * viewProj };
             GpuBuffers.UpdateConstant(ctx, _maskCb, ref consts);
 
@@ -262,7 +262,7 @@ float4 PSMain(VOut i) : SV_TARGET
 
         foreach ((GpuMesh mesh, Matrix4x4 world) in placements ?? [])
         {
-            if (!mesh.Visible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
+            if (!mesh.RenderVisible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
             var consts = new OutlineMaskConstants { Wvp = world * viewProj };
             GpuBuffers.UpdateConstant(ctx, _maskCb, ref consts);
 

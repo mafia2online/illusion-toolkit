@@ -139,7 +139,7 @@ internal sealed class SelectionController
         return min.X <= max.X;
     }
 
-    private static bool TryGetVisibleGeometryBounds(SceneNode node, out Vector3 min, out Vector3 max)
+    private bool TryGetVisibleGeometryBounds(SceneNode node, out Vector3 min, out Vector3 max)
     {
         min = new Vector3(float.MaxValue); max = new Vector3(float.MinValue);
         var stack = new Stack<SceneNode>(); stack.Push(node);
@@ -147,8 +147,12 @@ internal sealed class SelectionController
         {
             if (current.Mesh is { Visible: true } mesh)
             {
-                mesh.RefreshPose();
-                min = Vector3.Min(min, mesh.BoundsMin); max = Vector3.Max(max, mesh.BoundsMax);
+                mesh.RefreshNativeLod(_host.Rnd?.Camera.Position ?? Vector3.Zero);
+                if (mesh.NativeLodVisible)
+                {
+                    mesh.RefreshPose();
+                    min = Vector3.Min(min, mesh.BoundsMin); max = Vector3.Max(max, mesh.BoundsMax);
+                }
             }
             foreach (var child in current.Children) stack.Push(child);
         }

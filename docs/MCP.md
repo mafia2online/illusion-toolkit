@@ -215,3 +215,8 @@ This is resource authoring, without runtime particle simulation.
 `editor_stream_world` operates the map editor's real Whole map control and waits for streaming. It loads the native Bourbon shared city layer in Mafia III, including the water definitions, and streams districts around the camera. Disabling it returns to the selected area. Changing mode/season refuses unsaved edits unless explicitly discarded, and refuses open Blender sessions.
 
 Ordered `effect_point_timeline` / `effect_point_preview` also support six verified native plane generations. Snapshot metadata reports `emitterShape` and `emitterSize`; unsupported shape modes remain explicit refusals. Some native generations are invisible helpers with zero alpha and no material, so their correct particle data can accompany a transparent image rather than an invented sprite.
+
+
+`lod_status` reports the current native coarse/fine hierarchy, world bounds, child completion, camera visibility and visible mesh counts. Rendering and picking use the same stable native hierarchy masks; manual visibility remains independent.
+
+`water_surface` also reports whether the optional eight-mip water normal lookup is configured. The viewport applies native fine-normal UV motion using the copied lookup and water material D267.y/w; live material edits update these parameters. Dynamic flow, shoreline attenuation, foam and native reflection shading remain unimplemented.

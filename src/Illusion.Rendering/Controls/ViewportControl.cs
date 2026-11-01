@@ -741,7 +741,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         if (Renderer == null || ActualWidth <= 0 || ActualHeight <= 0) return null;
         var (o, d) = Picking.BuildRay(Renderer.Camera.ViewProjection, Renderer.Camera.Position,
             screenPos.X, screenPos.Y, ActualWidth, ActualHeight);
-        return Picking.Pick(Renderer.Meshes, o, d, out dist);
+        return Picking.Pick(Renderer.Meshes, o, d, out dist, Renderer.Camera.Position);
     }
 
     /// <summary>The world ray through a viewport screen pixel — for a subclass's own (e.g. collision) ray-pick.

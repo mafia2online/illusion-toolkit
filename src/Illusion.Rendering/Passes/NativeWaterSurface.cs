@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using Illusion.Rendering.Textures;
 using System.Numerics;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Scene;
@@ -15,14 +17,45 @@ namespace Illusion.Rendering.Passes;
 public sealed unsafe class NativeWaterSurface : IDisposable
 {
     private const int FieldSize = 256;
-    private const int ConstantFloats = 208;
+    private const int ConstantFloats = 212;
     private readonly GpuContext _gpu;
     private readonly float[] _values = new float[ConstantFloats];
     private ComPtr<ID3D11Buffer> _constants, _vertices, _indices;
     private ComPtr<ID3D11VertexShader> _definitionVs, _gridVs;
     private ComPtr<ID3D11PixelShader> _definitionPs, _wavePs, _surfacePs;
     private ComPtr<ID3D11InputLayout> _definitionLayout, _gridLayout;
-    private ComPtr<ID3D11ShaderResourceView> _lookup;
+    private ComPtr<ID3D11ShaderResourceView> _lookup, _fineNoise;
+    private float _fineScale, _fineIntensity;
+    private bool _fineParametersValid;
+    public float FineNormalScale => _fineScale;
+    public float FineNormalIntensity => _fineIntensity;
+
+    /// <summary>Refreshes native material parameters without recreating any GPU assets.
+    /// Nonfinite values disable detail; later finite values restore an existing lookup.</summary>
+    public bool SetFineNormalParameters(float scale, float intensity)
+    {
+        _fineParametersValid = float.IsFinite(scale) && float.IsFinite(intensity);
+        if (_fineParametersValid) { _fineScale = scale; _fineIntensity = intensity; }
+        return FineNormalsEnabled;
+    }
+    public bool FineNormalsConfigured => FineNormalsEnabled;
+    public bool FineNormalsEnabled => !_disposed && _fineNoise.Handle != null && _fineParametersValid;
+
+    /// <summary>Optional native RGBA8 256-square variance lookup, all eight authored mips.
+    /// Invalid or missing inputs disable detail and retain analytical normals.</summary>
+    public bool ConfigureFineNormals(ReadOnlyMemory<byte>? authoredDds, float scale, float intensity)
+    {
+        _fineNoise.Dispose(); _fineNoise = default;
+        SetFineNormalParameters(scale, intensity);
+        if (_disposed || authoredDds is not { } data || data.Length != 349648
+            || !float.IsFinite(scale) || !float.IsFinite(intensity)) return false;
+        uint U(int at) => BinaryPrimitives.ReadUInt32LittleEndian(data.Span.Slice(at, 4));
+        if (U(0) != 0x20534444 || U(12) != 256 || U(16) != 256 || U(28) != 8
+            || U(84) != 0 || U(88) != 32 || U(92) != 0xff || U(96) != 0xff00
+            || U(100) != 0xff0000 || U(104) != 0xff000000) return false;
+        _fineNoise = DdsTexture.LoadMipmapped(_gpu, data.ToArray());
+        return FineNormalsEnabled;
+    }
     private ComPtr<ID3D11SamplerState> _wrapped, _pointClamp, _linearClamp;
     private ComPtr<ID3D11RasterizerState> _raster;
     private ComPtr<ID3D11DepthStencilState> _depthState;
@@ -54,7 +87,7 @@ public sealed unsafe class NativeWaterSurface : IDisposable
         catch { Dispose(); throw; }
     }
 
-    public static bool Supports(GpuMesh mesh, GpuPart part) => mesh.Visible && !mesh.Ghost && !mesh.Instanced
+    public static bool Supports(GpuMesh mesh, GpuPart part) => mesh.RenderVisible && !mesh.Ghost && !mesh.Instanced
         && mesh.SkinBuffer.Handle == null && mesh.VertexBuffer.Handle != null && mesh.IndexBuffer.Handle != null
         && part.IndexCount > 0 && part.Surface?.NativeWaterDefinition is not null
         && part.SurfaceSrvs is { Length: >= 2 } views && views[0].Handle != null && views[1].Handle != null;
@@ -84,10 +117,11 @@ public sealed unsafe class NativeWaterSurface : IDisposable
         if (draws.Length == 0) return 0;
         var ctx = _gpu.Context11;
         var mainViewport = new Viewport(0, 0, target.Width, target.Height, 0, 1);
-        var resources = stackalloc ID3D11ShaderResourceView*[4];
+        var resources = stackalloc ID3D11ShaderResourceView*[5];
+        for (int i = 0; i < 5; i++) resources[i] = null;
         var renderTargets = stackalloc ID3D11RenderTargetView*[2];
         var samplers = stackalloc ID3D11SamplerState*[3]; samplers[0] = _wrapped.Handle; samplers[1] = _pointClamp.Handle; samplers[2] = _linearClamp.Handle;
-        var nullViews = stackalloc ID3D11ShaderResourceView*[4]; for (int i = 0; i < 4; i++) nullViews[i] = null;
+        var nullViews = stackalloc ID3D11ShaderResourceView*[5]; for (int i = 0; i < 5; i++) nullViews[i] = null;
         float* clear = stackalloc float[4]; for (int i = 0; i < 4; i++) clear[i] = 0;
         _values.AsSpan().Clear(); SetMatrix(16, camera.ViewProjection);
         SetVector(32, new(camera.Position, time));
@@ -100,9 +134,10 @@ public sealed unsafe class NativeWaterSurface : IDisposable
         SetVector(56, new(1f / target.Width, 1f / target.Height, 0, 0)); packed.CopyTo(_values.AsSpan(60));
         SetVector(188, Lighting.SunColor); SetVector(192, Lighting.AmbientUp); SetVector(196, Lighting.AmbientDown);
         SetVector(200, Lighting.SpecParams); SetVector(204, Lighting.Gamma);
+        SetVector(208, new(_fineScale, _fineIntensity, FineNormalsEnabled ? 1 : 0, 0));
         try
         {
-            ctx.VSSetShaderResources(0, 4, nullViews); ctx.PSSetShaderResources(0, 4, nullViews);
+            ctx.VSSetShaderResources(0, 5, nullViews); ctx.PSSetShaderResources(0, 5, nullViews);
             ctx.RSSetState(_raster.Handle); ctx.OMSetBlendState((ID3D11BlendState*)null, clear, uint.MaxValue);
             ctx.OMSetDepthStencilState(_depthState.Handle, 0);
             ctx.IASetPrimitiveTopology(D3DPrimitiveTopology.D3D11PrimitiveTopologyTrianglelist);
@@ -119,27 +154,27 @@ public sealed unsafe class NativeWaterSurface : IDisposable
             {
                 SetMatrix(0, draw.Mesh.World); Upload(); BindMesh(draw.Mesh);
                 resources[0] = draw.Part.SurfaceSrvs![0].Handle; resources[1] = draw.Part.SurfaceSrvs[1].Handle;
-                resources[2] = null; resources[3] = null; ctx.PSSetShaderResources(0, 4, resources);
+                resources[2] = null; resources[3] = null; ctx.PSSetShaderResources(0, 5, resources);
                 ctx.DrawIndexed(draw.Part.IndexCount, draw.Part.StartIndex, 0);
             }
-            ctx.PSSetShaderResources(0, 4, nullViews);
+            ctx.PSSetShaderResources(0, 5, nullViews);
             renderTargets[0] = _displacement!.View.Handle; renderTargets[1] = _normal!.View.Handle;
             ctx.OMSetRenderTargets(2, renderTargets, _depthView.Handle);
             ctx.ClearRenderTargetView(renderTargets[0], clear); ctx.ClearRenderTargetView(renderTargets[1], clear);
             ctx.ClearDepthStencilView(_depthView.Handle, (uint)ClearFlag.Depth, 1, 0);
             resources[0] = null; resources[1] = _mask.Resource.Handle; resources[2] = null; resources[3] = _lookup.Handle;
-            ctx.PSSetShaderResources(0, 4, resources); ctx.PSSetShader(_wavePs.Handle, null, 0);
+            ctx.PSSetShaderResources(0, 5, resources); ctx.PSSetShader(_wavePs.Handle, null, 0);
             foreach (var draw in draws)
             {
                 SetMatrix(0, draw.Mesh.World); Upload(); BindMesh(draw.Mesh);
                 ctx.DrawIndexed(draw.Part.IndexCount, draw.Part.StartIndex, 0);
             }
             ctx.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null);
-            ctx.PSSetShaderResources(0, 4, nullViews);
+            ctx.PSSetShaderResources(0, 5, nullViews);
             var main = target.Rtv.Handle; ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
             resources[0] = _displacement.Resource.Handle; resources[1] = _normal.Resource.Handle; resources[2] = null; resources[3] = null;
-            ctx.VSSetShaderResources(0, 4, resources); resources[0] = null; resources[1] = null; resources[2] = _color.Resource.Handle;
-            ctx.PSSetShaderResources(0, 4, resources);
+            ctx.VSSetShaderResources(0, 5, resources); resources[0] = null; resources[1] = null; resources[2] = _color.Resource.Handle; resources[4] = _fineNoise.Handle;
+            ctx.PSSetShaderResources(0, 5, resources);
             ctx.IASetInputLayout(_gridLayout.Handle); ctx.VSSetShader(_gridVs.Handle, null, 0); ctx.PSSetShader(_surfacePs.Handle, null, 0);
             var vertex = _vertices.Handle; uint stride = 4, offset = 0;
             ctx.IASetVertexBuffers(0, 1, &vertex, &stride, &offset); ctx.IASetIndexBuffer(_indices.Handle, Format.FormatR32Uint, 0);
@@ -148,7 +183,7 @@ public sealed unsafe class NativeWaterSurface : IDisposable
         }
         finally
         {
-            ctx.VSSetShaderResources(0, 4, nullViews); ctx.PSSetShaderResources(0, 4, nullViews);
+            ctx.VSSetShaderResources(0, 5, nullViews); ctx.PSSetShaderResources(0, 5, nullViews);
             var main = target.Rtv.Handle; ctx.OMSetRenderTargets(1, &main, target.Dsv.Handle); ctx.RSSetViewports(1, &mainViewport);
         }
     }
@@ -267,7 +302,7 @@ public sealed unsafe class NativeWaterSurface : IDisposable
     {
         if (_disposed) return; _disposed = true;
         _mask?.Dispose(); _color?.Dispose(); _displacement?.Dispose(); _normal?.Dispose(); _depthView.Dispose(); _depthTexture.Dispose();
-        _constants.Dispose(); _vertices.Dispose(); _indices.Dispose(); _lookup.Dispose(); _definitionLayout.Dispose(); _gridLayout.Dispose();
+        _constants.Dispose(); _vertices.Dispose(); _indices.Dispose(); _lookup.Dispose(); _fineNoise.Dispose(); _definitionLayout.Dispose(); _gridLayout.Dispose();
         _definitionVs.Dispose(); _gridVs.Dispose(); _definitionPs.Dispose(); _wavePs.Dispose(); _surfacePs.Dispose();
         _wrapped.Dispose(); _pointClamp.Dispose(); _linearClamp.Dispose(); _raster.Dispose(); _depthState.Dispose();
     }

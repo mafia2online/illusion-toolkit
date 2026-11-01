@@ -25,7 +25,7 @@ public sealed partial class CompiledMeshBinding
                 Name = mesh.Name, World = mesh.World, Positions = mesh.Positions, Normals = mesh.Normals, UVs = mesh.UVs, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs,
                 Tangents = mesh.Tangents, Binormals = mesh.Binormals, Indices = originalView.Indices, Parts = originalView.Parts,
                 Lod = mesh.Lod, BoneIndices = mesh.BoneIndices, BoneWeights = mesh.BoneWeights, Skeleton = mesh.Skeleton,
-                LiveRest = mesh.LiveRest, Instances = mesh.Instances, InstanceDrawDistances = mesh.InstanceDrawDistances
+                LiveRest = mesh.LiveRest, Instances = mesh.Instances, InstanceDrawDistances = mesh.InstanceDrawDistances, NativeLod = mesh.NativeLod
             };
             var partition = context with { Mesh = projected };
             var result = Rebuild(Payload(partition, "partition"), partition, lod); reason = null; return result;

@@ -314,6 +314,12 @@ internal sealed class MaterialEditController
     private void AfterMaterialChanged(ulong hash)
     {
         RefreshMeshesUsing(hash);
+        if (hash == 0x1A227ADE53424B91 && _host.Rnd is { } renderer)
+        {
+            var detail = Catalog.GetParameter(hash, "D267");
+            renderer.SetNativeWaterFineNormalParameters(detail is { Count: >= 4 } ? detail[1] : float.NaN,
+                detail is { Count: >= 4 } ? detail[3] : float.NaN);
+        }
         _host.RaiseMaterialsChanged();
         _host.RaiseDirtyChanged();
     }

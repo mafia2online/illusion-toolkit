@@ -217,7 +217,7 @@ public sealed partial class CompiledSceneDocument
         Graph.Owner(reference).Replace(reference, bytes);
     }
 
-    private sealed class GeometryCopy(CompiledSceneDocument document, IReadOnlyDictionary<ulong, ulong>? sharedIds = null, CompiledResource? destination = null)
+    private sealed partial class GeometryCopy(CompiledSceneDocument document, IReadOnlyDictionary<ulong, ulong>? sharedIds = null, CompiledResource? destination = null)
     {
         private readonly Dictionary<CompiledElement, CompiledElement> _elements = [];
         private readonly Dictionary<ulong, ulong> _guids = sharedIds is null ? [] : new(sharedIds);

@@ -32,8 +32,8 @@ internal static partial class Mafia3Probes
         }
         foreach (var (relative, roots, meshes, bakedIds) in new[]
         {
-            ("city/bc_bayou_block_a_lod0.sds", 458, 510, new ulong[] { 0x6072DDA1AE804E37, 0x6072DDA1AE804E3F, 0x6072DDA1AE804E47, 0x6072DDA1AE804E4F, 0x6072DDA1AE804E57 }),
-            ("city/bc_french_east_block_b_lod0.sds", 121, 305, new ulong[] { 0x5B403B2A66404E33, 0x5B403B2A66404E3B, 0x5B403B2A66404E43, 0x5B403B2A66404E4B })
+            ("city/bc_bayou_block_a_lod0.sds", 463, 515, new ulong[] { 0x6072DDA1AE804E37, 0x6072DDA1AE804E3F, 0x6072DDA1AE804E47, 0x6072DDA1AE804E4F, 0x6072DDA1AE804E57 }),
+            ("city/bc_french_east_block_b_lod0.sds", 125, 309, new ulong[] { 0x5B403B2A66404E33, 0x5B403B2A66404E3B, 0x5B403B2A66404E43, 0x5B403B2A66404E4B })
         })
         {
             var archive = new FileInfo(Path.Combine(MafiaEnvironment.ArchiveFolder, relative));
@@ -47,9 +47,9 @@ internal static partial class Mafia3Probes
                         foreach (var item in document.Graph.Items(document.Graph.Field(collection, "m_Objects")))
                             if (document.Graph.Resolve(item) is { TypeId: 0x4403597e } scene) placed.Add(scene.ObjectId);
             var rootIds = document.Roots.Select(row => row.Source).OfType<ICompiledMeshSource>().Select(source => source.SceneIdentity).ToArray();
-            check($"{archive.Name}: coarse LOD companion scenes have native ownership but are not activated by the primary LOD0 document",
+            check($"{archive.Name}: typed scene proxies activate with validated native LOD metadata",
                 document.Roots.Count == roots && document.Meshes.Count == meshes && rootIds.Distinct().Count() == rootIds.Length
-                && bakedIds.All(id => placed.Contains(id) && !rootIds.Contains($"guid:{id:X16}")));
+                && document.NativeLodMetadataReady && bakedIds.All(id => placed.Contains(id) && rootIds.Contains($"guid:{id:X16}")));
             var overlaps = document.Meshes.GroupBy(mesh =>
             {
                 using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

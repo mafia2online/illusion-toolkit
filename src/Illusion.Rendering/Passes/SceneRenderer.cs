@@ -43,6 +43,11 @@ public sealed unsafe class SceneRenderer : IDisposable
     public bool NativeWaterEnabled { get; set; } = true;
     public bool NativeWaterPlaying { get; set; }
     public bool NativeWaterAvailable => _nativeWater is not null;
+    public bool NativeWaterFineNormalsConfigured => _nativeWater?.FineNormalsConfigured ?? false;
+    public bool ConfigureNativeWaterFineNormals(ReadOnlyMemory<byte>? dds, float scale, float intensity)
+        => _nativeWater?.ConfigureFineNormals(dds, scale, intensity) ?? false;
+    public bool SetNativeWaterFineNormalParameters(float scale, float intensity)
+        => _nativeWater?.SetFineNormalParameters(scale, intensity) ?? false;
     public bool NativeWaterActive => NativeWaterEnabled && _nativeWaterActive && NativeWaterPartsDrawn > 0;
     public int NativeWaterPartsDrawn { get; private set; }
     public float NativeWaterTime
@@ -503,6 +508,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
     public void Render(SharedRenderTarget target)
     {
+        foreach (var mesh in _meshes) mesh.RefreshNativeLod(Camera.Position);
         var ctx = _gpu.Context11;
 
         var vp = new Viewport(0, 0, target.Width, target.Height, 0, 1);
@@ -588,7 +594,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         // shading selector offset by +4 (the shader's ghost marker).
         bool anyGhost = false;
         foreach (GpuMesh m in _meshes)
-            if (m.Ghost && m.Visible) { anyGhost = true; break; }
+            if (m.Ghost && m.RenderVisible) { anyGhost = true; break; }
         if (anyGhost)
         {
             Vector4 ghostColor = baseColor with { W = baseColor.W + 4f };
@@ -723,7 +729,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         foreach (GpuMesh mesh in _meshes)
         {
-            if (!mesh.Visible || mesh.Instanced || mesh.Ghost) continue;
+            if (!mesh.RenderVisible || mesh.Instanced || mesh.Ghost) continue;
             foreach (GpuPart part in mesh.Parts)
                 if (part.Blended) return true;
         }
@@ -753,7 +759,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
         foreach (GpuMesh mesh in _meshes)
         {
-            if (!mesh.Visible || mesh.Instanced) continue;             // instanced ones — separate pass
+            if (!mesh.RenderVisible || mesh.Instanced) continue;             // instanced ones — separate pass
             if (mesh.Ghost != ghostPass) continue;
             // Animated geometry may have moved into view since the previous frame.
             // Refresh both its palette and posed bounds before the broad-phase test.
@@ -847,7 +853,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         bool any = false;
         foreach (GpuMesh m in _meshes)
-            if (m.Instanced && m.Visible && m.Ghost == ghostPass) { any = true; break; }
+            if (m.Instanced && m.RenderVisible && m.Ghost == ghostPass) { any = true; break; }
         if (!any) return 0;
 
         // Raster state carries over from the mesh pass (solid/wireframe by mode) — instances match it.
@@ -878,7 +884,7 @@ public sealed unsafe class SceneRenderer : IDisposable
 
         foreach (GpuMesh mesh in _meshes)
         {
-            if (!mesh.Instanced || !mesh.Visible || mesh.Ghost != ghostPass) continue;
+            if (!mesh.Instanced || !mesh.RenderVisible || mesh.Ghost != ghostPass) continue;
             if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // whole-cloud early-out
 
             // Cull cells once per mesh (shared by all parts), merging contiguous survivors so a mostly

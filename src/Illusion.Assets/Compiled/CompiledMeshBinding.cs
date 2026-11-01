@@ -401,7 +401,7 @@ public sealed partial class CompiledMeshBinding
                 Normals = normals, UVs = uvs, DecalUVs = attributes.DecalUvs(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Colors = attributes.Colors(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Indices = original.Indices, Parts = original.Parts, Lod = original.Lod,
                 Tangents = renderTangents, Binormals = renderBinormals,
                 BoneIndices = context.Skin?.GlobalIds ?? original.BoneIndices, BoneWeights = context.Skin?.GlobalWeights ?? original.BoneWeights, Skeleton = original.Skeleton,
-                LiveRest = original.LiveRest, Instances = original.Instances, InstanceDrawDistances = original.InstanceDrawDistances }),
+                LiveRest = original.LiveRest, Instances = original.Instances, InstanceDrawDistances = original.InstanceDrawDistances, NativeLod = original.NativeLod }),
             ApplyCompiled = () =>
             {
                 foreach (var w in activeWrites) _graph.Owner(w.Stream.Data).Replace(w.Stream.Data, w.Bytes);

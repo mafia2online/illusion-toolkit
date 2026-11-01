@@ -22,11 +22,13 @@ cbuffer WaterConstants : register(b0)
     float4 AmbientDown;
     float4 SpecParams;
     float4 Gamma;
+    float4 FineNormal;
 };
 Texture2D<float4> Tex0 : register(t0);
 Texture2D<float4> Tex1 : register(t1);
 Texture2D<float4> Tex2 : register(t2);
 Texture2D<float2> Lookup : register(t3);
+Texture2D<float4> FineNoise : register(t4);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
@@ -62,7 +64,7 @@ DefinitionTargets DefinitionPS(DefinitionOut input)
 }
 """;
 
-    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + """
+    internal static readonly string Source = Header + AnalyticalWaterShader.Functions + NativeWaterFineNormalShader.Functions + """
 struct WaveTargets { float4 Displacement:SV_Target0; float4 Normal:SV_Target1; };
 WaveTargets WavePS(DefinitionOut input)
 {
@@ -78,7 +80,7 @@ WaveTargets WavePS(DefinitionOut input)
     o.Normal = float4(normal * .5 + .5, 1);
     return o;
 }
-struct GridOut { float4 Position:SV_Position; float3 Normal:TEXCOORD0; float3 WorldPosition:TEXCOORD1; };
+struct GridOut { float4 Position:SV_Position; float3 Normal:TEXCOORD0; float3 WorldPosition:TEXCOORD1; float2 Displacement:TEXCOORD2; };
 GridOut GridVS(uint4 packedPosition:POSITION)
 {
     float2 scale = 3.064427073695697e-5 * float2(1, 256);
@@ -94,11 +96,14 @@ GridOut GridVS(uint4 packedPosition:POSITION)
     o.Position = mul(float4(world, 1), ViewProjection);
     o.Normal = Tex1.SampleLevel(PointClamp, uv, 0).xyz * 2 - 1;
     o.WorldPosition = world;
+    o.Displacement = displacement.xy;
     return o;
 }
 float4 SurfacePS(GridOut input):SV_Target
 {
     float3 normal = normalize(input.Normal);
+    if (FineNormal.z != 0) normal = EvaluateNativeWaterFineNormal(FineNoise, Wrapped,
+        input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y);
     if (FieldData.z != 0) return float4(normal * .5 + .5, 1);
     float3 color = Tex2.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0).rgb;
     if (LightMode.w == 2) color = float3(.80, .81, .83);
