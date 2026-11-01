@@ -9,7 +9,7 @@ namespace Illusion.Rendering.Passes;
 /// instance buffer per key, so streaming can drop one archive's glyphs alone; colour and sizing mode ride per
 /// segment, so one layer covers boxes, axes and bones in a single draw.
 /// </summary>
-internal sealed unsafe class HelperGlyphRenderer : IDisposable
+internal sealed unsafe partial class HelperGlyphRenderer : IDisposable
 {
     private readonly OverlayLinePass _pass;
     private readonly Dictionary<object, District> _districts = new();
@@ -91,7 +91,7 @@ internal sealed unsafe class HelperGlyphRenderer : IDisposable
     /// <summary>Drops one archive's glyphs (district unload).</summary>
     public void RemoveDistrict(object key)
     {
-        if (_districts.Remove(key, out District d)) d.Vb.Dispose();
+        if (_districts.Remove(key, out var d)) d.Vb.Dispose();
     }
 
     /// <summary>Drops every archive's glyphs (scene reset).</summary>

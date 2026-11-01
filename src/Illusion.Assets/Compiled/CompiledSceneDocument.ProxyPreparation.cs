@@ -215,7 +215,12 @@ public sealed partial class CompiledSceneDocument
         public void CopyProxyRenderClosure(CompiledFrameNode[] frames, ProxySelection selection, CompiledElement child, CompiledElement parent)
         {
             RemapAlias(child.ObjectId, parent.ObjectId);
-            var queue = new Queue<CompiledElement>(frames.Select(f => f.Element));
+            CopyClosedDefinitions(frames.Select(f=>f.Element),selection);
+        }
+        public void CopyClosedDefinitions(IEnumerable<CompiledElement> roots, ProxySelection? selected = null)
+        {
+            var selection=selected??new ProxySelection([],[],[],[]);
+            var queue = new Queue<CompiledElement>(roots);
             var localReferences = new List<CompiledElement>(); var seen = new HashSet<CompiledElement>();
             void Follow(CompiledElement source, CompiledRewrite? plan)
             {

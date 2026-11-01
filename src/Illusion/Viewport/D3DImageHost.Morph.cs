@@ -84,7 +84,7 @@ public sealed partial class D3DImageHost
         }
         ClearMorphPreview();
         preview.BindToSceneRig(rig, () => Streamer.RefreshRig(node),
-            () => !IsLoading && BridgeEditedCount == 0 && Tree.IsInScene(node), includeMorphs ? SampleMorph : null,
+            () => !IsLoading && BridgeEditedCount == 0 && Tree.IsInScene(node) && ReferenceEquals(compiled.VehicleRig, rig), includeMorphs ? SampleMorph : null,
             () => { _animationMorphActive = false; _boundAnimationPreview = null; ClearMorphGeometry(); });
         if (preview.BoundBones == 0) return preview.Status;
         _boundAnimationPreview = preview;

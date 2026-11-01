@@ -13,11 +13,11 @@ namespace Illusion.Rendering.Passes;
 
 /// <summary>Three-stage analytical water surface: definition UV raster, native analytical field,
 /// screen-ray grid. User-owned lookup/material inputs only. Toolkit lighting and optional
-/// captured-scene optics; native depth attenuation/BRDF. Dynamic ripples remain absent.</summary>
+/// captured-scene optics; native depth attenuation/BRDF. Contact state is an explicit opt-in input.</summary>
 public sealed unsafe partial class NativeWaterSurface : IDisposable
 {
     private const int FieldSize = 256;
-    private const int ConstantFloats = 236;
+    private const int ConstantFloats = 240;
     private readonly GpuContext _gpu;
     private readonly float[] _values = new float[ConstantFloats];
     private ComPtr<ID3D11Buffer> _constants, _vertices, _indices;
@@ -76,7 +76,7 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
     public LightingConstants Lighting { get; set; } = LightingConstants.Default;
     public bool DebugNormals { get; set; }
     public bool ShowNormals { get => DebugNormals; set => DebugNormals = value; }
-    public const string Description = "Native analytical waves, camera-projected definition masks and screen-ray surface; toolkit lighting. Optional captured-scene optics use native depth attenuation and Blinn BRDF. Foam material diagnostics are OFF by default. Engine environment probes, temporal reflection filtering and dynamic ripples are absent.";
+    public const string Description = "Native analytical waves, camera-projected definition masks and screen-ray surface; toolkit lighting. Optional captured-scene optics use native depth attenuation and Blinn BRDF. Foam material diagnostics are OFF by default. Optional explicit native contact fields affect geometry. Engine environment probes, temporal reflection filtering and automatic actor wakes are absent.";
 
     public NativeWaterSurface(GpuContext gpu, IReadOnlyList<ReadOnlyMemory<byte>> lookupMips)
     {
@@ -148,6 +148,7 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
         SetVector(188, Lighting.SunColor); SetVector(192, Lighting.AmbientUp); SetVector(196, Lighting.AmbientDown);
         SetVector(200, Lighting.SpecParams); SetVector(204, Lighting.Gamma);
         SetVector(208, new(_fineScale, _fineIntensity, FineNormalsEnabled ? 1 : 0, 0));
+        SetVector(236, ContactShaderState);
         try
         {
             ctx.VSSetShaderResources(0, 12, nullViews); ctx.PSSetShaderResources(0, 12, nullViews);
@@ -182,8 +183,8 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
             ctx.OMSetRenderTargets(2, renderTargets, _depthView.Handle);
             ctx.ClearRenderTargetView(renderTargets[0], clear); ctx.ClearRenderTargetView(renderTargets[1], clear);
             ctx.ClearDepthStencilView(_depthView.Handle, (uint)ClearFlag.Depth, 1, 0);
-            resources[0] = null; resources[1] = _mask.Resource.Handle; resources[2] = null; resources[3] = _lookup.Handle;
-            ctx.PSSetShaderResources(0, 6, resources); ctx.PSSetShader(_wavePs.Handle, null, 0);
+            resources[0] = null; resources[1] = _mask.Resource.Handle; resources[2] = _contactState.Handle; resources[3] = _lookup.Handle;
+            ctx.PSSetShaderResources(0, 6, resources); BindContactSampler(); ctx.PSSetShader(_wavePs.Handle, null, 0);
             foreach (var draw in draws)
             {
                 SetMatrix(0, draw.Mesh.World); Upload(); BindMesh(draw.Mesh);
@@ -345,6 +346,7 @@ public sealed unsafe partial class NativeWaterSurface : IDisposable
         _mask?.Dispose(); _color?.Dispose(); _flow?.Dispose(); _displacement?.Dispose(); _normal?.Dispose(); _depthView.Dispose(); _depthTexture.Dispose();
         _constants.Dispose(); _vertices.Dispose(); _indices.Dispose(); _lookup.Dispose(); _fineNoise.Dispose(); _definitionLayout.Dispose(); _gridLayout.Dispose();
         _definitionVs.Dispose(); _gridVs.Dispose(); _definitionPs.Dispose(); _wavePs.Dispose(); _surfacePs.Dispose();
+        DisposeContact();
         _wrapped.Dispose(); _pointClamp.Dispose(); _linearClamp.Dispose(); _raster.Dispose(); _depthState.Dispose();
     }
 }

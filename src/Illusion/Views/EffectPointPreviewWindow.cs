@@ -240,15 +240,19 @@ public sealed class EffectPointPreviewWindow : Window
     {
         if (_pending || Snapshot is null) { _status.Text = "Wait for the requested frame before fitting its particles."; return; }
         _viewRevision++;
-        Vector2 minimum = Vector2.Zero, maximum = Vector2.Zero;
+        var emitterExtent = Vector2.Abs(Project(Snapshot.EmitterDimensions)) * .5f;
+        Vector2 minimum = -emitterExtent, maximum = emitterExtent;
         foreach (var p in Snapshot.Particles)
         {
-            var position = Project(p.Position); var size = Vector2.Abs(p.HalfSize);
+            var position = Project(p.Position); var rawSize = Vector2.Abs(p.HalfSize);
+            float cosine = MathF.Abs(MathF.Cos(p.Rotation)), sine = MathF.Abs(MathF.Sin(p.Rotation));
+            var size = new Vector2(cosine * rawSize.X + sine * rawSize.Y,sine * rawSize.X + cosine * rawSize.Y);
             minimum = Vector2.Min(minimum, position - size); maximum = Vector2.Max(maximum, position + size);
         }
         _center = (minimum + maximum) * .5f;
         var half = (maximum - minimum) * .5f;
-        _fitExtent = Math.Max(.01f, Math.Max(half.Y, half.X / 1.5f) * 1.1f);
+        float aspect = _target is null ? 1.5f : (float)_target.Width / _target.Height;
+        _fitExtent = Math.Max(.01f, Math.Max(half.Y, half.X / aspect) * 1.1f);
         _updating = true; try { _zoom.Value = 1; } finally { _updating = false; }
         RenderView();
     }
@@ -266,7 +270,7 @@ public sealed class EffectPointPreviewWindow : Window
                 + (TexturePath is null ? " Atlas unavailable: white helper quads." : "");
             if (_gpuFailure is not null) { _status.Text = _gpuFailure; return; }
             if (_renderer is null || _target is null || _gpu is null) return;
-            var sprites = Snapshot.Particles.Select(p => new PreviewBillboard(Project(p.Position) - _center, p.HalfSize, p.Color, p.AtlasUv)).ToArray();
+            var sprites = Snapshot.Particles.Select(p => new PreviewBillboard(Project(p.Position) - _center, p.HalfSize, p.Color, p.AtlasUv) { Rotation = p.Rotation }).ToArray();
             _renderer.Render(_target, sprites, TexturePath, (_fitExtent ?? OriginExtent) / (float)_zoom.Value);
             byte[] bytes = RenderTargetReadback.Read(_gpu, _target);
             _image.Source = BitmapSource.Create(_target.Width, _target.Height, 96, 96, PixelFormats.Bgra32, null, bytes, _target.Width * 4);

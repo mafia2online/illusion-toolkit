@@ -50,7 +50,7 @@ public struct GpuPart
 }
 
 /// <summary>GPU buffers of a single mesh + its parts by material + world matrix.</summary>
-public sealed unsafe class GpuMesh : IDisposable
+public sealed unsafe partial class GpuMesh : IDisposable
 {
     public ComPtr<ID3D11Buffer> VertexBuffer;
     public ComPtr<ID3D11Buffer> IndexBuffer;
@@ -284,6 +284,7 @@ public sealed unsafe class GpuMesh : IDisposable
             fixed (Vector4* data = colors) result.ColorBuffer = GpuBuffers.CreateImmutable(gpu, data, (uint)(n * sizeof(Vector4)), BindFlag.VertexBuffer);
         }
 
+        result.InitializeVegetationWind(gpu, mesh, sortedInstances);
         if (mesh.DecalUVs is { } decalUvs)
         {
             if (decalUvs.Length != n) throw new InvalidDataException("Decal UVs do not match the mesh allocation.");
@@ -621,6 +622,7 @@ public sealed unsafe class GpuMesh : IDisposable
             InstanceBuffer = default;
             Instanced = true; InstanceCount = 0;
             InstanceCells = null;
+            WindInstances = [];
             InstanceLodBounds = null;
             InstanceDrawOrigins = null;
             BoundsMin = new Vector3(float.MaxValue);
@@ -649,6 +651,7 @@ public sealed unsafe class GpuMesh : IDisposable
         var previous = InstanceBuffer;
         InstanceBuffer = replacement; Instanced = true; InstanceCount = instances.Length;
         InstanceCells = cells; InstanceDrawOrigins = origins; InstanceLodBounds = bounds;
+        WindInstances = WindGeometry is null ? [] : sorted;
         BoundsMin = bmin; BoundsMax = bmax;
         previous.Dispose();
     }
@@ -665,6 +668,7 @@ public sealed unsafe class GpuMesh : IDisposable
         if (IsSkinned) SkinBuffer.Dispose();
         if (ColorBuffer.Handle != null) ColorBuffer.Dispose();
         if (DecalUvBuffer.Handle != null) DecalUvBuffer.Dispose();
+        if (SecondaryColorBuffer.Handle != null) SecondaryColorBuffer.Dispose();
         // SRVs belong to TextureLibrary — returning the leases lets it evict entries with no users left.
         foreach (List<TextureLease> leases in _partLeases) _textures?.Release(leases);
         _textures?.Release(_textureLeases);

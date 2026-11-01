@@ -62,10 +62,15 @@ internal sealed class CompiledAuthoringWindow : Window
             ? host.CreateCompiledGroup(_name.Text, selected, out _) : "Select a destination group in the scene tree."));
         panel.Children.Add(Button("Create group for prepared fine object", () => host.SelectedNode is { } selected
             ? host.CreateLinkedProxyGroup(selected, _name.Text, out _) : "Select a prepared fine object in the scene tree."));
-        panel.Children.Add(Button("Edit prepared rigid skeleton�", () =>
+        panel.Children.Add(Button("Edit prepared rigid skeleton…", () =>
         {
             if (host.SelectedNode is not { } selected) return "Select a prepared fine object.";
             new CompiledProxyRigWindow(host, selected) { Owner = this }.Show(); return null;
+        }));
+        panel.Children.Add(Button("Import verified weighted prop under selected Kit...",()=>
+        {
+            if(host.SelectedNode is not{}selected)return "Select an owning Kit in a prepared fine resource.";
+            new CompiledProxySkinWindow(host,selected){Owner=this}.Show();return null;
         }));
         panel.Children.Add(Button("Make selected visual independent", () => host.SelectedNode is { } selected
             ? host.MakeCompiledMeshUnique(selected) : "Select one visual mesh in the scene tree."));
@@ -104,6 +109,10 @@ internal sealed class CompiledAuthoringWindow : Window
             }
             _waterWaves.Show(); _waterWaves.Activate(); return null;
         }, "Analytical wave preview opened."));
+        panel.Children.Add(Button("Preview explicit native water contact…", () =>
+        { new WaterContactPreviewWindow(host) { Owner = this }.Show(); return null; }, "Explicit contact preview opened."));
+        panel.Children.Add(Button("Preview native vegetation wind…", () =>
+        { new VegetationWindPreviewWindow(host) { Owner = this }.Show(); return null; }, "Native vegetation wind preview opened."));
         panel.Children.Add(Button("Play water surface", () =>
         {
             if (_host.Rnd is not { NativeWaterAvailable: true } renderer)

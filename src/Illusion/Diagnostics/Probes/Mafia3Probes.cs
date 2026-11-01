@@ -14,6 +14,9 @@ internal static partial class Mafia3Probes
 {
     internal static void RunEditing(string root)
     {
+        // Tests construct and close unshown windows. Keep the CLI application alive
+        // for the entire suite; App.OnStartup shuts it down after this method returns.
+        if (System.Windows.Application.Current is { } application) application.ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
         var report = new StringBuilder();
         int failures = 0;
         bool ready = false;
@@ -39,16 +42,34 @@ internal static partial class Mafia3Probes
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
             TestCompiledLinkedProxyGeometry(Check);
+            TestCompiledNavigationNetworkUi(Check);
+            TestCompiledNavigationNetwork(Check);
+            TestCompiledPooledProxyGeometry(Check);
+            TestCompiledProxyGeometryBatch(Check);
+            TestLinkedProxyGeometryBatchHost(Check);
             TestCompiledLinkedProxyReplacement(Check);
             TestCompiledLinkedProxyStructure(Check);
+            TestPreparedProxyRigStructure(Check);
+            TestPreparedProxyRigHost(Check);
+            TestPreparedProxyRigCollision(Check);
+            TestPreparedProxyRigCollisionHost(Check);
+            TestPreparedProxyRigGlass(Check);
+            TestPreparedProxyRigGlassHost(Check);
+            TestPreparedProxySkin(Check);
+            TestPreparedProxySkinHost(Check);
             TestCompiledLinkedProxyHighMaterials(Check);
             TestLinkedProxyGeometryHost(Check);
             TestLinkedProxyStructureHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
             TestNativeInstanceLod(Check);
+            TestNativePlacementRest(Check);
+            TestNativeVegetationWind(Check);
+            TestNativeVegetationWindBounds(Check);
+            TestNativeVegetationWindScene(Check);
             TestNativeInstanceUpdates(Check);
             TestNativePaintTriangle(Check);
+            TestNativePaintSpacing(Check);
             TestNativePaintClipping(Check);
             TestNativePaintTransforms(Check);
             TestNativePaintCells(Check);
@@ -76,8 +97,13 @@ internal static partial class Mafia3Probes
             TestNativeWaterFoamContext(Check);
             TestNativeWaterFoamSurface(Check);
             TestNativeWaterFoamViewport(Check);
+            TestNativeRainRipple(Check);
+            TestNativeWaterContact(Check);
+            TestNativeWaterContactViewport(Check);
+            TestNativeWaterContactJointViewport(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
+            TestNativeAnimationAuthoring(Check);
             TestSkinnedPreviewBounds(Check);
             TestCompiledAnimationPreviewUi(Check);
             TestCompiledMorphPreview(Check);
@@ -102,6 +128,7 @@ internal static partial class Mafia3Probes
 
     internal static void Run(string root)
     {
+        if (System.Windows.Application.Current is { } application) application.ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
         var report = new StringBuilder();
         int failures = 0;
         bool ready = false;
@@ -226,16 +253,34 @@ internal static partial class Mafia3Probes
             TestCompiledLinkedProxyAuthoring(Check);
             TestCompiledLinkedProxyMaterials(Check);
             TestCompiledLinkedProxyGeometry(Check);
+            TestCompiledNavigationNetworkUi(Check);
+            TestCompiledNavigationNetwork(Check);
+            TestCompiledPooledProxyGeometry(Check);
+            TestCompiledProxyGeometryBatch(Check);
+            TestLinkedProxyGeometryBatchHost(Check);
             TestCompiledLinkedProxyReplacement(Check);
             TestCompiledLinkedProxyStructure(Check);
+            TestPreparedProxyRigStructure(Check);
+            TestPreparedProxyRigHost(Check);
+            TestPreparedProxyRigCollision(Check);
+            TestPreparedProxyRigCollisionHost(Check);
+            TestPreparedProxyRigGlass(Check);
+            TestPreparedProxyRigGlassHost(Check);
+            TestPreparedProxySkin(Check);
+            TestPreparedProxySkinHost(Check);
             TestCompiledLinkedProxyHighMaterials(Check);
             TestLinkedProxyGeometryHost(Check);
             TestLinkedProxyStructureHost(Check);
             TestCompiledNativeLodBounds(Check);
             TestCompiledNativeLodRendering(Check);
             TestNativeInstanceLod(Check);
+            TestNativePlacementRest(Check);
+            TestNativeVegetationWind(Check);
+            TestNativeVegetationWindBounds(Check);
+            TestNativeVegetationWindScene(Check);
             TestNativeInstanceUpdates(Check);
             TestNativePaintTriangle(Check);
+            TestNativePaintSpacing(Check);
             TestNativePaintClipping(Check);
             TestNativePaintTransforms(Check);
             TestNativePaintCells(Check);
@@ -263,8 +308,13 @@ internal static partial class Mafia3Probes
             TestNativeWaterFoamContext(Check);
             TestNativeWaterFoamSurface(Check);
             TestNativeWaterFoamViewport(Check);
+            TestNativeRainRipple(Check);
+            TestNativeWaterContact(Check);
+            TestNativeWaterContactViewport(Check);
+            TestNativeWaterContactJointViewport(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
+            TestNativeAnimationAuthoring(Check);
             TestSkinnedPreviewBounds(Check);
             TestCompiledAnimationPreviewUi(Check);
             TestCompiledMorphPreview(Check);

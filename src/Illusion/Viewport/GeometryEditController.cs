@@ -80,7 +80,7 @@ internal sealed class GeometryEditController
                     : item.Result.AdditionalCompiledMeshes.Select(pair => new BridgeMeshApplier.ApplyResult.CompiledLodMesh(pair.Key, 0, pair.Value)).ToArray();
                 foreach (var counterpart in outputs)
                     foreach (var drawn in _host.Rnd!.Meshes.ToArray())
-                        if (drawn.Owner is SceneNode row && !ReferenceEquals(row, item.Node) && row.Lod == counterpart.Lod
+                        if (drawn.Owner is SceneNode row && !geometry.Any(primary => ReferenceEquals(primary.Node, row)) && row.Lod == counterpart.Lod
                             && (row.GeometrySource ?? row.Source) is ICompiledMeshSource { GeometryBinding: { } target }
                             && ReferenceEquals(target.Visual, counterpart.Binding.Visual))
                         {
@@ -125,7 +125,7 @@ internal sealed class GeometryEditController
 
             // Compiled LODs share compression coefficients. An expanded lattice re-packs their
             // buffers together, so every visible representation must follow the same undo unit.
-            if (item.Result.Requantized && item.Result.AdditionalCompiledLodMeshes.Count == 0 && (item.Node.GeometrySource ?? item.Node.Source) is ICompiledMeshSource { GeometryBinding: { } binding } compiled)
+            if (!item.Result.CompiledBatchMember && item.Result.Requantized && item.Result.AdditionalCompiledLodMeshes.Count == 0 && (item.Node.GeometrySource ?? item.Node.Source) is ICompiledMeshSource { GeometryBinding: { } binding } compiled)
             {
                 foreach (var drawn in _host.Rnd!.Meshes.ToArray())
                 {
@@ -479,8 +479,8 @@ internal sealed class GeometryEditController
         // AttachMesh ghosts anything outside the edit-focus set — but a swap replaces an EDITED
         // mesh, so the replacement inherits the ghost state instead (undo/redo mid-session would
         // otherwise ghost the very object being edited).
-        if (detach != null) { attach.Ghost = detach.Ghost; attach.Visible = detach.Visible; }
         node.Mesh = attach;
+        if (detach != null) { attach.Ghost = detach.Ghost; attach.Visible = detach.Visible; }
         if (node.Source is IFrameNode fn) attach.SetWorld(fn.WorldTransform);
         _host.Selection.UpdateSelectionHighlight();
         _host.RaiseSceneChanged();

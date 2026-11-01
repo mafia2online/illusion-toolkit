@@ -100,7 +100,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
         if (waves.Length != 128 || waves.ToArray().Any(value => !float.IsFinite(value)))
             throw new ArgumentException("Expected 128 finite native wave constants.", nameof(waves));
         var fresh = new NativeWaterSurface(_gpu, lookupMips);
-        _nativeWater?.Dispose(); _nativeWater = fresh; _nativeWaterWaves = waves.ToArray();
+        ClearNativeWaterContact(); _nativeWater?.Dispose(); _nativeWater = fresh; _nativeWaterWaves = waves.ToArray();
     }
     public void AdvanceNativeWater(float seconds)
     {
@@ -474,6 +474,8 @@ public sealed unsafe partial class SceneRenderer : IDisposable
     /// last user is among the disposed meshes are evicted by the library's lease accounting.</summary>
     public void Clear()
     {
+        ResetNativeVegetationWind();
+        ClearNativeWaterContact();
         NotifyNativeWaterFoamSourceChanged(); _nativeWaterActive = false; NativeWaterPartsDrawn = 0;
         _selectionMeshes.Clear(); // the selected mesh is among those about to be disposed
         foreach (GpuMesh m in _meshes) { m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged; m.Dispose(); }
@@ -575,6 +577,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
 
     public void Render(SharedRenderTarget target)
     {
+        BeginNativeVegetationWindFrame();
         foreach (var mesh in _meshes) mesh.RefreshNativeLod(Camera.Position);
         var ctx = _gpu.Context11;
 
@@ -633,6 +636,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
         if (_nativeWaterActive)
         {
             _nativeWater!.Lighting = lighting;
+            AdvanceNativeWaterContactPreview();
             int waterDrawCalls = _nativeWater!.Render(target, _meshes, _nativeWaterWaves!, Camera, NativeWaterTime, lightDir, Mode);
             DrawCalls += waterDrawCalls;
             NativeWaterPartsDrawn = waterDrawCalls > 0 ? _nativeWater.DefinitionPartsDrawn : 0;
@@ -952,7 +956,8 @@ public sealed unsafe partial class SceneRenderer : IDisposable
         foreach (GpuMesh mesh in _meshes)
         {
             if (!mesh.Instanced || mesh.InstanceCount == 0 || !mesh.RenderVisible || mesh.Ghost != ghostPass) continue;
-            if (!frustum.Intersects(mesh.BoundsMin, mesh.BoundsMax)) continue; // whole-cloud early-out
+            var wind = PrepareNativeVegetationWind(mesh);
+            if (!frustum.Intersects(wind?.Min ?? mesh.BoundsMin, wind?.Max ?? mesh.BoundsMax)) continue; // whole-cloud early-out
 
             // Cull cells once per mesh (shared by all parts), merging contiguous survivors so a mostly
             // visible cloud still collapses into a handful of DrawIndexedInstanced calls.
@@ -964,9 +969,11 @@ public sealed unsafe partial class SceneRenderer : IDisposable
             }
             else
             {
+                int cellIndex = -1;
                 foreach (InstanceCell cell in cells)
                 {
-                    if (!frustum.Intersects(cell.Min, cell.Max)) continue;
+                    cellIndex++;
+                    if (!frustum.Intersects(wind?.Cells[cellIndex].Min ?? cell.Min, wind?.Cells[cellIndex].Max ?? cell.Max)) continue;
                     // The range the source data itself gives these copies — the crash table draws a bin at 20 m
                     // and a billboard at 300 m, and the viewport shows what the game would. A cell holds copies of
                     // ONE distance (InstanceChunks bins by it), so this stays a single per-cell test.
@@ -981,7 +988,8 @@ public sealed unsafe partial class SceneRenderer : IDisposable
                         for (uint i = cell.Start; i < cell.Start + cell.Count; i++)
                         {
                             var box = bounds[i];
-                            if (!frustum.Intersects(box.Min, box.Max)
+                            var windBox = wind?.FrustumBounds((int)i, box) ?? box;
+                            if (!frustum.Intersects(windBox.Min, windBox.Max)
                                 || cell.DrawDistance > 0 && (mesh.InstanceDrawOrigins is { } origins
                                     ? (eye - origins[i]).LengthSquared() : DistanceSqToAabb(eye, box.Min, box.Max)) > cell.DrawDistance * cell.DrawDistance
                                 || maxDist > 0 && DistanceSqToAabb(eye, box.Min, box.Max) > maxDistSq
@@ -1021,6 +1029,7 @@ public sealed unsafe partial class SceneRenderer : IDisposable
             {
                 srvs[0] = part.Srv.Handle;         // t0 diffuse
                 _surfaceBindings.Bind(ctx, part, mesh.HasDecalUvs);
+                BindNativeVegetationWind(ctx, mesh, part, wind);
                 srvs[1] = part.NormalSrv.Handle;   // t1 normal
                 srvs[2] = part.SpecSrv.Handle;     // t2 specular level
                 if (srvs[0] != last0 || srvs[1] != last1 || srvs[2] != last2)
@@ -1052,7 +1061,8 @@ public sealed unsafe partial class SceneRenderer : IDisposable
 
     public void Dispose()
     {
-        _nativeWater?.Dispose();
+        DisposeNativeVegetationWind();
+        ClearNativeWaterContact(); _nativeWater?.Dispose();
         foreach (GpuMesh m in _meshes) { m.RenderInputsChanged -= NotifyNativeWaterFoamSourceChanged; m.Dispose(); }
         _meshes.Clear();
         Textures.Dispose();

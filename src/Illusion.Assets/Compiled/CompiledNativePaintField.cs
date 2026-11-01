@@ -6,6 +6,8 @@ using Illusion.Formats.Compiled;
 
 namespace Illusion.Assets.Compiled;
 
+public readonly record struct CompiledPaintSpacingSettings(float X, float Y, float DeviationX, float DeviationY);
+
 public sealed record CompiledNativePaintCell(CompiledPaintCellAddress Address, IReadOnlyList<MeshData> Meshes,
     int Candidates, int FullCount, bool NativeBakedBins, bool EditorSeededShuffle, string? RenderRefusal)
 {
@@ -23,6 +25,7 @@ public sealed class CompiledNativePaintField
     private readonly uint _seed;
     private readonly Func<Matrix4x4[], CompiledPaintCellAddress, IReadOnlyList<MeshData>> _makeMeshes;
     public ulong RootId { get; }
+    public ulong SpawningProfileId { get; internal init; }
     public ulong OwnerSceneId { get; internal init; }
     public ulong OwnerVisualHash { get; internal init; }
     public NativeLodMembership? OwnerLod { get; internal init; }
@@ -33,16 +36,17 @@ public sealed class CompiledNativePaintField
     public Vector3 BoundsMax { get; }
     public CompiledPaintCellContext Context { get; }
     public bool NativeBakedBins { get; }
+    public CompiledPaintSpacingSettings? Spacing { get; }
     public string? RenderRefusal { get; }
 
     internal CompiledNativePaintField(ulong rootId, string sourceArchive, string layerName, string instanceName,
         CompiledPaintMapping mapping, CompiledPaintDensity density, Matrix4x4 world, float value,
         float minimumScale, float maximumScale, float normalAlignment, bool baked,
-        Func<Matrix4x4[], CompiledPaintCellAddress, IReadOnlyList<MeshData>> makeMeshes, string? renderRefusal = null)
+        Func<Matrix4x4[], CompiledPaintCellAddress, IReadOnlyList<MeshData>> makeMeshes, string? renderRefusal = null, CompiledPaintSpacingSettings? spacing = null)
     {
         RootId = rootId; SourceArchive = sourceArchive; LayerName = layerName; _mapping = mapping; _density = density; _world = world;
         _value = value; _minimumScale = minimumScale; _maximumScale = maximumScale; _normalAlignment = normalAlignment;
-        NativeBakedBins = baked; _makeMeshes = makeMeshes; RenderRefusal = renderRefusal; Context = new();
+        Spacing = spacing; NativeBakedBins = baked; _makeMeshes = makeMeshes; RenderRefusal = renderRefusal; Context = new();
         _seed = Fnv(Encoding.UTF8.GetBytes(instanceName));
         var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
         foreach (var position in mapping.Positions)
@@ -99,8 +103,12 @@ public sealed class CompiledNativePaintField
             Vector3 normal = CompiledPaintTriangle.FlatNormal(p[0], p[1], p[2]);
             for (int corner = 0; corner < 3; corner++) uv[corner] = Vector3.Clamp(uv[corner], new(-100), new(100));
             uint seed = Fnv(MemoryMarshal.AsBytes(p.AsSpan())) ^ profileSeed;
-            var accepted = CompiledPaintTriangle.GenerateCounted(p, [normal, normal, normal], uv, [amount, amount, amount],
-                amount, amount, seed, _density.Sample, maximumCandidates - candidates, cancellationToken, out int count);
+            IReadOnlyList<CompiledPaintTriangle.Point> accepted; int count;
+            if (Spacing is { } spacing)
+                accepted = CompiledPaintSpacing.GenerateCounted(p, normal, uv, spacing.X, spacing.Y, spacing.DeviationX, spacing.DeviationY,
+                    seed, Context.Levels, level, _density.Sample, maximumCandidates - candidates, cancellationToken, out count);
+            else accepted = CompiledPaintTriangle.GenerateCounted(p, [normal, normal, normal], uv, [amount, amount, amount],
+                amount, amount, seed, _density.Sample, maximumCandidates - candidates, cancellationToken, out count);
             candidates += count; output.AddRange(accepted);
         }
         var ordered = output.ToArray(); var random = new Random(unchecked((int)editorShuffleSeed));

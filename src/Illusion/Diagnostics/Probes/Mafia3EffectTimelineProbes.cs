@@ -10,8 +10,8 @@ internal static partial class Mafia3Probes
     {
         var graph = document.Graph;
         var library = new CompiledEffectLibraryData(graph);
-        check("native point/plane timeline preflight accepts20 verified generations", library.Effects.SelectMany(library.Generations)
-            .Count(g => CompiledEffectPointTimeline.TryCreate(graph, g, out _, out _)) == 20);
+        check("native point/plane timeline preflight accepts21 verified generations", library.Effects.SelectMany(library.Generations)
+            .Count(g => CompiledEffectPointTimeline.TryCreate(graph, g, out _, out _)) == 21);
         var generation = graph.Objects[0x1065E033E7A12ADD];
         var resource = graph.Owner(generation); var before = resource.ToArray();
         check("native continuous random-rate point generation is available", CompiledEffectPointTimeline.TryCreate(graph, generation, out var timeline, out _));
@@ -29,10 +29,10 @@ internal static partial class Mafia3Probes
                 hash.AppendData(BitConverter.GetBytes(p.Position.X)); hash.AppendData(BitConverter.GetBytes(p.Position.Y)); hash.AppendData(BitConverter.GetBytes(p.Position.Z));
             }
         }
-        // Original Tick, Init, Birth, Scale, Point and zero-Speed routines, with private
+        // Original Tick, Init, Birth, Scale, Point, zero-Speed and Texture birth routines, with private
         // array memory and identity-emitter services. Native fast2D size interpolation.
         check("continuous point replay matches original native Tick at1000frames", Convert.ToHexString(hash.GetHashAndReset())
-            == "B1FF000189B2B8E29B541A6FE153BA4BBBBF8C9BB284DF944182A2AAEAAC1E55");
+            == "008E730E3BB237D4D6AD94DF0FF945524D14C16D4DE2027A989F9059F8D85EC1");
         var first = timeline!.SampleFrames(42);
         check("continuous point native stochastic birth expiry and rewind", first.Particles.Count == 1 && timeline.SampleFrames(46).Particles.Count == 0
             && timeline.SampleFrames(42).Particles.SequenceEqual(first.Particles) && timeline.SampleFrames(0).Particles.Count == 0);
@@ -57,6 +57,9 @@ internal static partial class Mafia3Probes
         try { timeline.SampleFrames(1, float.NaN); } catch (ArgumentOutOfRangeException) { refused = true; }
         check("continuous point timeline rejects invalid step values", refused);
         check("continuous point timeline never changes compiled bytes", resource.ToArray().AsSpan().SequenceEqual(before));
+        VerifyCompiledEffectRotation(document, check);
+        VerifyCompiledEffectBox(document, check);
+        VerifyCompiledEffectAtlas(document, check);
         VerifyCompiledEffectMotion(document, check);
         VerifyCompiledEffectPlane(document, check);
     }

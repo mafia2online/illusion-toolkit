@@ -204,3 +204,13 @@ Reflected and refracted radiance is produced by a bounded editor screen-space ra
 An ignored GPU oracle executes unmodified user-owned PS1078 and the production native helper with 500 randomized fields / 128,000 pixels, varied flow, banked normals and shallow depth. The maximum color-vector error is 0.00021143198; no pixel exceeds one 8-bit channel quantum. The pre-existing deep-water comparison with the production BRDF helper remains within 0.00042286396. This evidence applies to the controlled native material boundary, not the editor's radiance capture.
 
 Durable synthetic GPU tests cover a real reflected wall, captured underwater geometry, independent toggles, combined composition, visibility changes, resize/recreation, deterministic restoration and missing-BRDF fallback. Captures and lookup views are released with the water surface; SRVs are unbound across copy/RT boundaries. All tests use generated assets or copied user-owned inputs.
+
+
+### Composed foam viewport mode (2026-11-01)
+
+`water_foam` also accepts `mode=surface`. This mode uses the verified PS1078 foam material normal, roughness and authored diffuse term in the toolkit water lighting and screen-space optics pass. The normal and roughness now affect water lighting/reflection rather than appearing only as diagnostic colors. With captured opaque depth, the material receives the existing native depth-fade/depth-slope inputs. Diffuse/normals/roughness diagnostics retain their previous behavior. Simulation remains explicit, bounded, deterministic and disabled by default.
+
+This is toolkit lighting composition, not native final-renderer parity: native environment radiance, temporal filtering and dynamic ripple inputs remain separate work. The offscreen copied-resource viewport probe passes45 checks including retained history, distinct composed pixels, deterministic paused rendering, exact disabled output and unchanged compiled resource bytes.
+
+
+The previously unresolved default foam blur sampler is now traced through the original `C_PPShaderParamsCtx` constructor102747120. Its16-byte descriptor has min/mag2, mip1, UVW2, comparison1, bias0 and signed maxLOD-128. The original D3D sampler constructor102612FE0 maps this to `MIN_MAG_LINEAR_MIP_POINT` and mirror addressing. The viewport already used these verified filter/address modes. Rain ripples temporarily override that pointer and restore it, so their repeat-addressed sampler is not the default foam sampler. Scratch evidence: params-constructor-new.c, sampler-d3d.c and rain-ripples-new.c. Dynamic ripples and runtime environment/temporal radiance are still not implemented.

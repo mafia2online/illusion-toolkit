@@ -8,7 +8,10 @@ using Silk.NET.Direct3D11;
 
 namespace Illusion.Rendering.Passes;
 
-public readonly record struct PreviewBillboard(Vector2 Position, Vector2 HalfSize, Vector4 Color, Vector4 AtlasUv);
+public readonly record struct PreviewBillboard(Vector2 Position, Vector2 HalfSize, Vector4 Color, Vector4 AtlasUv)
+{
+    public float Rotation { get; init; }
+}
 
 /// <summary>Isolated unlit atlas/alpha visualization of evaluated particles, independent of scene shaders.</summary>
 public sealed unsafe class ParticleBillboardPreview : IDisposable
@@ -26,15 +29,17 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
     private ComPtr<ID3D11ShaderResourceView> _texture;
     private string? _texturePath;
     private bool _hasTexture;
-    private struct Constants { public Vector4 Rect, Uv, Color; }
+    private struct Constants { public Vector4 Rect, Uv, Color, Rotation; }
     private const string Hlsl = """
-        cbuffer Preview : register(b0) { float4 Rect; float4 Uv; float4 Color; };
+        cbuffer Preview : register(b0) { float4 Rect; float4 Uv; float4 Color; float4 Rotation; };
         Texture2D Atlas : register(t0); SamplerState Samp : register(s0);
         struct Varying { float4 Position : SV_POSITION; float2 Uv : TEXCOORD0; };
         Varying VSMain(uint id : SV_VertexID) {
             const float2 corners[6] = {float2(-1,1),float2(1,1),float2(1,-1),float2(-1,1),float2(1,-1),float2(-1,-1)};
             float2 corner = corners[id]; Varying o;
-            o.Position = float4(Rect.xy + corner * Rect.zw, 0, 1);
+            float2 offset = corner * Rect.zw;
+            offset = float2(Rotation.x * offset.x - Rotation.y * offset.y, Rotation.y * offset.x + Rotation.x * offset.y);
+            o.Position = float4(Rect.xy + offset * Rotation.zw, 0, 1);
             o.Uv = lerp(Uv.xy, Uv.zw, float2(corner.x * .5 + .5, .5 - corner.y * .5));
             return o;
         }
@@ -90,7 +95,8 @@ public sealed unsafe class ParticleBillboardPreview : IDisposable
         foreach (var sprite in sprites)
         {
             var constants = new Constants { Rect = new(sprite.Position.X / horizontal, sprite.Position.Y / extent,
-                sprite.HalfSize.X / horizontal, sprite.HalfSize.Y / extent), Uv = sprite.AtlasUv, Color = sprite.Color };
+                sprite.HalfSize.X, sprite.HalfSize.Y), Uv = sprite.AtlasUv, Color = sprite.Color,
+                Rotation = new(MathF.Cos(sprite.Rotation), MathF.Sin(sprite.Rotation), 1 / horizontal, 1 / extent) };
             GpuBuffers.UpdateConstant(ctx, _constants, ref constants); ctx.Draw(6, 0);
         }
         texture = null; ctx.PSSetShaderResources(0, 1, &texture); ctx.Flush();

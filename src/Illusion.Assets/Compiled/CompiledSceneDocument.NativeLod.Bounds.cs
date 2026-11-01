@@ -86,7 +86,8 @@ public sealed partial class CompiledSceneDocument
                 var visuals = CurrentItems(visualArray).Select(Graph.Resolve).ToArray();
                 if (visuals.Length == 0) continue;
                 NativeLodBounds? local = null;
-                if (Graph.Field(component, "m_LocalAABB") is { } field)
+                if (HasNativeSkin(frame) && PreparedSkinContract(frame,out _)) local = PreparedSkinLocalBounds(frame);
+                else if (Graph.Field(component, "m_LocalAABB") is { } field)
                     local = LocalBox(frame, component, field, 0, Matrix4x4.Identity);
                 else foreach (var visual in visuals)
                 {

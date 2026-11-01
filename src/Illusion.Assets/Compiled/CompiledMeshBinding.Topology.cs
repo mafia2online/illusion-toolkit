@@ -323,7 +323,7 @@ public sealed partial class CompiledMeshBinding
             SkinFromBlender = skinPlan?.Authored ?? 0,
             CompiledWriteFields = activeChanges.Select(c => c.Key).Concat(unchanged ? [] : new[] { context.NativeMesh }).ToArray(),
             NewMesh = RenderMesh(context, new MeshData { Name = old.Name, World = old.World, Positions = pArray, Normals = nArray, UVs = uvArray,
-                Colors = attributes.Colors(attributeCorners, donors), DecalUVs = attributes.DecalUvs(attributeCorners, donors),
+                Colors = attributes.Colors(attributeCorners, donors), SecondaryColors = old.SecondaryColors is { } secondaryColors ? donors.Select(donor => secondaryColors[donor]).ToArray() : null, DecalUVs = attributes.DecalUvs(attributeCorners, donors),
                 Indices = indexArray, Parts = parts.ToArray(), Lod = old.Lod,
                 Tangents = old.Tangents is null ? null : renderTangents, Binormals = old.Binormals is null ? null : renderBinormals,
                 BoneIndices = skinPlan?.GlobalIds, BoneWeights = skinPlan?.GlobalWeights, Skeleton = old.Skeleton, LiveRest = old.LiveRest, NativeLod = old.NativeLod }),

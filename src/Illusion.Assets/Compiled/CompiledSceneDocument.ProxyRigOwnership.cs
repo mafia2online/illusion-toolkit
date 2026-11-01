@@ -11,6 +11,14 @@ public sealed partial class CompiledSceneDocument
     /// <summary>Edits an existing rigid rest bone on independently identified native immutable
     /// skeleton copies. Original skeleton GUIDs remain unchanged for unloaded native users.</summary>
     public IEditAction? SetPreparedLinkedProxyBoneTransform(IFrameNode source, int bone, Matrix4x4 local, out string? refusal)
+        => EditPreparedLinkedProxyRig(source, () =>
+        {
+            var action = SetPreparedLinkedProxyBoneTransformCore(source, bone, local, out var reason);
+            return (action, reason);
+        }, out refusal);
+
+    private IEditAction? EditPreparedLinkedProxyRig(IFrameNode source,
+        Func<(IEditAction? Action, string? Refusal)> mutate, out string? refusal)
     {
         refusal = null;
         if (InspectPreparedLinkedProxyBones(source, out refusal).Count == 0) return null;
@@ -25,7 +33,6 @@ public sealed partial class CompiledSceneDocument
         var originals = new Dictionary<CompiledElement, byte[]>(); IEditAction? rest = null;
         try
         {
-            if (!CompiledMeshBinding.IsRigidBind(local)) throw new NotSupportedException("A static bind bone must remain a finite proper rigid transform.");
             foreach (var frame in new[] { fine, far })
             {
                 var component = Components(frame.Element).Single(c => c.TypeId == 0x0fa73185);
@@ -49,7 +56,7 @@ public sealed partial class CompiledSceneDocument
                 edits.Add(manager.AddGenericBudget(Path.GetFileName(resource.Path), [folder], out refusal) ?? throw new NotSupportedException(refusal));
             }
             ResetProxyInvariants(state);
-            rest = SetPreparedLinkedProxyBoneTransformCore(source, bone, local, out refusal) ?? throw new NotSupportedException(refusal);
+            var mutation = mutate(); rest = mutation.Action ?? throw new NotSupportedException(mutation.Refusal);
             var ownedCache = CapturePairRigCache(); bool applied = true;
             void Validate(bool forward)
             {
@@ -68,10 +75,22 @@ public sealed partial class CompiledSceneDocument
                 () =>
                 {
                     if (applied) return; Validate(true);
-                    foreach (var edit in edits) edit.Redo(); foreach (var copy in copies) copy.Reattach();
-                    foreach (var p in pointers) Graph.Owner(p.Field).Replace(p.Field, p.After);
-                    ownedCache(); ResetProxyInvariants(_linkedProxyStates[state.Parent]);
-                    rest.Redo(); applied = true;
+                    var currentState = _linkedProxyStates[state.Parent]; var previousPins = CaptureProxyStatePins(currentState);
+                    var restoreResources = Graph.Resources.Select(resource => resource.CaptureRevertedMutationCheckpoint()).ToArray();
+                    try
+                    {
+                        foreach (var edit in edits) edit.Redo(); foreach (var copy in copies) copy.Reattach();
+                        foreach (var p in pointers) Graph.Owner(p.Field).Replace(p.Field, p.After);
+                        ownedCache(); ResetProxyInvariants(currentState);
+                        rest.Redo(); applied = true;
+                    }
+                    catch
+                    {
+                        foreach (var p in pointers) Graph.Owner(p.Field).Replace(p.Field, p.Before);
+                        foreach (var copy in copies.AsEnumerable().Reverse()) copy.Detach();
+                        foreach (var edit in edits.AsEnumerable().Reverse()) edit.Undo(); originalCache();
+                        foreach (var restore in restoreResources) restore(); RestoreProxyStatePins(currentState, previousPins); throw;
+                    }
                 },
                 () =>
                 {

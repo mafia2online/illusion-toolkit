@@ -14,6 +14,12 @@ public sealed class MeshData
     public Vector3[] Normals { get; init; } = null!;
     public Vector2[]? UVs { get; init; }
     public Vector4[]? Colors { get; init; }
+    /// <summary>Optional native BGRA COLOR1 stream, including vegetation flexibility in alpha.</summary>
+    public Vector4[]? SecondaryColors { get; init; }
+    /// <summary>Native raw-model to decoded rigid geometry basis, for verified vegetation transforms.</summary>
+    public Matrix4x4? NativeWindGeometryBind { get; init; }
+    /// <summary>True only where each instance retains its native scene-object origin (not baked paint cells).</summary>
+    public bool NativeWindObjectOrigin { get; init; }
     /// <summary>Optional native TEXCOORD2 used by verified vehicle T018 decals.</summary>
     public Vector2[]? DecalUVs { get; init; }
     /// <summary>Per-vertex tangent/binormal (world of the local frame) for normal mapping; null when the

@@ -33,7 +33,7 @@ public sealed class LinkedProxyTools
     }
 
     [McpServerTool(Name = "linked_proxy_bones")]
-    [Description("Inspect existing native rest bones of a prepared render-only rigid fine object. Reports index, parent, name and authored parent-local row-major matrix; not an animation pose. Refuses shared skeletons, collision-bearing objects, skin and morph representations.")]
+    [Description("Inspect native rest bones of a prepared fine/far pair. Reports index, parent, name and authored parent-local row-major matrix. Supports verified rigid, static collision/glass and imported pure Model/Skeleton weighted rigs. Unknown gameplay/dynamic and morph layouts remain refused.")]
     public static async Task<string> Bones(IEditorSession editor, IUiThreadMarshal ui, string owner)
     {
         try
@@ -46,12 +46,36 @@ public sealed class LinkedProxyTools
     }
 
     [McpServerTool(Name = "linked_proxy_bone_set")]
-    [Description("Author one existing native rigid rest bone on a prepared fine object and its generated far counterpart, atomically and undoably. localMatrix is 16 row-major floats; translation is indices12–14. Must remain a finite proper rigid transform. Preserves inverse binds, indices, palettes and raw vertex buffers; refreshes native bounds and both representations. Only verified uniquely owned render-only static rigs are eligible. Normal Save/Build applies.")]
+    [Description("Author one existing native rigid rest bone on a prepared fine object and its generated far counterpart, atomically and undoably. localMatrix is 16 row-major floats; translation is indices12â€“14. Must remain a finite proper rigid transform. Preserves inverse binds, indices, palettes and raw vertex buffers; refreshes native bounds and both representations. Verified static collision/glass placements follow rigid bones; imported pure weighted rigs refit native joint envelopes. Unknown dynamic/gameplay and morph layouts remain refused. Normal Save/Build applies.")]
     public static async Task<string> SetBone(IEditorSession editor, IUiThreadMarshal ui, string owner, int bone, float[] localMatrix)
     {
         try
         {
             if (await ui.RunAsync(() => editor.SetLinkedProxyBone(owner, bone, localMatrix)) is { } refusal) return ToolResult.Invalid(refusal);
+            return ToolResult.Json(new { success = true });
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
+
+    [McpServerTool(Name = "linked_proxy_bone_add")]
+    [Description("Append an unused rest bone to a prepared Mafia III fine/far pair. Existing palette indices remain unchanged. Supply a unique name, existing parent index, rigid local row-major matrix and positive local bound reach. Undoable; normal Save/Build.")]
+    public static async Task<string> AddBone(IEditorSession editor, IUiThreadMarshal ui, string owner, string name, int parent, float[] localMatrix, float reach)
+    {
+        try
+        {
+            if (await ui.RunAsync(() => editor.AddLinkedProxyBone(owner, name, parent, localMatrix, reach)) is { } refusal) return ToolResult.Invalid(refusal);
+            return ToolResult.Json(new { success = true });
+        }
+        catch (Exception ex) { return ToolResult.Fail(ex); }
+    }
+
+    [McpServerTool(Name = "linked_proxy_bone_reparent")]
+    [Description("Reparent a rest bone in a prepared Mafia III fine/far pair while preserving its model-space bind transform. Parent must precede the bone, or be -1 for a root. Existing palette indices remain unchanged. Undoable; normal Save/Build.")]
+    public static async Task<string> ReparentBone(IEditorSession editor, IUiThreadMarshal ui, string owner, int bone, int parent)
+    {
+        try
+        {
+            if (await ui.RunAsync(() => editor.ReparentLinkedProxyBone(owner, bone, parent)) is { } refusal) return ToolResult.Invalid(refusal);
             return ToolResult.Json(new { success = true });
         }
         catch (Exception ex) { return ToolResult.Fail(ex); }

@@ -12,6 +12,9 @@ public sealed partial class CompiledSceneDocument
     private readonly List<ulong> _nativeTranslocatorResourceIds = [];
     public int NativeTranslocatorPlacementCount { get; private set; }
     public int NativeTranslocatorRenderedPlacements { get; private set; }
+    public int NativeTranslocatorRestPosePlacements { get; private set; }
+    public int NativeTranslocatorLightOverridePlacements { get; private set; }
+    public int NativeTranslocatorUnsupportedLightChanges { get; private set; }
     public IReadOnlyDictionary<string, int> NativeTranslocatorRefusals => _nativeTranslocatorRefusals;
     private readonly Dictionary<string, int> _nativeTranslocatorRefusals = [];
 
@@ -32,11 +35,14 @@ public sealed partial class CompiledSceneDocument
         public List<Vector3> Origins { get; } = [];
         public HashSet<ulong> Resources { get; } = [];
         public HashSet<string> Prototypes { get; } = [];
+        public int RestPoseInstances { get; set; }
+        public int LightOverrideInstances { get; set; }
     }
 
     private void BuildNativeTranslocators(CompiledMeshDecoder decoder, int selectedLod, IEnumerable<CompiledResource> sceneResources)
     {
         var clouds = new Dictionary<(CompiledFrameNode, CompiledElement), TranslocatorCloud>();
+        var restTemplates = new Dictionary<(CompiledFrameNode, CompiledElement), bool>();
         var decodedTemplates = new Dictionary<(CompiledFrameNode, CompiledElement), MeshData?[]>();
         var nativeLods = new Dictionary<(CompiledFrameNode, CompiledElement), (NativeMeshLod Table, NativeLodBounds Bounds)>();
         var canonicalTemplates = new Dictionary<(CompiledFrameNode, CompiledElement), (CompiledFrameNode, CompiledElement)>();
@@ -46,6 +52,7 @@ public sealed partial class CompiledSceneDocument
             var key = (frame, visual);
             if (decodedTemplates.TryGetValue(key, out var cached)) return cached;
             var decoded = DecodeNativePlacementTemplate(frame, visual, decoder);
+            restTemplates.Add(key, decoded.RestBaked);
             var meshes = decoded.Meshes; var bounds = decoded.Bounds;
             nativeLods.Add(key, (decoded.Table, bounds));
             string digest = NativePlacementTemplateHash(meshes);
@@ -90,7 +97,7 @@ public sealed partial class CompiledSceneDocument
                         if (!Graph.Objects.TryGetValue(description.ObjectId, out var prototype) || prototype.TypeId != 0x4403597E)
                             throw new InvalidDataException("An explicit translocator prototype is unresolved.");
                         var mod = placement.ModificationIndex < 0 ? null : modifications[placement.ModificationIndex];
-                        ValidateTranslocatorMod(mod);
+                        int lightChanges = ValidateTranslocatorMod(mod);
                         var overrides = new Dictionary<CompiledElement, (Matrix4x4? Matrix, bool Hidden)>();
                         foreach (var childMod in Graph.Items(Graph.Field(mod, "m_ChildrenMods")))
                         {
@@ -130,9 +137,14 @@ public sealed partial class CompiledSceneDocument
                         {
                             var key = canonicalTemplates[(entry.Frame, entry.Visual)];
                             if (!clouds.TryGetValue(key, out var cloud)) clouds.Add(key, cloud = new(key.Item1, key.Item2));
+                            if (restTemplates[(entry.Frame, entry.Visual)]) cloud.RestPoseInstances++;
+                            if (lightChanges != 0) cloud.LightOverrideInstances++;
                             cloud.Matrices.Add(entry.World); cloud.Origins.Add(placement.Transform.Translation); cloud.Ranges.Add(description.Range); cloud.Resources.Add(data.ResourceId); cloud.Prototypes.Add(entry.Frame.Name);
                         }
                         NativeTranslocatorRenderedPlacements++;
+                        if (lightChanges != 0) NativeTranslocatorLightOverridePlacements++;
+                        NativeTranslocatorUnsupportedLightChanges += lightChanges;
+                        if (entries.Any(entry => restTemplates[(entry.Frame, entry.Visual)])) NativeTranslocatorRestPosePlacements++;
                     }
                     catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
                     { Refuse(ex.Message); }
@@ -146,7 +158,7 @@ public sealed partial class CompiledSceneDocument
         foreach (var cloud in clouds.Values)
         {
             var row = new SdsFrameNode { Name = cloud.Frame.Name + $" ({cloud.Matrices.Count} placements)", Kind = "Mesh",
-                Source = new NativePlacementSource(string.Join(", ", cloud.Resources.Order().Select(id => $"{id:X16}")), string.Join(", ", cloud.Prototypes.Order()), cloud.Matrices.Count) };
+                Source = new NativePlacementSource(string.Join(", ", cloud.Resources.Order().Select(id => $"{id:X16}")), string.Join(", ", cloud.Prototypes.Order()), cloud.Matrices.Count, cloud.RestPoseInstances, cloud.LightOverrideInstances) };
             var matrices = cloud.Matrices.ToArray(); var ranges = cloud.Ranges.ToArray(); var origins = cloud.Origins.ToArray();
             var templates = decodedTemplates[(cloud.Frame, cloud.Visual)];
             for (int level = 0; level < templates.Length; level++)
@@ -158,7 +170,7 @@ public sealed partial class CompiledSceneDocument
                 {
                     Name = cloud.Frame.Name, World = Matrix4x4.Identity, Lod = level,
                     Positions = mesh.Positions, Normals = mesh.Normals, UVs = mesh.UVs,
-                    Tangents = mesh.Tangents, Binormals = mesh.Binormals, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs,
+                    Tangents = mesh.Tangents, Binormals = mesh.Binormals, Colors = mesh.Colors, SecondaryColors = mesh.SecondaryColors, NativeWindGeometryBind = mesh.NativeWindGeometryBind, NativeWindObjectOrigin = cloud.RestPoseInstances == 0, DecalUVs = mesh.DecalUVs,
                     Indices = mesh.Indices, Parts = mesh.Parts, Instances = matrices, InstanceDrawDistances = ranges, InstanceDrawOrigins = origins,
                     InstanceLod = new(definition.Table, level, definition.Bounds.Min, definition.Bounds.Max)
                 };
@@ -184,16 +196,22 @@ public sealed partial class CompiledSceneDocument
             }
     }
 
-    private void ValidateTranslocatorMod(CompiledElement? modification)
+    private int ValidateTranslocatorMod(CompiledElement? modification)
     {
-        if (modification is null) return;
+        if (modification is null) return 0;
         if (Graph.Field(modification, "m_LayerMetaDataIndex") is { } layer && unchecked((int)Graph.Integer(layer)) >= 0)
             throw new NotSupportedException("Conditional translocator layer activation is not verified.");
+        int lightChanges = 0;
         foreach (var node in Graph.Items(Graph.Field(modification, "m_ChildrenMods")).Prepend(Graph.Field(modification, "m_RootMods")))
-            if (Graph.Items(Graph.Field(node, "m_ComponentMods")).Count != 0)
-                throw new NotSupportedException("Native component overrides require their renderer-specific decoder.");
+            foreach (var change in Graph.Items(Graph.Field(node, "m_ComponentMods")))
+            {
+                if (!CompiledPlacementLightChanges.IsGeometryIndependent(Graph, change))
+                    throw new NotSupportedException("Native component overrides require their renderer-specific decoder.");
+                lightChanges++;
+            }
         if (Graph.Items(Graph.Field(modification, "m_WorldInteractionMods")).Count != 0)
             throw new NotSupportedException("Native world-interaction overrides are not statically simulated.");
+        return lightChanges;
     }
 
     private Matrix4x4? TranslocatorOverride(CompiledElement matrix)
@@ -210,7 +228,7 @@ public sealed partial class CompiledSceneDocument
         return zero ? null : ReadMatrix(data);
     }
 
-    private sealed class NativePlacementSource(string resources, string prototype, int count) : IPropertySource
+    private sealed class NativePlacementSource(string resources, string prototype, int count, int restPoses, int lightOverrides) : IPropertySource
     {
         public string TypeName => "Native placement cloud";
         public IReadOnlyList<PropertyGroup> GetPropertyGroups() => [new PropertyGroup
@@ -218,7 +236,9 @@ public sealed partial class CompiledSceneDocument
             Title = "Native placement source", IsTypeSpecific = true, Properties =
             [new() { Id = "NativePlacements.Resource", Label = "Resource GUIDs", Kind = PropertyKind.Text, IsReadOnly = true, Get = () => resources },
              new() { Id = "NativePlacements.Prototype", Label = "Prototype", Kind = PropertyKind.Text, IsReadOnly = true, Get = () => prototype },
-             new() { Id = "NativePlacements.Count", Label = "Placements", Kind = PropertyKind.Int, IsReadOnly = true, Get = () => (long)count }]
+             new() { Id = "NativePlacements.Count", Label = "Placements", Kind = PropertyKind.Int, IsReadOnly = true, Get = () => (long)count },
+             new() { Id = "NativePlacements.RestPoses", Label = "Static rest-pose visual instances", Kind = PropertyKind.Int, IsReadOnly = true, Get = () => (long)restPoses },
+             new() { Id = "NativePlacements.LightOverrides", Label = "Visual instances with unsupported native light overrides", Kind = PropertyKind.Int, IsReadOnly = true, Get = () => (long)lightOverrides }]
         }];
     }
 }

@@ -120,6 +120,7 @@ public sealed partial class CompiledSceneDocument
         }
         foreach (var frame in fine)
         {
+            bool verifiedSkin = PreparedSkinContract(frame, out _);
             var model = Components(frame.Element).Single(c => c.TypeId == 0x2da22400);
             var declared = Graph.Items(Graph.Field(model, "m_Visuals"));
             if (declared.Count == 0 || declared.Select(Graph.Resolve).Any(v => v?.TypeId != 0x62c04287))
@@ -144,7 +145,7 @@ public sealed partial class CompiledSceneDocument
                 if (ProxyReferencePresent(Graph.Field(native, "m_InternalMorphMapTextureData")) || ProxyReferencePresent(Graph.Field(native, "m_InternalMorphTextureData")))
                     throw new NotSupportedException("Internal morph texture dependencies cannot be prepared as static proxies.");
                 var flags = Graph.Data(Graph.Field(native, "m_VFFlags")!);
-                if (flags.Length != 12 || Enumerable.Range(0, 3).Any(i => (BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(Graph.Field(native, "m_VFFlags")!)[(i * 4)..]) & 0x200040) != 0))
+                if (flags.Length != 12 || Enumerable.Range(0, 3).Any(i => (BinaryPrimitives.ReadUInt32LittleEndian(Graph.Data(Graph.Field(native, "m_VFFlags")!)[(i * 4)..]) & (verifiedSkin ? 0x200000u : 0x200040u)) != 0))
                     throw new NotSupportedException("Skinned or morph proxy replacement has not been validated.");
                 var face = Graph.Resolve(Graph.Field(visual, "m_FaceGroupSet")) ?? throw new NotSupportedException("Missing native face groups.");
                 var tables = Graph.Items(Graph.Field(Graph.Field(face, "m_Data"), "m_FaceGroups")); int index = Math.Min(last, tables.Count - 1);

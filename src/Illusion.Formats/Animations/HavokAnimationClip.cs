@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Illusion.Formats.Animations;
 
@@ -46,7 +48,7 @@ public sealed partial class HavokAnimationClip
     {
         if (!float.IsFinite(seconds)) throw new ArgumentOutOfRangeException(nameof(seconds));
         if (_sampler is not null) return _sampler(Math.Clamp(seconds, 0, Duration));
-        float position = Math.Clamp(seconds / Duration, 0, 1) * (FrameCount - 1);
+        float position = InterleavedPosition(Math.Clamp(seconds, 0, Duration), Duration, FrameCount);
         int first = Math.Min((int)position, FrameCount - 1), next = Math.Min(first + 1, FrameCount - 1);
         float blend = position - first;
         var result = new Matrix4x4[TrackCount];
@@ -58,6 +60,19 @@ public sealed partial class HavokAnimationClip
                 * Matrix4x4.CreateTranslation(Vector3.Lerp(a.Translation, b.Translation, blend));
         }
         return result;
+    }
+
+    // Native hkaInterleavedUncompressedAnimation uses RCPPS and one Newton refinement,
+    // then multiplies time before the frame count. Division reassociation changes raw
+    // facial percentages near steep keys, so retain the original operation order.
+    private static float InterleavedPosition(float seconds, float duration, int frames)
+    {
+        if (frames <= 1) return 0;
+        float reciprocal = Sse.IsSupported ? Sse.Reciprocal(Vector128.Create(duration)).GetElement(0) : 1 / duration;
+        reciprocal *= 2 - reciprocal * duration;
+        float position = (frames - 1) * (seconds * reciprocal);
+        if (!float.IsFinite(position)) throw new InvalidDataException("Native interleaved frame position is not finite.");
+        return Math.Clamp(position, 0, frames - 1);
     }
 
     public static IReadOnlyList<HavokAnimationClip> Read(ReadOnlySpan<byte> input) => Read(input, null);
@@ -216,7 +231,7 @@ public sealed partial class HavokAnimationClip
                 { BlendHint = blendHint, FloatTrackToSlot = floatMapping };
             interleaved._floatSampler = seconds =>
             {
-                float position = seconds / duration * (frames - 1); int first = Math.Min((int)position, frames - 1), next = Math.Min(first + 1, frames - 1);
+                float position = InterleavedPosition(seconds, duration, frames); int first = Math.Min((int)position, frames - 1), next = Math.Min(first + 1, frames - 1);
                 return Enumerable.Range(0, floatTracks).Select(i => scalars[first * floatTracks + i]
                     + (scalars[next * floatTracks + i] - scalars[first * floatTracks + i]) * (position - first)).ToArray();
             };

@@ -14,12 +14,20 @@ public sealed unsafe partial class SceneRenderer
         {
             cancellationToken.ThrowIfCancellationRequested();
             Render(target);
+            if (NativeWaterContactPreviewEnabled)
+            {
+                if (!NativeWaterActive) return "Native contact preview requires supported visible water definitions in a perspective view.";
+                if (NativeWaterContactError is { } contactError) return contactError;
+                if (!NativeWaterContactPreviewReady) { if (watch.ElapsedMilliseconds >= 300) break; continue; }
+            }
             if (!NativeWaterFoamEnabled) return null;
             if (!NativeWaterActive) return "Native foam diagnostic is unavailable in this view: supported visible water definitions and perspective shading are required.";
             if (NativeWaterFoamError is { } error) return error;
             if (NativeWaterFoamReady) return null;
             if (watch.ElapsedMilliseconds >= 300) break;
         }
+        if (NativeWaterContactPreviewEnabled && !NativeWaterContactPreviewReady)
+            return $"Native contact preview is pending at frame {NativeWaterContactFrame}/{NativeWaterContactTargetFrame}; capture budget is eight draws /300ms, at most four contact steps each.";
         return $"Native foam capture replay is pending at frame {NativeWaterFoamFrame}/{NativeWaterFoamTargetFrame}; capture budget is eight draws /300ms, at most four simulation steps each. Reduce the requested frame or use the viewport projection.";
     }
 }

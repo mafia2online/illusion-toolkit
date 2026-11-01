@@ -42,7 +42,7 @@ internal sealed partial class AppEditorSession
         result = null;
         if (TargetHost is not { Rnd: { } renderer } host) return TargetNotOpen;
         if (frame is < 0 or > 36000) return "Foam frame must be in 0–36000.";
-        if (mode is not null && mode is not ("diffuse" or "normals" or "roughness")) return "Foam mode must be diffuse, normals or roughness.";
+        if (mode is not null && mode is not ("diffuse" or "normals" or "roughness" or "surface")) return "Foam mode must be diffuse, normals, roughness or surface.";
         if (!renderer.NativeWaterAvailable) return host.NativeWaterInputError ?? "Native water is unavailable.";
         bool willEnable = enabled ?? renderer.NativeWaterFoamEnabled;
         if (willEnable && (frame is { } targetFrame ? targetFrame / 60f : renderer.NativeWaterTime) > 600)

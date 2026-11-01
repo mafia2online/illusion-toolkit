@@ -14,7 +14,7 @@ namespace Illusion.Rendering.Passes;
 /// selected part's physics shapes — different meanings, one way of drawing them.
 /// </para>
 /// </summary>
-internal sealed unsafe class LineOverlayRenderer : IDisposable
+internal sealed unsafe partial class LineOverlayRenderer : IDisposable
 {
     private readonly OverlayLinePass _pass;
 

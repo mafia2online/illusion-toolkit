@@ -110,6 +110,8 @@ public sealed partial class CompiledSceneDocument
                         || !Graph.Objects.TryGetValue(pair.Value, out var target) || !_frames.TryGetValue(target, out var far)
                         || ProxyGroup(fine)?.ObjectId != mapping.Child || !ProxyFineAncestrySupported(fine) || fine.Children.Count != 0
                         || ProxyGroup(far)?.ObjectId != mapping.Parent || far.ParentFrame is not null || far.Children.Count != 0
+                        || !files.ContainsKey(Graph.Owner(source).Path) || !files.ContainsKey(Graph.Owner(target).Path)
+                        || !Graph.Owner(target).Path.Equals(Full(mapping.DestinationResource),StringComparison.OrdinalIgnoreCase)
                         || Components(target).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400)))
                         throw new InvalidDataException("Prepared render ownership or group membership changed.");
                     pairs.Add(fine, far);

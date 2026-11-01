@@ -33,6 +33,14 @@ public static class Program
                 Console.Write(JsonSerializer.Serialize(new { Success = true, Error = (string?)null, Connections = connections }));
                 return 0;
             }
+            if (request.Operation == "navigation_streaming_network")
+            {
+                using var network = new NavigationOracle(request.ExecutablePath);
+                var networkEdits = (request.Edits ?? []).ToDictionary(vertex => vertex.Index, vertex => new Vector3(vertex.X, vertex.Y, vertex.Z));
+                var resources = network.CookStreamingNetwork(request.Resources ?? throw new ArgumentException("Missing streaming resources."), networkEdits, request.MoveRepresentatives);
+                Console.Write(JsonSerializer.Serialize(new { Success = true, Error = (string?)null, Resources = resources }));
+                return 0;
+            }
             if (request.Operation == "navigation_streaming")
             {
                 using var jointCook = new NavigationOracle(request.ExecutablePath);

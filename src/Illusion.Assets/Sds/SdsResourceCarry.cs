@@ -120,6 +120,14 @@ public sealed class SdsResourceCarry
 
     /// <summary>Stages explicit positive SlotRam/OtherRam allowances; GPU allocations are independent.</summary>
     public IEditAction? AddGenericGrowthBudget(string destinationFile, long additionalSlotRamBytes, long additionalOtherRamBytes, out string? refusal)
+        => AddTypedGrowthBudget(destinationFile, "Generic", additionalSlotRamBytes, additionalOtherRamBytes, out refusal);
+
+    /// <summary>Reserves the additional serialized PC Havok animation block in its native OtherRam pool.
+    /// The resource remains one packfile allocation; no GPU or Generic allocation allowance is changed.</summary>
+    public IEditAction? AddAnimationGrowthBudget(string destinationFile, long additionalBytes, out string? refusal)
+        => AddTypedGrowthBudget(destinationFile, "hkAnimation", 0, additionalBytes, out refusal);
+
+    private IEditAction? AddTypedGrowthBudget(string destinationFile, string expectedType, long additionalSlotRamBytes, long additionalOtherRamBytes, out string? refusal)
     {
         refusal = null;
         try
@@ -127,7 +135,7 @@ public sealed class SdsResourceCarry
             _ = Contained(_folder, destinationFile);
             if (additionalSlotRamBytes < 0 || additionalOtherRamBytes < 0) throw new ArgumentOutOfRangeException(nameof(additionalSlotRamBytes));
             var target = Parse(_original).Elements("ResourceEntry").SingleOrDefault(e => e.Element("File")?.Value == destinationFile);
-            if (target?.Element("Type")?.Value != "Generic") throw new ArgumentException("Select a destination native Generic resource file.");
+            if (target?.Element("Type")?.Value != expectedType) throw new ArgumentException("Select a destination native " + expectedType + " resource file.");
             var budget = new GenericBudget(destinationFile, [checked((uint)additionalSlotRamBytes), 0, checked((uint)additionalOtherRamBytes), 0]);
             _ = BuildManifest(_entries.Where(p => _references.GetValueOrDefault(p.Key) > 0).Select(p => p.Value), _genericBudgets.Append(budget));
             var action = new BudgetEdit(this, budget); action.Redo(); return action;

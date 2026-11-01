@@ -433,3 +433,15 @@ identity, invalid-point and metadata-tamper refusal, both allocation budgets,
 compressed fresh extraction of both exact resources, redo, and byte-exact undo
 of every resource/manifest with source SDS untouched. The complete copied
 streaming suite now passes **42 checks**.
+
+## Loaded navigation networks beyond a reciprocal pair
+
+Fixed-topology deformation now accepts 2–32 explicitly selected loaded sections. `PrepareStreamingNetwork` propagates positions through exact reciprocal mesh-edge endpoints, including transitive junctions. A vertex touching any open, blocked or unloaded boundary remains protected. There is no positional-nearness stitching or guessed link creation. Optional representative movement requires every external graph connection of every moved node to have its peer loaded; unchanged external links remain byte protected.
+
+The isolated `navigation_streaming_network` worker reproduces each selected source graph using the original native multi-instance cost routine before changing anything. It then regenerates affected representative positions, local costs and reciprocal cross-section costs, preserving section UIDs, topology and stream connection records. Independent result validation permits only requested vertex positions, reviewed graph values and acceleration-root invalidation. A complete byte preflight covers all sections before Undo/Redo starts.
+
+The editor exposes a separate loaded-network vertex window from navigation geometry, with explicit source/loaded indices and protected rows. MCP `navigation_network_deform` uses the same asynchronous host/history path. Existing reciprocal pair and edge-split tools retain their original contracts; network topology splitting is not implied.
+
+Actual copied South sections A98D32E3/A98D32E0/AA8D345C reproduce the native baseline together. Moving source vertices 100 and 101 by two units in X moves two cluster representatives. The old two-section route refuses the same combined edit because a third section is required; the loaded three-section route succeeds. Native reciprocal cost recomputation preserves the original quantized costs in this case. Durable coverage verifies all three records, fresh save/reload, compressed archive roundtrip, malformed peer metadata refusal, exact Undo/Redo and unchanged original copied archives. Actual background MCP Save/Build/Undo acceptance also passed.
+
+Baseline mismatches remain explicit refusals: unrelated North sections and a broad thirteen-section South selection currently expose original-cost differences for some local graphs. The network feature does not disable those gates or claim that every selected native graph is understood. Select a proven loaded subnetwork covering all affected links; unknown baselines and unloaded dependencies remain protected.

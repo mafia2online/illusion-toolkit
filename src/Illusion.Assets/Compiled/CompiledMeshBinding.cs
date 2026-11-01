@@ -407,7 +407,7 @@ public sealed partial class CompiledMeshBinding
                 .Concat(touched == 0 ? [] : new[] { context.NativeMesh }).Distinct().ToArray(),
             NewDecompressionOffset = context.Origin, NewDecompressionFactor = context.Scale,
             NewMesh = RenderMesh(context, new MeshData { Name = original.Name, World = original.World, Positions = positions,
-                Normals = normals, UVs = uvs, DecalUVs = attributes.DecalUvs(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Colors = attributes.Colors(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Indices = original.Indices, Parts = original.Parts, Lod = original.Lod,
+                Normals = normals, UVs = uvs, DecalUVs = attributes.DecalUvs(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), Colors = attributes.Colors(attributeCorners, Enumerable.Range(0, positions.Length).ToArray()), SecondaryColors = original.SecondaryColors, Indices = original.Indices, Parts = original.Parts, Lod = original.Lod,
                 Tangents = renderTangents, Binormals = renderBinormals,
                 BoneIndices = context.Skin?.GlobalIds ?? original.BoneIndices, BoneWeights = context.Skin?.GlobalWeights ?? original.BoneWeights, Skeleton = original.Skeleton,
                 LiveRest = original.LiveRest, Instances = original.Instances, InstanceDrawDistances = original.InstanceDrawDistances, NativeLod = original.NativeLod }),

@@ -39,9 +39,11 @@ public static partial class NativeNavigationCooker
 {
     public static async Task<byte[][]> CookStreamingAsync(byte[][] resources, IReadOnlyDictionary<int, Vector3> vertices,
         string? copiedExecutablePath = null, CancellationToken cancellationToken = default, string? helperPath = null, bool moveRepresentatives = false,
-        int? splitEdge = null, Vector3? splitPoint = null)
+        int? splitEdge = null, Vector3? splitPoint = null, bool network = false)
     {
-        if (resources.Length != 2) throw new ArgumentException("Select one reciprocal section pair.", nameof(resources));
+        if (network ? resources.Length is < 2 or > 32 : resources.Length != 2)
+            throw new ArgumentException("Select a reciprocal pair or a bounded loaded navigation network.", nameof(resources));
+        if (network && splitEdge is not null) throw new NotSupportedException("Network topology splitting has a separate native contract.");
         string executable;
         if (copiedExecutablePath is not null) executable = Path.GetFullPath(copiedExecutablePath);
         else
@@ -68,7 +70,7 @@ public static partial class NativeNavigationCooker
         Task<string> output = process.StandardOutput.ReadToEndAsync(timeout.Token), error = process.StandardError.ReadToEndAsync(timeout.Token);
         try
         {
-            var request = new { ExecutablePath = executable, Resource = Array.Empty<byte>(), Resources = resources, Operation = splitEdge is null ? "navigation_streaming" : "navigation_stream_split", MoveRepresentatives = moveRepresentatives,
+            var request = new { ExecutablePath = executable, Resource = Array.Empty<byte>(), Resources = resources, Operation = network ? "navigation_streaming_network" : splitEdge is null ? "navigation_streaming" : "navigation_stream_split", MoveRepresentatives = moveRepresentatives,
                 Edge = splitEdge, Position = splitPoint is { } point ? new Vertex(0, point.X, point.Y, point.Z) : null,
                 Edits = vertices.Select(v => new Vertex(v.Key, v.Value.X, v.Value.Y, v.Value.Z)).ToArray() };
             await process.StandardInput.WriteAsync(JsonSerializer.Serialize(request).AsMemory(), timeout.Token); process.StandardInput.Close();
@@ -79,7 +81,7 @@ public static partial class NativeNavigationCooker
             if (process.ExitCode != 0 || !root.GetProperty("Success").GetBoolean())
                 throw new NotSupportedException(root.TryGetProperty("Error", out var message) ? message.GetString() : "Joint native cook was refused.");
             var result = root.GetProperty("Resources").EnumerateArray().Select(e => e.GetBytesFromBase64()).ToArray();
-            if (result.Length != 2) throw new InvalidDataException("Joint native cook returned an invalid section count.");
+            if (result.Length != resources.Length) throw new InvalidDataException("Joint native cook returned an invalid section count.");
             return result;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

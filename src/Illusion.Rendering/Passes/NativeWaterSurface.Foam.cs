@@ -34,7 +34,7 @@ public sealed unsafe partial class NativeWaterSurface
     public int FoamFrame => (int)(_foam?.Frames ?? 0);
     public int FoamTargetFrame => _foamTarget;
     public uint FoamSeed => _foamSeed;
-    public string FoamMode => _foamMode switch { 1 => "normals", 2 => "roughness", _ => "diffuse" };
+    public string FoamMode => _foamMode switch { 1 => "normals", 2 => "roughness", 3 => "surface", _ => "diffuse" };
     public string? FoamError { get; private set; }
     /// <summary>CPU-only invalidation for opaque geometry/material edits, undo/redo and streaming.
     /// Many notifications coalesce into one reset on the next bounded render update.</summary>
@@ -72,10 +72,13 @@ public sealed unsafe partial class NativeWaterSurface
     }
 
     public string? SetFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset)
+        => JointContactEnabled ? SetJointContactClock(enabled, mode, frame, seed, reset) : SetFoamCore(enabled, mode, frame, seed, reset);
+
+    private string? SetFoamCore(bool? enabled, string? mode, int? frame, uint? seed, bool reset)
     {
         if (frame is < 0 or > 36000) return "Foam frame must be in 0–36000; replay is fixed 1/60 seconds and advances at most four steps per draw.";
-        int selected = mode switch { null => _foamMode, "diffuse" => 0, "normals" => 1, "roughness" => 2, _ => -1 };
-        if (selected < 0) return "Foam mode must be diffuse, normals or roughness.";
+        int selected = mode switch { null => _foamMode, "diffuse" => 0, "normals" => 1, "roughness" => 2, "surface" => 3, _ => -1 };
+        if (selected < 0) return "Foam mode must be diffuse, normals, roughness or surface.";
         if ((enabled == true || (enabled != false && frame is not null)) && !FoamConfigured) return FoamError ?? "Native foam inputs are unavailable.";
         _foamMode = selected;
         if (seed is { } s && s != _foamSeed) { _foamSeed = s; reset = true; }
@@ -94,6 +97,8 @@ public sealed unsafe partial class NativeWaterSurface
         if (_foamNormal.Handle == null) _foamNormal = DdsTexture.LoadMipmapped(_gpu, _foamNormalBytes!);
         if (_foamBlur.Handle == null)
         {
+            // Native C_PPShaderParamsCtx constructor102747120: min/mag2, mip1, UVW2.
+            // C_D3D11SamplerState102612FE0 maps these to linear/point-mip and mirror.
             var desc = new SamplerDesc { Filter = Filter.MinMagLinearMipPoint, AddressU = TextureAddressMode.Mirror,
                 AddressV = TextureAddressMode.Mirror, AddressW = TextureAddressMode.Mirror, MaxLOD = float.MaxValue };
             ID3D11SamplerState* state = null; SilkMarshal.ThrowHResult(_gpu.Device11.CreateSamplerState(in desc, &state)); _foamBlur = state;
@@ -110,27 +115,34 @@ public sealed unsafe partial class NativeWaterSurface
         if (!_foamHasSignature || _foamSignature != current || _foam.Frames > _foamTarget || _foamConsumedRevision != _foamSourceRevision
             || _foamCamera != cameraView || _foamWidth != target.Width || _foamHeight != target.Height)
         {
-            _foam.Reset(_foamSeed); _foamSignature = current; _foamHasSignature = true;
+            _foam.Reset(_foamSeed); ResetJointContactReplay(); _foamSignature = current; _foamHasSignature = true;
             _foamConsumedRevision = _foamSourceRevision;
             _foamCamera = cameraView; _foamWidth = target.Width; _foamHeight = target.Height;
         }
-        if (_foam.Frames == _foamTarget) { FoamError = null; return 0; }
+        if (_foam.Frames == _foamTarget) { FoamError = null; PublishJointContactState(); return 0; }
         if (!_foamContext.Prepare(target, camera, draws.Select(d => d.Mesh).Distinct(), out string? refusal)) { FoamError = refusal; return 0; }
         int calls = _foamContext.DefinitionPartsDrawn + 3;
         for (int step = 0; step < 4 && _foam.Frames < _foamTarget; step++)
         {
-            calls += field((_foam.Frames + 1) / 60f);
-            var input = new NativeWaterFoamInputs(_foamContext.CameraConstants!.ViewConstants, _foamGlobals,
-                _foamContext.LinearDepth, _foamContext.Height, _displacement!.Resource, _foamBlur);
-            if (!_foam.Step(1f / 60, input, out refusal)) { FoamError = refusal; return calls; }
-            _foamOrigin = new(camera.Position.X, camera.Position.Y); calls += 4;
+            if (!BeginJointContactStep((int)_foam.Frames + 1)) return calls;
+            try
+            {
+                calls += field((_foam.Frames + 1) / 60f);
+                var input = new NativeWaterFoamInputs(_foamContext.CameraConstants!.ViewConstants, _foamGlobals,
+                    _foamContext.LinearDepth, _foamContext.Height, _displacement!.Resource, _foamBlur, JointContactFoam);
+                if (_jointContactPreview is { } joint) { _foamGlobals[140] = joint.Origin.X; _foamGlobals[141] = joint.Origin.Y; }
+                if (!_foam.Step(1f / 60, input, out refusal)) { FoamError = refusal; return calls; }
+                _foamOrigin = new(camera.Position.X, camera.Position.Y); calls += 4;
+            }
+            finally { EndJointContactStep(); }
         }
-        FoamError = null; return calls;
+        FoamError = null; PublishJointContactState(); return calls;
     }
 
     private int DrawFoamAnalytical((GpuMesh Mesh, GpuPart Part)[] draws, float time)
     {
         var ctx = _gpu.Context11; SetVector(32, new(_values[32], _values[33], _values[34], time));
+        SetVector(236, ContactShaderState);
         ID3D11ShaderResourceView** empty = stackalloc ID3D11ShaderResourceView*[9]; for (int i = 0; i < 9; i++) empty[i] = null;
         ctx.PSSetShaderResources(0, 9, empty); ctx.VSSetShaderResources(0, 9, empty);
         ctx.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null);
@@ -143,7 +155,7 @@ public sealed unsafe partial class NativeWaterSurface
         ctx.OMSetRenderTargets(2, rt, _depthView.Handle); float* clear = stackalloc float[4]; for (int i = 0; i < 4; i++) clear[i] = 0;
         ctx.ClearRenderTargetView(rt[0], clear); ctx.ClearRenderTargetView(rt[1], clear); ctx.ClearDepthStencilView(_depthView.Handle, (uint)ClearFlag.Depth, 1, 0);
         ID3D11ShaderResourceView** input = stackalloc ID3D11ShaderResourceView*[6]; for (int i = 0; i < 6; i++) input[i] = null;
-        input[1] = _mask!.Resource.Handle; input[3] = _lookup.Handle; ctx.PSSetShaderResources(0, 6, input);
+        input[1] = _mask!.Resource.Handle; input[2] = ContactAnalyticalState.Handle; input[3] = _lookup.Handle; ctx.PSSetShaderResources(0, 6, input); BindContactSampler();
         ctx.IASetInputLayout(_definitionLayout.Handle); ctx.VSSetShader(_definitionVs.Handle, null, 0); ctx.PSSetShader(_wavePs.Handle, null, 0);
         foreach (var d in draws) { SetMatrix(0, d.Mesh.World); Upload(); BindMesh(d.Mesh); ctx.DrawIndexed(d.Part.IndexCount, d.Part.StartIndex, 0); }
         ctx.PSSetShaderResources(0, 9, empty); ctx.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null); return draws.Length;

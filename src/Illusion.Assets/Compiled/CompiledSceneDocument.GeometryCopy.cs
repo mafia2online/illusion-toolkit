@@ -13,7 +13,7 @@ public sealed partial class CompiledSceneDocument
     private static readonly HashSet<uint> GeometryDependencyTypes =
         [0x1baf2d1d, 0xf0731a96, 0x4dc47de8, 0x51b03839, 0x557b6b6d, 0x2946549f];
 
-    private bool StaticGeometry(CompiledFrameNode frame)
+    private bool StaticGeometry(CompiledFrameNode frame, bool rigidCollision = false)
     {
         bool renderable = false;
         foreach (var component in Components(frame.Element))
@@ -27,7 +27,9 @@ public sealed partial class CompiledSceneDocument
                 renderable = true;
                 if (Graph.Items(Graph.Field(visual, "m_SkeletonBoneIDsPerLOD")).Count != 0) return false;
                 if (Graph.Field(visual, "m_Data") is { DataSize: >= 48 } data &&
-                    BinaryPrimitives.ReadUInt16LittleEndian(Graph.Data(data)[46..]) != 0 && !CompiledMeshBinding.TryStaticBind(Graph, frame.Element, visual, out _)) return false;
+                    BinaryPrimitives.ReadUInt16LittleEndian(Graph.Data(data)[46..]) != 0 && !(rigidCollision
+                        ? CompiledMeshBinding.TryImmutableRigidBind(Graph, frame.Element, visual, out _)
+                        : CompiledMeshBinding.TryStaticBind(Graph, frame.Element, visual, out _))) return false;
                 var set = Graph.Resolve(Graph.Field(visual, "m_MeshSet"));
                 if (set is null || Graph.Items(Graph.Field(set, "m_LODs")).Count == 0) return false;
                 if (Graph.Field(set, "m_MorphMapHash") is { } morph && Graph.Integer(morph) != 0
@@ -49,14 +51,14 @@ public sealed partial class CompiledSceneDocument
         return renderable;
     }
 
-    private List<GeometryCopy> CopyGeometry(CompiledElement scene)
+    private List<GeometryCopy> CopyGeometry(CompiledElement scene, CompiledResource? destination = null)
     {
         var visuals = Components(scene).SelectMany(c => Graph.Items(Graph.Field(c, "m_Visuals"))).Select(Graph.Resolve).OfType<CompiledElement>().ToArray();
         var frame = new CompiledFrameNode(this, scene);
         var decoder = new CompiledMeshDecoder(Graph, Illusion.Assets.Library.StageCompanions.For(SourceArchive));
         var views = visuals.Select(visual => Enumerable.Range(0, Graph.Items(Graph.Field(Graph.Resolve(Graph.Field(visual, "m_MeshSet")), "m_LODs")).Count)
             .Select(lod => DecodeVisual(frame, visual, decoder, lod)).ToArray()).ToArray();
-        var copies = CopyVisualGeometry(visuals);
+        var copies = CopyVisualGeometry(visuals, destination);
         for (int index = 0; index < visuals.Length; index++)
         {
             var visual = visuals[index];
@@ -73,7 +75,7 @@ public sealed partial class CompiledSceneDocument
         return copies;
     }
 
-    private List<GeometryCopy> CopyVisualGeometry(IEnumerable<CompiledElement> sourceVisuals)
+    private List<GeometryCopy> CopyVisualGeometry(IEnumerable<CompiledElement> sourceVisuals, CompiledResource? destination = null)
     {
         var copies = new List<GeometryCopy>();
         var detached = new HashSet<CompiledElement>();
@@ -84,7 +86,7 @@ public sealed partial class CompiledSceneDocument
             foreach (var (visual, sourceSet, sourceFaces) in visuals)
             {
                 if (sourceSet is null) continue;
-                var setCopy = new GeometryCopy(this);
+                var setCopy = new GeometryCopy(this, destination: destination);
                 copies.Add(setCopy);
                 var set = setCopy.CloneDefinition(sourceSet, followDependencies: false);
                 setCopy.Finish();
@@ -94,10 +96,13 @@ public sealed partial class CompiledSceneDocument
                 {
                     var sourceMesh = Graph.Resolve(Graph.Field(sourceLods[level], "m_Mesh"));
                     if (sourceMesh is null) throw new InvalidDataException("Unresolved mesh in copied LOD.");
-                    var meshCopy = new GeometryCopy(this);
+                    var meshCopy = new GeometryCopy(this, destination: destination);
                     copies.Add(meshCopy);
-                    var mesh = meshCopy.CloneDefinition(sourceMesh, followDependencies: true);
+                    CompiledElement mesh;
+                    if (destination is null) mesh = meshCopy.CloneDefinition(sourceMesh, followDependencies: true);
+                    else { meshCopy.CopyClosedDefinitions([sourceMesh]); mesh = meshCopy.Copied(sourceMesh)!; }
                     meshCopy.Finish();
+                    IsolateCopiedVertexAllocations(mesh, copies, detached);
                     ReplaceReference(Graph.Field(lods[level], "m_Mesh")!, mesh.ObjectId, detached);
                     var overrides = Graph.Items(Graph.Field(visual, "m_CDSubdiv"));
                     if (level < overrides.Count && Graph.Resolve(overrides[level]) is { } cd)
@@ -106,9 +111,9 @@ public sealed partial class CompiledSceneDocument
                         if (clonedCd is null)
                         {
                             if (cd.TypeId is not (0x4dc47de8 or 0x17bf41a8)) throw new NotSupportedException("Unknown independent visual collision override type.");
-                            var cdCopy = new GeometryCopy(this);
+                            var cdCopy = new GeometryCopy(this, destination: destination);
                             copies.Add(cdCopy);
-                            clonedCd = cdCopy.CloneDefinition(cd, followDependencies: true);
+                            clonedCd = cdCopy.CloneDefinition(cd, followDependencies: destination is null);
                             cdCopy.Finish();
                         }
                         ReplaceReference(overrides[level], clonedCd.ObjectId, detached);
@@ -117,7 +122,7 @@ public sealed partial class CompiledSceneDocument
                 ReplaceReference(Graph.Field(visual, "m_MeshSet")!, set.ObjectId, detached);
                 if (sourceFaces is not null)
                 {
-                    var faceCopy = new GeometryCopy(this);
+                    var faceCopy = new GeometryCopy(this, destination: destination);
                     copies.Add(faceCopy);
                     var faces = faceCopy.CloneDefinition(sourceFaces, followDependencies: false);
                     faceCopy.Finish();

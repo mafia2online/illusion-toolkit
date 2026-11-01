@@ -19,10 +19,10 @@ public sealed partial class CompiledSceneDocument
         {
             if (mesh is null) { Add<int>(null); continue; }
             Add(mesh.Positions); Add(mesh.Normals); Add(mesh.UVs); Add(mesh.Tangents); Add(mesh.Binormals);
-            Add(mesh.Colors); Add(mesh.DecalUVs); Add(mesh.Indices);
+            Add(mesh.Colors); Add(mesh.SecondaryColors); Add(mesh.DecalUVs); Add(mesh.Indices);
             // Full value equality below resolves hash collisions, including all surface/material fields.
             Add(mesh.Parts.Select(part => part.GetHashCode()).ToArray());
-            Add(new[] { mesh.NativeLod?.GetHashCode() ?? 0 });
+            Add(new[] { mesh.NativeLod?.GetHashCode() ?? 0 }); Add(new[] { mesh.NativeWindGeometryBind ?? System.Numerics.Matrix4x4.Identity });
         }
         return Convert.ToHexString(hash.GetHashAndReset());
     }
@@ -38,7 +38,7 @@ public sealed partial class CompiledSceneDocument
             if (a is null || b is null) { if (!ReferenceEquals(a, b)) return false; continue; }
             if (!Same(a.Positions, b.Positions) || !Same(a.Normals, b.Normals) || !Same(a.UVs, b.UVs)
                 || !Same(a.Tangents, b.Tangents) || !Same(a.Binormals, b.Binormals) || !Same(a.Colors, b.Colors)
-                || !Same(a.DecalUVs, b.DecalUVs) || !Same(a.Indices, b.Indices) || !a.Parts.SequenceEqual(b.Parts) || !Equals(a.NativeLod, b.NativeLod)) return false;
+                || a.NativeWindGeometryBind != b.NativeWindGeometryBind || !Same(a.SecondaryColors, b.SecondaryColors) || !Same(a.DecalUVs, b.DecalUVs) || !Same(a.Indices, b.Indices) || !a.Parts.SequenceEqual(b.Parts) || !Equals(a.NativeLod, b.NativeLod)) return false;
         }
         return true;
     }

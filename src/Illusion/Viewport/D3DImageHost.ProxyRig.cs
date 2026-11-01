@@ -10,6 +10,28 @@ public sealed partial class D3DImageHost
 {
     internal Action? BeforeLinkedProxyRigGpuAllocation { get; set; }
     internal string? SetLinkedProxyBone(SceneNode owner, int bone, Matrix4x4 local)
+        => EditLinkedProxyRig(owner, (document, source) =>
+        {
+            var action = document.SetPreparedLinkedProxyBoneTransform(source, bone, local, out var refusal);
+            return (action, refusal);
+        });
+
+    internal string? AddLinkedProxyBone(SceneNode owner, string name, int parent, Matrix4x4 local, float reach)
+        => EditLinkedProxyRig(owner, (document, source) =>
+        {
+            var action = document.AddPreparedLinkedProxyBone(source, name, parent, local, reach, out var refusal);
+            return (action, refusal);
+        });
+
+    internal string? ReparentLinkedProxyBone(SceneNode owner, int bone, int parent)
+        => EditLinkedProxyRig(owner, (document, source) =>
+        {
+            var action = document.ReparentPreparedLinkedProxyBone(source, bone, parent, out var refusal);
+            return (action, refusal);
+        });
+
+    private string? EditLinkedProxyRig(SceneNode owner,
+        Func<CompiledSceneDocument, IFrameNode, (IEditAction? Action, string? Refusal)> apply)
     {
         if (!Tree.IsInScene(owner)) return "The fine object is no longer in this scene.";
         if (IsLoading || Rnd is null || BridgeEditedCount > 0) return "Wait for loading and end the Blender session before editing a bind bone.";
@@ -22,10 +44,16 @@ public sealed partial class D3DImageHost
         var revertedRigs = targets.OfType<CompiledSceneDocument.CompiledFrameNode>().Select(document.VehicleRig)
             .OfType<CompiledVehicleRig>().Distinct().Select(rig => rig.CaptureRevertedAuthoredMutationCheckpoint()).ToArray();
         var revertedRigCache = document.CaptureRevertedRigCacheCheckpoint();
-        var action = document.SetPreparedLinkedProxyBoneTransform(canonical, bone, local, out var refusal);
+        var revertedCarry = document.CaptureRevertedCarryCheckpoint();
+        bool changesCollision = targets.OfType<CompiledSceneDocument.CompiledFrameNode>().Any(frame =>
+            document.Graph.Items(document.Graph.Field(frame.Element, "m_Components")).Select(document.Graph.Resolve)
+                .Any(component => component?.TypeId == 0x2b7b4775));
+        var collisionBefore = changesCollision ? CarCollisionEditing.CaptureRigCollisionOverlay() : default;
+        var (action, refusal) = apply(document, canonical);
         if (action is null) return refusal ?? "The native bind bone could not be edited.";
         var swaps = new List<(SceneNode Row, GpuMesh Before, GpuMesh After)>();
         var pending = new List<(SceneNode Row, MeshData Before, MeshData After)>();
+        IEditAction? rigRefresh = null, collisionRefresh = null;
         try
         {
             bool Match(SceneNode row, out CompiledMeshBinding? binding)
@@ -49,6 +77,13 @@ public sealed partial class D3DImageHost
                 foreach (var child in row.Children) Walk(child);
             }
             Walk(documentNode);
+            rigRefresh = Streamer.PrepareCompiledRigAuthoringRefresh(documentNode, targets);
+            if (changesCollision)
+            {
+                var collisionAfter = CarCollisionEditing.CaptureRigCollisionOverlay();
+                BeforeLinkedProxyRigGpuAllocation?.Invoke();
+                collisionRefresh = Rnd.PreparePartShapeLines(collisionBefore.Vertices, collisionBefore.Colors, collisionAfter.Vertices, collisionAfter.Colors);
+            }
         }
         catch (Exception ex)
         {
@@ -57,22 +92,25 @@ public sealed partial class D3DImageHost
             revertedBounds?.Invoke();
             foreach (var restore in revertedRigs) restore();
             revertedRigCache();
+            revertedCarry();
             foreach (var swap in swaps) swap.After.Dispose();
+            rigRefresh?.Discard();
+            collisionRefresh?.Discard();
             if (ex is OutOfMemoryException) throw;
             return "The edited rigid skeleton could not be displayed: " + ex.Message;
         }
-        var edit = new ProxyRigDisplayEdit(this, documentNode, action, swaps, pending);
+        var edit = new ProxyRigDisplayEdit(this, documentNode, action, swaps, pending, rigRefresh!, collisionRefresh);
         edit.Install(); History.Push(edit); return null;
     }
 
     private sealed class ProxyRigDisplayEdit(D3DImageHost host, SceneNode owner, IEditAction action,
         List<(SceneNode Row, GpuMesh Before, GpuMesh After)> swaps,
-        List<(SceneNode Row, MeshData Before, MeshData After)> pending) : INodeEdit
+        List<(SceneNode Row, MeshData Before, MeshData After)> pending, IEditAction rigRefresh, IEditAction? collisionRefresh) : INodeEdit
     {
         private bool _applied = true;
         public IEnumerable<SceneNode> Nodes => new[] { owner }.Concat(swaps.Select(s => s.Row)).Concat(pending.Select(p => p.Row));
-        public void ValidateUndo() => action.ValidateUndo();
-        public void ValidateRedo() => action.ValidateRedo();
+        public void ValidateUndo() { action.ValidateUndo(); rigRefresh.ValidateUndo(); collisionRefresh?.ValidateUndo(); }
+        public void ValidateRedo() { action.ValidateRedo(); rigRefresh.ValidateRedo(); collisionRefresh?.ValidateRedo(); }
         internal void Install() => Swap(true);
         private void Swap(bool forward)
         {
@@ -81,17 +119,20 @@ public sealed partial class D3DImageHost
             foreach (var swap in swaps)
             {
                 var before = forward ? swap.Before : swap.After; var after = forward ? swap.After : swap.Before;
-                host.Rnd.DetachMeshes([before]); host.Rnd.AttachMesh(after); after.Ghost = before.Ghost; after.Visible = before.Visible; swap.Row.Mesh = after;
+                host.Rnd.DetachMeshes([before]); host.Rnd.AttachMesh(after); swap.Row.Mesh = after;
+                after.Ghost = before.Ghost; after.Visible = before.Visible;
                 if (swap.Row.Source is IFrameNode frame) after.SetWorld(frame.WorldTransform);
             }
             host.Rnd.RestoreMeshOrder(order);
             foreach (var row in pending) row.Row.Pending = forward ? row.After : row.Before;
-            host.Persistence.MarkFrameModified(owner); host.Streamer.RefreshRig(owner);
+            if (forward) rigRefresh.Redo(); else rigRefresh.Undo();
+            if (forward) collisionRefresh?.Redo(); else collisionRefresh?.Undo();
+            host.Persistence.MarkFrameModified(owner);
             host.Selection.UpdateSelectionHighlight(); host.RaiseSelectionPropertiesChanged(); host.RaiseSceneChanged(); _applied = forward;
         }
         public void Undo() { if (!_applied) return; ValidateUndo(); action.Undo(); Swap(false); }
         public void Redo() { if (_applied) return; ValidateRedo(); action.Redo(); Swap(true); }
         public void Discard()
-        { action.Discard(); foreach (var swap in swaps) { if (_applied) swap.Before.Dispose(); else swap.After.Dispose(); } }
+        { action.Discard(); rigRefresh.Discard(); collisionRefresh?.Discard(); foreach (var swap in swaps) { if (_applied) swap.Before.Dispose(); else swap.After.Dispose(); } }
     }
 }

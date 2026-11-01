@@ -15,6 +15,7 @@ namespace Illusion.Assets.Compiled;
 public sealed class CompiledVehicleRig
 {
     private static readonly ConcurrentDictionary<ulong, string> AuthoredNames = new();
+    internal static void RememberAuthoredName(string name) => AuthoredNames[Fnv64.Hash(name, Encoding.UTF8)] = name;
     private readonly CompiledGraph _graph;
     private readonly CompiledElement _immutable;
     private readonly IFrameNode _frame;
@@ -23,6 +24,14 @@ public sealed class CompiledVehicleRig
     private Matrix4x4[]? _animationPose;
     internal Func<string?>? MutationRefusal { get; set; }
     internal static string? BoneMutationRefusal(IFrameNode source) => source is Bone bone ? bone.Owner.MutationRefusal?.Invoke() : null;
+    public static int BoneIndex(ISceneSource? source) => source is Bone bone ? bone.Index : -1;
+    public static bool TryBoneWorld(ISceneSource? source, out Matrix4x4 world)
+    {
+        if (source is Bone bone && bone.Owner._rest.DataSize >= 4L + (bone.Index + 1L) * 48
+            && (bone.Owner._frame is not CompiledSceneDocument.CompiledFrameNode frame || ReferenceEquals(frame.VehicleRig, bone.Owner)))
+        { world = bone.Owner.LiveRest[bone.Index] * bone.Owner._frame.WorldTransform; return true; }
+        world = default; return false;
+    }
     internal long AuthoredRevision { get; private set; }
     internal void NotifyAuthoredMutation() { _animationPose = null; AuthoredRevision++; }
     /// <summary>Captures transient playback and authored revision for a completely reverted,
@@ -190,6 +199,7 @@ public sealed class CompiledVehicleRig
     }
     private sealed class Bone(CompiledVehicleRig rig, int index) : IFrameNode, IPropertySource
     {
+        internal int Index => index;
         internal CompiledVehicleRig Owner => rig;
         public string TypeName => "Compiled skeleton bone";
         public bool IsOnNameTable => false;

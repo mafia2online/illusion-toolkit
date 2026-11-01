@@ -65,6 +65,12 @@ internal static partial class Mafia3Probes
             check("native animation binding changes transient rig pose", window.BoundBones > 0 && !rig.LiveRest.SequenceEqual(authored) && changes > 0);
             window.ClearSceneBinding();
             check("native animation explicit unbind restores authored pose and clears morph callback", window.BoundBones == 0 && clears == 1 && rig.LiveRest.SequenceEqual(authored));
+            bool currentRig = true; int staleClears = 0;
+            window.BindToSceneRig(rig, () => changes++, () => currentRig, morphClear: () => staleClears++);
+            window.Seek(20); window.SetPlaying(false); currentRig = false;
+            typeof(AnimationPreviewWindow).GetMethod("ValidateSceneBinding",flags)!.Invoke(window,null);
+            check("paused animation invalidation clears stale rig binding and restores its transient pose",window.BoundBones == 0
+                && staleClears == 1 && rig.LiveRest.SequenceEqual(authored) && window.Status.Contains("no scene rig",StringComparison.Ordinal));
             window.BindToSceneRig(rig, () => changes++, () => true,
                 (_, _) => { if (refuse) throw new NotSupportedException("probe forced facial callback refusal"); }, () => clears++);
             window.SetPlaying(true); refuse = true; File.Delete(output);

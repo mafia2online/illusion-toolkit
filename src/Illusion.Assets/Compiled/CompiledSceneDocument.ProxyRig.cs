@@ -21,9 +21,11 @@ public sealed partial class CompiledSceneDocument
         foreach (var frame in new[] { fine, state.Pairs[fine] })
         {
             var candidate = VehicleRig(frame);
-            if (frame.Children.Count != 0 || Components(frame.Element).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400)) || !StaticGeometry(frame)
+            if (frame.Children.Count != 0 || Components(frame.Element).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400 or 0x2b7b4775 or 0xe27be3b3))
+                || !StaticGeometry(frame, rigidCollision: true) && !PreparedSkinContract(frame,out _)
                 || candidate is null)
-            { refusal = "Paired rest-bone edits require render-only rigid skeletons without collision, skin or morph."; return []; }
+            { refusal = "Paired rest-bone edits require rigid model/skeleton components with verified static collision/glass; gameplay, dynamic, skin and morph dependencies need their own contract."; return []; }
+            if ((refusal = (ValidatePreparedRigCollision(frame, candidate) ?? ValidatePreparedRigGlass(frame, candidate))) is not null) return [];
         }
         var rig = VehicleRig(fine)!;
         return Enumerable.Range(0, rig.Count).Select(i => new PreparedProxyBoneInfo(i, rig.Name(i), rig.Parent(i), rig.LocalRest(i))).ToArray();
@@ -49,9 +51,11 @@ public sealed partial class CompiledSceneDocument
             if (!CompiledMeshBinding.IsRigidBind(local)) throw new NotSupportedException("A static bind bone must remain a finite proper rigid transform.");
             var rigs = new[] { fine, far }.Select(frame =>
             {
-                if (frame.Children.Count != 0 || Components(frame.Element).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400)) || !StaticGeometry(frame))
-                    throw new NotSupportedException("Paired bind edits require a render-only static object without collision, skin or morph components.");
+                if (frame.Children.Count != 0 || Components(frame.Element).Any(c => c.TypeId is not (0x0fa73185 or 0x2da22400 or 0x2b7b4775 or 0xe27be3b3))
+                    || !StaticGeometry(frame, rigidCollision: true) && !PreparedSkinContract(frame,out _))
+                    throw new NotSupportedException("Paired bind edits require rigid static models with verified static collision/glass dependencies.");
                 var rig = VehicleRig(frame) ?? throw new NotSupportedException("The object has no immutable native skeleton.");
+                if (ValidatePreparedRigGlass(frame, rig) is { } glassRefusal) throw new NotSupportedException(glassRefusal);
                 if ((uint)bone >= rig.Count || Graph.Nodes.Count(n => ReferenceEquals(Graph.Resolve(Graph.Field(n, "m_ImmutableData")), rig.Immutable)) != 1)
                     throw new NotSupportedException("The native immutable skeleton must be uniquely owned and the bone index valid.");
                 return rig;
@@ -61,6 +65,7 @@ public sealed partial class CompiledSceneDocument
                     throw new InvalidDataException("Fine and far native bind tables do not correspond.");
             var names = rigs.Select(rig => Graph.Items(Graph.Field(rig.Immutable, "m_BoneNames")).Select(Graph.Integer).ToArray()).ToArray();
             if (!names[0].SequenceEqual(names[1])) throw new InvalidDataException("Fine and far bone identities differ.");
+            var modelsBefore = rigs.Select(rig => Enumerable.Range(0, rig.Count).Select(rig.ModelRest).ToArray()).ToArray();
             foreach (var rig in rigs)
             {
                 var field = Graph.Field(rig.Immutable, "m_OrigBoneMatrices")!; var bytes = Graph.Data(field).ToArray();
@@ -69,8 +74,11 @@ public sealed partial class CompiledSceneDocument
             }
             foreach (var frame in new[] { fine, far })
             {
-                NativeLodBounds? aggregate = null;
-                foreach (var visual in ProxyVisuals(frame))
+                int rigIndex = ReferenceEquals(frame, fine) ? 0 : 1;
+                UpdatePreparedRigCollision(frame, rigs[rigIndex], modelsBefore[rigIndex], before, after);
+                bool skin=HasNativeSkin(frame);
+                NativeLodBounds? aggregate = skin?PreparedSkinLocalBounds(frame):null;
+                foreach (var visual in skin?Enumerable.Empty<CompiledElement>():ProxyVisuals(frame))
                 {
                     if (!CompiledMeshBinding.TryImmutableRigidBind(Graph, frame.Element, visual, out var bind)
                         || Graph.Field(visual, "m_Data") is not { DataSize: 88 } data)
@@ -80,6 +88,16 @@ public sealed partial class CompiledSceneDocument
                     aggregate = aggregate is { } old ? new(Vector3.Min(old.Min, box.Min), Vector3.Max(old.Max, box.Max)) : box;
                 }
                 if (aggregate is null) throw new InvalidDataException("The paired rig has no visual geometry.");
+                if(skin)
+                    foreach(var skeleton in Components(frame.Element).Where(component=>component.TypeId==0x0fa73185))
+                        foreach(string name in new[]{"m_LocalAABB","m_WorldAABB"})
+                        {
+                            var field=Graph.Field(skeleton,name);
+                            if(field is not{DataSize:24})throw new NotSupportedException("The skinned native skeleton lacks a verified envelope field.");
+                            before.TryAdd(field,Graph.Data(field).ToArray());
+                            after[field]=NativeBoundsBytes(name=="m_LocalAABB"?aggregate.Value:TransformNativeBounds(aggregate.Value,frame.WorldTransform));
+                            Graph.Owner(field).Replace(field,after[field]);
+                        }
                 foreach (var model in Components(frame.Element).Where(c => c.TypeId == 0x2da22400))
                     if (Graph.Field(model, "m_LocalAABB") is { } field)
                     {

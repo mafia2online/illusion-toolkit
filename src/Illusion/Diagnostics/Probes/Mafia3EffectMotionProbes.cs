@@ -60,23 +60,23 @@ internal static partial class Mafia3Probes
             return Convert.ToHexString(hash.GetHashAndReset());
         }
         // Both expected digests execute original full Tick+Accel+Speed with these exact inputs.
-        check("native acceleration damping and position match1000original frames", Digest() == "FE93A85A530CCC1A40DDCA7A6E3FE03B2874E29B1A7B49BFF03DA6057FE4F379");
+        check("native acceleration damping and position match1000original frames", Digest() == "63FBE094DEA5B43F065CAA9577BC987AF37EE9957518CCEFF747AB7DCF8941E1");
         var moving = timeline!.SampleFrames(45).Particles.Single();
         check("native acceleration produces visible displacement and velocity", moving.Position.LengthSquared() > .0001f && moving.Velocity.LengthSquared() > .1f);
         var distance = graph.Field(graph.Resolve(speedEntry), "m_MaxDist")!;
         var originalDistance = graph.Data(distance).ToArray();
         resource.Replace(distance, BitConverter.GetBytes(.004f));
-        check("native particle maximum-distance culling matches1000original frames", Digest() == "DE6433135F6CF299A0545CD74F5C429E8DAFF195F5BD0280CBE2BC8A504ACCF3");
+        check("native particle maximum-distance culling matches1000original frames", Digest() == "5C10398FB97649F9628AE93E9F89BA45CD2D4935AEB2CD0BAA98D485C1E25B41");
         check("native motion radius removes particles before lifetime expiry", timeline.SampleFrames(43).Particles.Count == 1 && timeline.SampleFrames(44).Particles.Count == 0);
         resource.Replace(distance, originalDistance);
         var birth = library.Operators(generation).Single(n => n.TypeId == 0x3EBB96BE);
         Bind(birth, "m_Rate", Scalar(120));
-        check("native multiple-birth cone displacement matches1000original frames", Digest() == "32E15644628971DFB9475DE659F8F8F1D8FC430505CB490D2EDC7BD0555A095A");
+        check("native multiple-birth cone displacement matches1000original frames", Digest() == "E81672BF7A2ED2DE59832754FEC21D46AA29CEE3D0B8283BE02CECE4045D5BE5");
         check("native newborn subframe offsets remain visible before normalization", timeline.SampleFrames(3).Particles.Any(p => p.AgeSeconds > 0
             && p.NormalizedAge == 0 && p.Position.LengthSquared() > 0));
         var speed = graph.Resolve(speedEntry)!;
         Bind(speed, "m_Speed", Scalar(5)); Bind(speed, "m_SpeedVar", Scalar(2)); Bind(speed, "m_SpeedMultiplier", Scalar(1.5f));
-        check("native cone speed variance and acceleration match1000original frames", Digest() == "EAF539DE17A47AA366133CB93DCEADA10D2BF4D3A9A6C57028D20A5805E8C95D");
+        check("native cone speed variance and acceleration match1000original frames", Digest() == "74BF66CB93C7E7921DAE03AE3386C076CC73605AEDD7979F5C3BE9A0FEA26FA3");
         check("native seeded speed replay rewinds deterministically", timeline.SampleFrames(30).Particles.SequenceEqual(timeline.SampleFrames(30).Particles));
         var session = timeline.CreateSession();
         while (!session.AdvanceToFrame(45)) { }

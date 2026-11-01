@@ -81,7 +81,7 @@ internal sealed partial class AppEditorSession : IEditorSession
             Loading: stage.IsLoading,
             Meshes: stage.MeshCount,
             Selection: stage.SelectedNodes.Select(n => n.Name).ToList(),
-            UnsavedEdits: stage.HasUnsavedEdits,
+            UnsavedEdits: stage.HasUnsavedEdits || window.AnimationPreview?.HasAnimationEdits == true,
             PendingBuild: stage.PendingBuildArchives().Select(f => f.Name).ToList(),
             BlenderObjects: stage.BridgeEditedCount,
             RenderMode: stage.RenderMode.ToString());
@@ -551,8 +551,9 @@ internal sealed partial class AppEditorSession : IEditorSession
         if (TargetHost is not { } host) return TargetNotOpen;
         try
         {
+            int animations = _resourceTarget ? ResourceWindow?.SaveAnimationEdits() ?? 0 : 0;
             D3DImageHost.SaveReport report = host.SaveEditsReport();
-            filesWritten = report.Written;
+            filesWritten = report.Written + animations;
             notSaved = report.NotSaved;
             return null;
         }
@@ -570,6 +571,9 @@ internal sealed partial class AppEditorSession : IEditorSession
         //
         // And when that save does not complete, nothing is packed: an archive packed now would ship meshes
         // naming materials that are not in the library on disk, with a backup taken and "built" reported.
+        try { if (_resourceTarget) ResourceWindow?.SaveAnimationEdits(); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or ArgumentException)
+        { return new BuildOutcome([], [], ["Native animation: " + ex.Message]); }
         D3DImageHost.SaveReport saved = host.SaveEditsReport();
         if (!saved.Complete) return new BuildOutcome([], [], saved.NotSaved);
 

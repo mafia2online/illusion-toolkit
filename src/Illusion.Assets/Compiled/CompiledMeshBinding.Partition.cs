@@ -27,7 +27,7 @@ public sealed partial class CompiledMeshBinding
             // directly from the cloned native allocations, avoiding display-bind round-trip noise.
             var projected = new MeshData
             {
-                Name = mesh.Name, World = mesh.World, Positions = mesh.Positions, Normals = mesh.Normals, UVs = mesh.UVs, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs,
+                Name = mesh.Name, World = mesh.World, Positions = mesh.Positions, Normals = mesh.Normals, UVs = mesh.UVs, Colors = mesh.Colors, SecondaryColors = mesh.SecondaryColors, NativeWindGeometryBind = mesh.NativeWindGeometryBind, NativeWindObjectOrigin = mesh.NativeWindObjectOrigin, DecalUVs = mesh.DecalUVs,
                 Tangents = mesh.Tangents, Binormals = mesh.Binormals, Indices = originalView.Indices, Parts = originalView.Parts,
                 Lod = mesh.Lod, BoneIndices = mesh.BoneIndices, BoneWeights = mesh.BoneWeights, Skeleton = mesh.Skeleton,
                 LiveRest = mesh.LiveRest, Instances = mesh.Instances, InstanceDrawDistances = mesh.InstanceDrawDistances, NativeLod = mesh.NativeLod

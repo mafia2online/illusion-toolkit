@@ -147,7 +147,7 @@ internal sealed class SceneTree
     /// indices. For a car this is the list of its parts — <c>doorFL</c>, <c>coverF</c>, <c>axleFR</c> — which
     /// nothing else in the scene tree shows, because they are not frames but weight groups inside one mesh.
     /// </summary>
-    private static SceneNode BuildSkeletonTree(SkeletonData skeleton)
+    internal static SceneNode BuildSkeletonTree(SkeletonData skeleton)
     {
         var root = new SceneNode($"Skeleton ({skeleton.Bones.Count})", "Skeleton", true);
         var nodes = new SceneNode[skeleton.Bones.Count];

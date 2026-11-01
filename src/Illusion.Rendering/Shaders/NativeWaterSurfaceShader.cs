@@ -1,7 +1,7 @@
 namespace Illusion.Rendering.Shaders;
 
 /// <summary>Source-only analytical water composition. Native analytical field and screen-ray
-/// reconstruction; toolkit lighting. Dynamic ripple/height inputs are explicitly zero.</summary>
+/// reconstruction; toolkit lighting. Native contact state is an explicit optional input.</summary>
 internal static class NativeWaterSurfaceShader
 {
     internal const string Header = """
@@ -29,6 +29,7 @@ cbuffer WaterConstants : register(b0)
     float4 OpticsDepth;
     float4 OpticsState;
     float4 CameraForward;
+    float4 ContactState;
 };
 Texture2D<float4> Tex0 : register(t0);
 Texture2D<float4> Tex1 : register(t1);
@@ -45,6 +46,7 @@ Texture2D<float4> OpticsBrdf : register(t11);
 SamplerState Wrapped : register(s0);
 SamplerState PointClamp : register(s1);
 SamplerState LinearClamp : register(s2);
+SamplerState ContactSampler : register(s3);
 struct VertexIn { float3 Position:POSITION; float3 Normal:NORMAL; float2 UV:TEXCOORD;
     float3 Tangent:TANGENT; float3 Binormal:BINORMAL; };
 struct DefinitionOut { float4 Position:SV_Position; float3 WorldPosition:TEXCOORD0;
@@ -87,6 +89,11 @@ WaveTargets WavePS(DefinitionOut input)
     float4 weights = Tex1.SampleLevel(PointClamp, uv, 0);
     AnalyticalWaterField field = EvaluateAnalyticalWater(Lookup, Wrapped, Packed,
         input.WorldPosition.xy, CameraTime.w, weights);
+    if (ContactState.x != 0)
+    {
+        float2 contactUv = (input.WorldPosition.xy + field.Displacement.xy - ContactState.yz) * (1.0 / 96) + .5;
+        field = ApplyNativeWaterContact(field, Tex2.Sample(ContactSampler, contactUv).xyz);
+    }
     float3 normal = normalize(field.Normal.x * normalize(input.Tangent)
         + field.Normal.y * normalize(input.Binormal) + field.Normal.z * normalize(input.Normal));
     float3 ray = input.WorldPosition - CameraTime.xyz;
@@ -119,7 +126,7 @@ float4 SurfacePS(GridOut input):SV_Target
     float3 normal = normalize(input.Normal);
     float4 flowData = FlowField.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0);
     float2 flow = flowData.z > .5 ? flowData.xy * 2 - 1 : 0;
-    if (FoamState.x != 0)
+    if (FoamState.x != 0 && FoamState.y != 3)
     {
         NativeWaterFoamMaterial foam = EvaluateNativeWaterFoamMaterial(FineNoise, FoamDetail, FoamNormal,
             FoamHistory, Wrapped, LinearClamp, input.WorldPosition.xy - input.Displacement * .5,
@@ -139,6 +146,19 @@ float4 SurfacePS(GridOut input):SV_Target
     }
     if (FineNormal.z != 0) normal = EvaluateNativeWaterFineNormal(FineNoise, Wrapped,
         input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, normal, FineNormal.x, FineNormal.y * depthFade * depthSlope, flow);
+    float foamRoughness = .5;
+    float3 foamDiffuse = 0;
+    bool composedFoam = FoamState.x != 0 && FoamState.y == 3;
+    if (composedFoam)
+    {
+        NativeWaterFoamMaterial foam = EvaluateNativeWaterFoamMaterial(FineNoise, FoamDetail, FoamNormal,
+            FoamHistory, Wrapped, LinearClamp, input.WorldPosition.xy - input.Displacement * .5,
+            normalize(input.Normal), flow, CameraTime.w, 0, FoamState.zw, 0,
+            FoamColor, FoamControls, depthFade, depthSlope, .5);
+        normal = foam.Normal;
+        foamRoughness = foam.Roughness;
+        foamDiffuse = foam.DiffuseDiagnostic;
+    }
     if (FieldData.z != 0) return float4(normal * .5 + .5, 1);
     float3 color = Tex2.SampleLevel(LinearClamp, input.Position.xy * TargetData.xy, 0).rgb;
     if (LightMode.w == 2) color = float3(.80, .81, .83);
@@ -159,11 +179,12 @@ float4 SurfacePS(GridOut input):SV_Target
         float fresnel = pow(1 - saturate(dot(normal, V)), SpecParams.w);
         rim = AmbientUp.rgb * (fresnel * SpecParams.z);
     }
-    float3 lit = pow(saturate(color * diffuse + specular + rim), Gamma.rgb);
+    float3 lit = pow(saturate((color + foamDiffuse) * diffuse + specular + rim), Gamma.rgb);
     if (OpticsState.x != 0 && LightMode.w != 2)
     {
         float roughness = FineNormal.z != 0 ? NativeWaterVarianceRoughness(FineNoise, Wrapped,
             input.WorldPosition.xy - input.Displacement * .5, CameraTime.w, FineNormal.x, FineNormal.y, flow) : .5;
+        if (composedFoam) roughness = foamRoughness;
         lit = ComposeWaterOptics(input.WorldPosition, normal, input.Normal, input.Position.xy * TargetData.xy, depthFade, roughness, lit);
     }
     return float4(lit, 1);

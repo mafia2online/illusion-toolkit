@@ -84,7 +84,7 @@ public sealed partial class CompiledMeshBinding
     private static MeshData TransformMesh(MeshData mesh, Matrix4x4 transform) => new()
     {
         Name = mesh.Name, World = mesh.World, Positions = mesh.Positions.Select(p => Vector3.Transform(p, transform)).ToArray(),
-        Normals = mesh.Normals.Select(n => Vector3.TransformNormal(n, transform)).ToArray(), UVs = mesh.UVs, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs,
+        Normals = mesh.Normals.Select(n => Vector3.TransformNormal(n, transform)).ToArray(), UVs = mesh.UVs, Colors = mesh.Colors, SecondaryColors = mesh.SecondaryColors, NativeWindGeometryBind = (mesh.NativeWindGeometryBind ?? Matrix4x4.Identity) * transform, NativeWindObjectOrigin = mesh.NativeWindObjectOrigin, DecalUVs = mesh.DecalUVs,
         Tangents = mesh.Tangents?.Select(n => Vector3.TransformNormal(n, transform)).ToArray(),
         Binormals = mesh.Binormals?.Select(n => Vector3.TransformNormal(n, transform)).ToArray(),
         Indices = mesh.Indices, Parts = mesh.Parts, Lod = mesh.Lod,

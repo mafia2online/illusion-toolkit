@@ -11,9 +11,10 @@ public sealed class CompiledEffectPointTimeline
     public ulong GenerationId => _generation.ObjectId;
     public ulong MaterialGuid { get; }
     public string EmitterShape { get; }
+    public Vector3 EmitterDimensions { get; }
     public Vector2 EmitterSize { get; }
     private CompiledEffectPointTimeline(CompiledGraph graph, CompiledElement generation, CompiledEffectPointPreview config)
-    { _graph = graph; _generation = generation; MaterialGuid = config.MaterialGuid; EmitterShape = config.EmitterShape; EmitterSize = config.EmitterSize; }
+    { _graph = graph; _generation = generation; MaterialGuid = config.MaterialGuid; EmitterShape = config.EmitterShape; EmitterSize = config.EmitterSize; EmitterDimensions = config.EmitterDimensions; }
 
     public static bool TryCreate(CompiledGraph graph, CompiledElement generation, out CompiledEffectPointTimeline? preview, out string? refusal)
     {
@@ -63,7 +64,9 @@ public sealed partial class CompiledEffectPointPreview
 {
     private sealed class TimelineParticle
     {
-        public float Age, Life, NormalizedAge, Emission, HalfSize, SizeFactor, SpeedVariation, PreviousSpeed;
+        public uint Seed;
+        public int AtlasFrame;
+        public float Age, Life, NormalizedAge, Emission, HalfSize, SizeFactor, SpeedVariation, PreviousSpeed, Rotation, SpinDirection;
         public Vector3 Position, Velocity, Direction;
         public bool Outside;
     }
@@ -101,6 +104,8 @@ public sealed partial class CompiledEffectPointPreview
         float Scalar(CompiledElement owner, string field, float emission = 0, float age = 0) => Value(owner, field, emission, age).X;
         uint state = seed;
         var particleRandom = new PointRandom(seed);
+        var integerRandom = new PointIntegerRandom(seed);
+        var atlas = _texture is null ? default : ReadFixedAtlas(_graph,_texture);
         uint Next()
         {
             state = unchecked(state * 214013 + 2531011);
@@ -133,9 +138,19 @@ public sealed partial class CompiledEffectPointPreview
             if (uniform) Rand();
             float sizeVariation = Scalar(_size, "m_SizeVar", clock);
             var sizeCurve = Curve(_size, "m_Size");
+            float rotationVariation = _rotation is null ? 0 : Scalar(_rotation, "m_SpinVar", clock) * .01745329238474369f;
             foreach (var p in particles)
             {
                 p.Age += dt;
+                if (_rotation is not null)
+                {
+                    float spin = Scalar(_rotation, "m_Spin", p.Emission, NormalizeAge(p.Age, p.Life))
+                        + (p.Seed ^ 0x7EA8u) * (1 / 32767f) * rotationVariation;
+                    float angle = p.Rotation + p.SpinDirection * spin * dt;
+                    if (!float.IsFinite(angle)) throw new NotSupportedException("Native billboard spin exceeded the finite preview range.");
+                    p.Rotation = angle - MathF.Truncate(angle * .15915493667125702f) * 6.2831854820251465f;
+                    if (angle < 0) p.Rotation += 6.2831854820251465f;
+                }
                 p.NormalizedAge = NormalizeAge(p.Age, p.Life);
                 var size = sizeCurve.IsConstant ? sizeCurve.Sample(0) : sizeCurve.Sample(p.Emission, p.NormalizedAge);
                 p.HalfSize = size.X * p.SizeFactor;
@@ -179,7 +194,8 @@ public sealed partial class CompiledEffectPointPreview
             float initialAge = 0, spacing = born == 0 ? 0 : dt / born;
             for (int i = 0; i < born; i++)
             {
-                float speedVariation = (particleRandom.Next() ^ 0x3423u) * (1 / 32767f) - .5f;
+                uint particleSeed = particleRandom.Next();
+                float speedVariation = (particleSeed ^ 0x3423u) * (1 / 32767f) - .5f;
                 float lifeValue = Scalar(_birth, "m_Life", clock);
                 float lifeVariation = Scalar(_birth, "m_LifeVar", clock);
                 float life = lifeValue + Rand() * lifeVariation;
@@ -194,6 +210,17 @@ public sealed partial class CompiledEffectPointPreview
                 // Native Position::ParticleOnce1019DBB70 consumes two LCG draws after Scale.
                 if (_planeSize is { } extent)
                     position = new(Rand() * (extent.X * .5f), Rand() * (extent.Y * .5f), 0);
+                if (_boxSize is { } box)
+                {
+                    float u = Rand(), v = Rand(); var halfBox = box * .5f;
+                    if (_boxDistribution == 3) position = new(u * halfBox.X,v * halfBox.Y,Rand() * halfBox.Z);
+                    else position = ((integerRandom.Next() & 32767) % 6) switch
+                    {
+                        0 => new(u * halfBox.X,v * halfBox.Y,halfBox.Z), 1 => new(u * halfBox.X,v * halfBox.Y,-halfBox.Z),
+                        2 => new(u * halfBox.X,halfBox.Y,v * halfBox.Z), 3 => new(u * halfBox.X,-halfBox.Y,v * halfBox.Z),
+                        4 => new(halfBox.X,v * halfBox.Y,u * halfBox.Z), _ => new(-halfBox.X,v * halfBox.Y,u * halfBox.Z)
+                    };
+                }
                 var direction = Vector3.Zero;
                 float speed = 0;
                 if (_speed is not null)
@@ -203,15 +230,32 @@ public sealed partial class CompiledEffectPointPreview
                     {
                         direction = NativePointConeDirection(symmetric, unit, divergence);
                         var offset = direction * initialAge;
-                        position = _planeSize.HasValue ? position + offset
+                        position = _planeSize.HasValue || _boxSize.HasValue ? position + offset
                             : new(offset.X == 0 ? 0 : offset.X, offset.Y == 0 ? 0 : offset.Y, offset.Z == 0 ? 0 : offset.Z);
                     }
                     speed = (Scalar(_speed, "m_Speed") + speedVariation * Scalar(_speed, "m_SpeedVar"))
                         * Scalar(_speed, "m_SpeedMultiplier");
                 }
+                float rotation = 0, spinDirection = 0;
+                if (_rotation is not null)
+                {
+                    spinDirection = Scalar(_rotation, "m_SpinDirection", clock) >= Rand() ? 1 : -1;
+                    float initial = Float(_graph, _rotation, "m_InitialRotation") * .01745329238474369f;
+                    float variation = Float(_graph, _rotation, "m_InitialRotationVar") * .01745329238474369f;
+                    rotation = Rand() * variation + initial;
+                }
+                // Native Texture::ParticleOnce1019D4DB0 consumes one shared Win32 float
+                // draw even for a fixed one-cell atlas. Its independent integer RNG has no
+                // observable output in this supported fixed-frame/no-mirror subset.
+                int atlasFrame = 0;
+                if (_texture is not null)
+                {
+                    uint textureRandom = integerRandom.Next(); Rand();
+                    atlasFrame = Bool(_graph,_texture,"m_RandomStartFrame") ? (int)((textureRandom >> 8) & 127) % atlas.Frames : atlas.Start;
+                }
                 var velocity = direction * speed;
                 velocity = new(velocity.X == 0 ? 0 : velocity.X, velocity.Y == 0 ? 0 : velocity.Y, velocity.Z == 0 ? 0 : velocity.Z);
-                particles.Add(new() { Direction = direction, PreviousSpeed = speed, SpeedVariation = speedVariation, Velocity = velocity, Age = initialAge, Life = life, NormalizedAge = 0, Emission = clock, HalfSize = half, SizeFactor = sizeFactor, Position = position });
+                particles.Add(new() { Seed = particleSeed, AtlasFrame = atlasFrame, Rotation = rotation, SpinDirection = spinDirection, Direction = direction, PreviousSpeed = speed, SpeedVariation = speedVariation, Velocity = velocity, Age = initialAge, Life = life, NormalizedAge = 0, Emission = clock, HalfSize = half, SizeFactor = sizeFactor, Position = position });
                 initialAge += spacing;
             }
         }
@@ -223,16 +267,22 @@ public sealed partial class CompiledEffectPointPreview
         for (int i = 0; i < output.Length; i++)
         {
             var p = particles[i];
-            var color = Vector3.Clamp(Value(_color, "m_Color", p.Emission, p.NormalizedAge), Vector3.Zero, Vector3.One);
+            var variation = Vector(_graph.Data(_graph.Field(_color,"m_ColorVariation")!),0,3) * .01f;
+            // Original Color::RenderParticle uses VPAND followed directly by MULPS, with
+            // no integer-to-float conversion. Preserve its bit reinterpretation exactly.
+            float Channel(uint mask) { float value = BitConverter.UInt32BitsToSingle((p.Seed ^ mask) & 32767) * (1 / 32767f) - .5f; return value + value; }
+            var factor = new Vector3(Channel(2740196996u),Channel(1703179860u),Channel(3870788114u)) * variation + Vector3.One;
+            var color = Vector3.Clamp(Value(_color, "m_Color", p.Emission, p.NormalizedAge) * factor, Vector3.Zero, Vector3.One);
             color = new((int)(color.X * 255) / 255f, (int)(color.Y * 255) / 255f, (int)(color.Z * 255) / 255f);
             float opacity = Scalar(_color, "m_Opacity", p.Emission, p.NormalizedAge);
             var emissivity = _emissivity is null ? Vector3.Zero : Value(_emissivity, "m_Emissivity", p.Emission, p.NormalizedAge);
             uint packed = unchecked((uint)(int)(emissivity.X * 255) << 16 | (uint)(int)(emissivity.Y * 255) << 8 | (uint)(int)(emissivity.Z * 255));
             emissivity = new((packed >> 16 & 255) / 255f, (packed >> 8 & 255) / 255f, (packed & 255) / 255f);
-            output[i] = new(p.Position, new(p.HalfSize), new(color, opacity), uv, emissivity, p.NormalizedAge, p.Life)
-            { AgeSeconds = p.Age, EmissionTime = p.Emission, Velocity = p.Velocity };
+            output[i] = new(p.Position, new(p.HalfSize), new(color, opacity), _texture is null ? uv : atlas.Regions[p.AtlasFrame], emissivity, p.NormalizedAge, p.Life)
+            { AtlasFrame = p.AtlasFrame, Rotation = p.Rotation, AgeSeconds = p.Age, EmissionTime = p.Emission, Velocity = p.Velocity };
         }
-        return new(GenerationId, MaterialGuid, clock, output) { Frames = steps, RandomState = state, EmitterShape = EmitterShape, EmitterSize = EmitterSize };
+        return new(GenerationId, MaterialGuid, clock, output) { Frames = steps, RandomState = state, EmitterShape = EmitterShape, EmitterSize = EmitterSize, EmitterDimensions = EmitterDimensions,
+            IntegerRandomStateX = integerRandom.X, IntegerRandomStateY = integerRandom.Y };
         }
         return new(Step, Snapshot);
     }

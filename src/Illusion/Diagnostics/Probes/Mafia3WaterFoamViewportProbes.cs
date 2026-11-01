@@ -68,6 +68,18 @@ internal static partial class Mafia3Probes
         renderer.SetNativeWaterFoam(null, "normals", null, null, false); byte[] normals = Draw();
         renderer.SetNativeWaterFoam(null, "roughness", null, null, false); byte[] roughness = Draw();
         check("native foam viewport exposes distinct material diagnostics", !normals.AsSpan().SequenceEqual(diffuse) && !roughness.AsSpan().SequenceEqual(normals));
+        int composedFrame = renderer.NativeWaterFoamFrame;
+        check("native foam surface composition accepts existing history", renderer.SetNativeWaterFoam(null, "surface", null, null, false) is null);
+        byte[] surface = Draw();
+        check("native foam surface composition retains history and differs from diagnostics", renderer.NativeWaterFoamReady
+            && renderer.NativeWaterFoamFrame == composedFrame && renderer.NativeWaterFoamMode == "surface"
+            && !surface.AsSpan().SequenceEqual(diffuse) && !surface.AsSpan().SequenceEqual(normals)
+            && !surface.AsSpan().SequenceEqual(roughness));
+        check("native foam surface paused rendering is pixel exact", Draw().AsSpan().SequenceEqual(surface));
+        renderer.SetNativeWaterFoam(false, null, null, null, false); byte[] sameTimeWithoutFoam = Draw();
+        renderer.SetNativeWaterFoam(true, "surface", 24, 19, false); for (int i = 0; i < 6; i++) Draw();
+        check("native foam surface changes same-time lit water and toggles back exactly", !surface.AsSpan().SequenceEqual(sameTimeWithoutFoam)
+            && renderer.NativeWaterFoamReady && Draw().AsSpan().SequenceEqual(surface));
         renderer.SetNativeWaterFoam(null, "diffuse", 24, 19, true); for (int i = 0; i < 6; i++) Draw();
         check("native foam viewport seeded reset/replay is pixel exact", Draw().AsSpan().SequenceEqual(diffuse));
         int actual = renderer.NativeWaterFoamFrame;

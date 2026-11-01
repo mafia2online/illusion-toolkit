@@ -16,7 +16,7 @@ namespace Illusion.Viewport;
 /// made it one of the paths that reached the prefab on their own.
 /// </para>
 /// </summary>
-internal sealed class CarCollisionController
+internal sealed partial class CarCollisionController
 {
     private readonly D3DImageHost _host;
 

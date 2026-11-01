@@ -254,10 +254,15 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<EditorTools>()
             .WithTools<AuthoringTools>()
             .WithTools<LinkedProxyTools>()
+            .WithTools<LinkedProxySkinTools>()
             .WithTools<NativePlacementTools>()
             .WithTools<EffectPreviewTools>()
             .WithTools<EffectPointTools>()
             .WithTools<WaterWaveTools>()
+            .WithTools<WaterContactTools>()
+            .WithTools<VegetationWindTools>()
+            .WithTools<AnimationAuthoringTools>()
+            .WithTools<NavigationNetworkTools>()
             .WithTools<MorphTools>()
             .WithTools<CarTools>();
 

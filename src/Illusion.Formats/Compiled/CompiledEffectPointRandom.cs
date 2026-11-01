@@ -2,6 +2,18 @@ namespace Illusion.Formats.Compiled;
 
 public sealed partial class CompiledEffectPointPreview
 {
+    // Independent native C_SimpleIntRandom::SetSeeds/Rand. The explicit preview seed
+    // initializes both words; this is separate from Win32 float draws and particle MT.
+    private sealed class PointIntegerRandom(uint seed)
+    {
+        public uint X { get; private set; } = seed;
+        public uint Y { get; private set; } = seed;
+        public uint Next()
+        {
+            X ^= X >> 15; X ^= X << 17; Y = unchecked(Y * 69069); return X ^ Y;
+        }
+    }
+
     // C_Random::Rand: private MT19937, independent of the emitter Win32 LCG.
     private sealed class PointRandom
     {

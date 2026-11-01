@@ -5,6 +5,7 @@ using Illusion.Assets;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Collisions;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
@@ -1287,7 +1288,7 @@ internal sealed partial class DistrictStreamer
             var radii = new List<float>(picks.Count);
             foreach ((SceneNode node, Vector3 at, float radius) in picks)
             {
-                bool isBone = node.Source is BoneNodeAdapter;
+                bool isBone = node.Source is BoneNodeAdapter || CompiledVehicleRig.BoneIndex(node.Source) >= 0;
                 if (isBone ? !renderer.ShowSkeleton : !renderer.ShowHelpers) continue;
                 candidates.Add(node);
                 anchors.Add(at);

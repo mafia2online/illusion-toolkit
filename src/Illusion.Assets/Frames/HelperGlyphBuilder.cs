@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -203,6 +204,7 @@ public static class HelperGlyphBuilder
     public static bool DrawsGlyph(ISceneSource? source) => source switch
     {
         BoneNodeAdapter => true,
+        _ when CompiledVehicleRig.BoneIndex(source) >= 0 => true,
         FrameNodeAdapter adapter => adapter.Frame is FrameObjectDummy or FrameObjectArea or FrameObjectSector
             or FrameObjectPoint or FrameObjectTarget or FrameObjectDeflector or FrameObjectLight or FrameObjectCamera
             && !Skip(adapter),
@@ -213,6 +215,7 @@ public static class HelperGlyphBuilder
     /// This is the point a click is measured against, so it is the point the glyph is drawn around.</summary>
     public static Vector3 GlyphAnchor(ISceneSource? source)
     {
+        if (CompiledVehicleRig.TryBoneWorld(source, out var posed)) return posed.Translation;
         if (source is not FrameNodeAdapter adapter) return source is IFrameNode node ? node.WorldTransform.Translation : Vector3.Zero;
         return adapter.Frame switch
         {
@@ -269,6 +272,12 @@ public static class HelperGlyphBuilder
                     Vector3 dir = new(world.M21, world.M22, world.M23);
                     dir = dir.LengthSquared() > 1e-8f ? Vector3.Normalize(dir) : Vector3.UnitY;
                     AddBone(segments, world.Translation, dir, BonePixels, screenSized: true, color);
+                    glyphs++;
+                    break;
+                case IFrameNode nativeBone when CompiledVehicleRig.TryBoneWorld(nativeBone, out var nativeWorld):
+                    Vector3 nativeDirection = new(nativeWorld.M21, nativeWorld.M22, nativeWorld.M23);
+                    nativeDirection = nativeDirection.LengthSquared() > 1e-8f ? Vector3.Normalize(nativeDirection) : Vector3.UnitY;
+                    AddBone(segments, nativeWorld.Translation, nativeDirection, BonePixels, screenSized: true, color);
                     glyphs++;
                     break;
             }

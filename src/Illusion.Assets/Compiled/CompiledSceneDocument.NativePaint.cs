@@ -10,12 +10,13 @@ public sealed partial class CompiledSceneDocument
 {
     private CompiledResource[] _nativePaintSceneResources = [];
     private HashSet<CompiledFrameNode> _nativePaintPlacedFrames = [];
+    private readonly Dictionary<ulong, (CompiledFrameNode Owner, CompiledElement Profile, string Layer)> _nativePaintProfiles = [];
     public IReadOnlyList<CompiledNativePaintField> NativePaintFields { get; private set; } = [];
     public IReadOnlyDictionary<ulong, string> NativePaintRefusals { get; private set; } = new Dictionary<ulong, string>();
 
     private void LoadNativePaintFields(CompiledMeshDecoder decoder, IEnumerable<CompiledResource> sceneResources, HashSet<CompiledFrameNode> placedFrames)
     {
-        _nativePaintSceneResources = sceneResources.ToArray(); _nativePaintPlacedFrames = placedFrames; CaptureNativePaintFields(decoder);
+        _nativePaintSceneResources = sceneResources.ToArray(); _nativePaintPlacedFrames = placedFrames; CaptureNativePaintFields(decoder); AttachNativePaintProfiles();
     }
 
     /// <summary>Captures immutable worker inputs after a completed authoring transaction; never changes resources.</summary>
@@ -23,6 +24,7 @@ public sealed partial class CompiledSceneDocument
 
     private void CaptureNativePaintFields(CompiledMeshDecoder decoder)
     {
+        _nativePaintProfiles.Clear();
         var fields = new List<CompiledNativePaintField>(); var refusals = new Dictionary<ulong, string>();
         var mappings = new Dictionary<(ulong Mesh, int Level, int Channel), CompiledPaintMapping>();
         float F(CompiledElement node, string name)
@@ -73,10 +75,16 @@ public sealed partial class CompiledSceneDocument
                     .OfType<CompiledElement>().Where(data => data.TypeId == 0x70EE4BD0).ToArray();
                 if (options.Length != 1) throw new NotSupportedException("Native paint requires one explicit density-spawner parameter record.");
                 var data = options[0]; var spawner = Variant(Graph.Field(data, "m_SpawnerParams"));
-                if (spawner?.TypeId != 0x00E201E6) throw new NotSupportedException("Native paint effect/unknown spawner is not a static mesh template.");
                 var profile = Graph.Resolve(Graph.Field(data, "m_SpawningProfile")) ?? throw new InvalidDataException("Native paint spawning profile is unresolved.");
-                if (Graph.Field(profile, "m_SpacingEnabled") is not { } spacing || Graph.Integer(spacing) != 0)
-                    throw new NotSupportedException("Native fixed-spacing paint rasterization is not enabled.");
+                _nativePaintProfiles[root.ObjectId] = (ownerFrame, profile, Graph.Text(Graph.Field(layer, "m_Name")!));
+                if (spawner?.TypeId != 0x00E201E6) throw new NotSupportedException("Native paint effect/unknown spawner is not a static mesh template.");
+                var spacingEnabled = Graph.Field(profile, "m_SpacingEnabled") ?? throw new InvalidDataException("Native paint spacing flag is absent.");
+                ulong spacingFlag = Graph.Integer(spacingEnabled);
+                if (spacingFlag > 1) throw new InvalidDataException("Invalid native paint spacing flag.");
+                CompiledPaintSpacingSettings? spacingSettings = spacingFlag == 0 ? null : new(F(profile, "m_SpacingX"), F(profile, "m_SpacingY"),
+                    F(profile, "m_SpacingDeviationX"), F(profile, "m_SpacingDeviationY"));
+                if (spacingSettings is { } spacing && (spacing.X <= 0 || spacing.Y <= 0))
+                    throw new NotSupportedException("Native fixed-spacing profile requires positive authored spacing.");
                 var filter = Graph.Resolve(Graph.Field(data, "m_VertexFilter")) ?? throw new InvalidDataException("Native paint vertex filter is unresolved.");
                 if (filter.TypeId != 0x49BF48C1 || Graph.Resolve(Graph.Field(filter, "m_Next")) is not null)
                     throw new NotSupportedException("Native paint currently requires an unchained linear density filter.");
@@ -135,7 +143,7 @@ public sealed partial class CompiledSceneDocument
                         {
                             Name = $"Native paint {templateName} {address}", World = Matrix4x4.Identity, Lod = level,
                             Positions = mesh.Positions, Normals = mesh.Normals, UVs = mesh.UVs, Tangents = mesh.Tangents,
-                            Binormals = mesh.Binormals, Colors = mesh.Colors, DecalUVs = mesh.DecalUVs, Indices = mesh.Indices,
+                            Binormals = mesh.Binormals, Colors = mesh.Colors, SecondaryColors = mesh.SecondaryColors, NativeWindGeometryBind = mesh.NativeWindGeometryBind, NativeWindObjectOrigin = !baked && !template.RestBaked, DecalUVs = mesh.DecalUVs, Indices = mesh.Indices,
                             Parts = mesh.Parts, Instances = matrices, InstanceLod = new(table, level, bounds.Min, bounds.Max)
                             { QueryBounds = baked ? queryBounds : null }
                         });
@@ -143,8 +151,8 @@ public sealed partial class CompiledSceneDocument
                 }
                 fields.Add(new(root.ObjectId, _archives[Graph.Owner(root)].FullName, Graph.Text(Graph.Field(layer, "m_Name")!),
                     Graph.Text(Graph.Field(instance, "m_Name")!), mapped, CompiledPaintDensity.Read(Graph, store), world, value,
-                    minimumScale, maximumScale, F(spawner, "m_NormalAlignment"), baked, CreateMeshes, renderRefusal)
-                { OwnerSceneId = owner.ObjectId, OwnerVisualHash = ownerVisualName,
+                    minimumScale, maximumScale, F(spawner, "m_NormalAlignment"), baked, CreateMeshes, renderRefusal, spacingSettings)
+                { SpawningProfileId = profile.ObjectId, OwnerSceneId = owner.ObjectId, OwnerVisualHash = ownerVisualName,
                     OwnerLod = _nativeLodVisuals.GetValueOrDefault((owner, ownerVisual)) });
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException or ArgumentException or InvalidOperationException or OverflowException)
@@ -152,4 +160,26 @@ public sealed partial class CompiledSceneDocument
         }
         NativePaintFields = fields.ToArray(); NativePaintRefusals = refusals;
     }
+    private void AttachNativePaintProfiles()
+    {
+        var owners = new Dictionary<CompiledFrameNode, Sds.SdsFrameNode>();
+        void Visit(IEnumerable<Sds.SdsFrameNode> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                if (node.Source is CompiledFrameNode frame) owners.TryAdd(frame, node);
+                Visit(node.Children);
+            }
+        }
+        Visit(Roots);
+        foreach (var (paintId, source) in _nativePaintProfiles)
+            if (owners.TryGetValue(source.Owner, out var owner))
+                owner.Children.Add(new Sds.SdsFrameNode
+                {
+                    Name = $"Native paint {source.Layer} [{paintId:X16}]", Kind = "Component",
+                    Source = new CompiledPaintProfileProperties(Graph, source.Profile, paintId, source.Layer,
+                        _nativePaintProfiles.Values.Count(other => ReferenceEquals(other.Profile, source.Profile)))
+                });
+    }
+
 }

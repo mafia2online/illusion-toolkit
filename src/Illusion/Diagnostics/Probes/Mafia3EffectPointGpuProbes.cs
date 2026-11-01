@@ -24,6 +24,26 @@ internal static partial class Mafia3Probes
             && Math.Abs(tinted[center] - (.75f * .5f + .04f * .5f) * 255) < 2
             && Math.Abs(tinted[center + 1] - (.5f * .5f + .03f * .5f) * 255) < 2
             && Math.Abs(tinted[center + 2] - (.25f * .5f + .025f * .5f) * 255) < 2);
+        var rectangle = synthetic[0] with { HalfSize = new(.5f,.1f) };
+        byte[] horizontal = Render([rectangle]), vertical = Render([rectangle with { Rotation = MathF.PI / 2 }]);
+        static (int Width, int Height) Bounds(byte[] pixels,byte[] background,int width)
+        {
+            int minX = width,minY = pixels.Length / 4 / width,maxX = -1,maxY = -1;
+            for (int i = 0; i < pixels.Length / 4; i++)
+                if (!pixels.AsSpan(i * 4,4).SequenceEqual(background.AsSpan(i * 4,4)))
+                { int x = i % width,y = i / width; minX = Math.Min(minX,x); minY = Math.Min(minY,y); maxX = Math.Max(maxX,x); maxY = Math.Max(maxY,y); }
+            return (maxX - minX + 1,maxY - minY + 1);
+        }
+        var h = Bounds(horizontal,empty,128); var v = Bounds(vertical,empty,128);
+        check("particle billboard applies native angle to visible geometry", h.Width > h.Height * 3 && v.Height > v.Width * 3
+            && Math.Abs(h.Width - v.Height) <= 1 && Math.Abs(h.Height - v.Width) <= 1);
+        check("particle billboard angle rewind restores exact pixels", Render([rectangle]).AsSpan().SequenceEqual(horizontal));
+        using (var wide = new SharedRenderTarget(gpu,256,128))
+        {
+            renderer.Render(wide,[],null,1); byte[] background = RenderTargetReadback.Read(gpu,wide);
+            renderer.Render(wide,[rectangle with { Rotation = MathF.PI / 2 }],null,1); var bounds = Bounds(RenderTargetReadback.Read(gpu,wide),background,256);
+            check("particle billboard rotation preserves world aspect in wide captures", bounds == v);
+        }
         var graph = document.Graph;
         if (!CompiledEffectPointPreview.TryCreate(graph, graph.Objects[0x1065E033E7A05503], out var preview, out var refusal))
             throw new InvalidDataException(refusal);

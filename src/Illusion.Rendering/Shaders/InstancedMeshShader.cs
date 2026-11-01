@@ -29,7 +29,7 @@ public struct InstancedConstants
 /// </summary>
 public sealed unsafe class InstancedMeshShader : MeshShaderBase
 {
-    private const string Hlsl = ShaderCompiler.SurfaceTextures + @"
+    private const string Hlsl = ShaderCompiler.SurfaceTextures + VegetationWindBindings.Hlsl + @"
 cbuffer CB : register(b0)
 {
     row_major float4x4 ViewProj;
@@ -40,14 +40,15 @@ cbuffer CB : register(b0)
 struct VSIn
 {
     float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 tan : TANGENT; float3 bin : BINORMAL;
-    float4 color : COLOR; float2 decalUv : TEXCOORD2;
+    float4 color : COLOR; float4 color1 : COLOR1; float2 decalUv : TEXCOORD2;
     float4 w0 : WORLD0; float4 w1 : WORLD1; float4 w2 : WORLD2; float4 w3 : WORLD3;
 };" + ShaderCompiler.PsInStruct + @"
 PSIn VSMain(VSIn i)
 {
     PSIn o;
     float4x4 world = float4x4(i.w0, i.w1, i.w2, i.w3);   // rows = System.Numerics row-major
-    float4 wp = mul(float4(i.pos, 1.0), world);          // row-vector: pos * World
+    float4 wp = mul(float4(i.pos, 1.0), world);
+    if (NativeWindFlags.x > .5) wp.xyz = ApplyNativeVegetationWind(i.pos,i.color,i.color1.w,world);          // row-vector: pos * World
     o.pos  = mul(wp, ViewProj);
     o.nrm  = mul(i.nrm, (float3x3)world);
     o.uv   = i.uv;
@@ -74,7 +75,7 @@ PSIn VSMain(VSIn i)
         byte* wName = (byte*)SilkMarshal.StringToPtr("WORLD");
         byte* colorName = (byte*)SilkMarshal.StringToPtr("COLOR");
 
-        var elems = stackalloc InputElementDesc[11];
+        var elems = stackalloc InputElementDesc[12];
         elems[0] = ShaderCompiler.VertexElement(posName, 0, Format.FormatR32G32B32Float, 0);
         elems[1] = ShaderCompiler.VertexElement(nrmName, 0, Format.FormatR32G32B32Float, 12);
         elems[2] = ShaderCompiler.VertexElement(uvName, 0, Format.FormatR32G32Float, 24);
@@ -96,9 +97,10 @@ PSIn VSMain(VSIn i)
         }
         elems[9] = ShaderCompiler.VertexElement(colorName, 0, Format.FormatR32G32B32A32Float, 0); elems[9].InputSlot = 2;
         elems[10] = ShaderCompiler.VertexElement(uvName, 2, Format.FormatR32G32Float, 0); elems[10].InputSlot = 3;
+        elems[11] = ShaderCompiler.VertexElement(colorName, 1, Format.FormatR32G32B32A32Float, 0); elems[11].InputSlot = 4;
         ID3D11InputLayout* layout = null;
         SilkMarshal.ThrowHResult(gpu.Device11.CreateInputLayout(
-            elems, 11, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
+            elems, 12, vsCode.GetBufferPointer(), vsCode.GetBufferSize(), ref layout));
         _layout = layout;
 
         SilkMarshal.Free((nint)posName);

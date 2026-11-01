@@ -82,6 +82,8 @@ internal sealed unsafe class SurfaceBindings : IDisposable
         context.IASetVertexBuffers(2, 1, &buffer, &stride, &offset);
         var decal = mesh.DecalUvBuffer.Handle; stride = 8;
         context.IASetVertexBuffers(3, 1, &decal, &stride, &offset);
+        var secondary = mesh.SecondaryColorBuffer.Handle; stride = 16;
+        context.IASetVertexBuffers(4, 1, &secondary, &stride, &offset);
     }
 
     public void Dispose() => _buffer.Dispose();

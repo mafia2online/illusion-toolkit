@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Numerics;
 using Illusion.Formats.Hashing;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
@@ -18,7 +19,7 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
         => ImportFrameCore(sourceResourcePath, sourceObjectId, target, out refusal);
 
     private IFrameDuplication? ImportFrameCore(string sourceResourcePath, ulong sourceObjectId, IFrameNode target, out string? refusal,
-        VehicleImportSource? vehicle = null)
+        VehicleImportSource? vehicle = null, bool preparedSkin = false, Matrix4x4? preparedSkinPlacement = null)
     {
         refusal = null;
         if (target is not CompiledFrameNode parent || !_frames.ContainsValue(parent) || Hierarchy(parent) is not { } container)
@@ -70,6 +71,8 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
             var resourceOwner = Graph.Owner(container);
             var prototype = Graph.Nodes.Where(n => n.TypeId == container.TypeId && ReferenceEquals(Graph.Owner(n), resourceOwner))
                 .SelectMany(CurrentItems).FirstOrDefault(e => Graph.Field(e, "First") is { DataSize: 4 });
+            if (prototype is null && preparedSkin) prototype=Graph.Nodes.Where(n=>n.TypeId==container.TypeId)
+                .SelectMany(CurrentItems).FirstOrDefault(e=>Graph.Field(e,"First")is{DataSize:4});
             var dependencies = Graph.Nodes.Select(n => Graph.Field(n, "m_Dependencies")).OfType<CompiledElement>()
                 .FirstOrDefault(c => ReferenceEquals(Graph.Owner(c), resourceOwner));
             var dependencyTemplate = Graph.Nodes.Select(n => Graph.Field(n, "m_Dependencies")).OfType<CompiledElement>()
@@ -85,9 +88,11 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
             var owned = nodes.ToHashSet();
             if (nodes.Where(n => n.Event == 2 && n.TypeId == 0x4403597e).SelectMany(Components).Any(c => !owned.Contains(c)))
             { refusal = "The stock object's mutable components are not owned inline."; return null; }
-            var schemas = Graph.ValidateCopySubtree(resourceOwner, source);
+            var schemas = Graph.ValidateCopySubtree(resourceOwner, source).ToDictionary();
+            if (preparedSkin) foreach(var schema in Graph.ValidateCopySubtree(resourceOwner,prototype))schemas.TryAdd(schema.Key,schema.Value);
             var stock = RegisterCopiedHierarchy(source, null, null, [], register: false);
-            if (!SafeHierarchy(stock, [])) { refusal = "The stock hierarchy contains an unsupported entity or deformation."; return null; }
+            if (preparedSkin ? !PreparedSkinContract(stock, out refusal) : !SafeHierarchy(stock, []))
+            { refusal ??= "The stock hierarchy contains an unsupported entity or deformation."; return null; }
             var ids = new Dictionary<ulong, ulong>();
             var used = resourceOwner.Elements.Where(e => e.Event == 2).Select(e => e.ObjectId).ToHashSet();
             foreach (var p in resourceOwner.Elements.Where(e => e.Event == 2 && Graph.Kind(e) == 173))
@@ -124,7 +129,7 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
             List<GeometryCopy> geometryCopies;
             try
             {
-                geometryCopies = vehicle is null ? CopyHierarchyAssets(element, ids)
+                geometryCopies = preparedSkin ? CopyPreparedSkinAssets(element, resourceOwner) : vehicle is null ? CopyHierarchyAssets(element, ids)
                     : CopyVehiclePlacementAssets(element, ids, resourceOwner, source, vehicle);
             }
             catch { Graph.SetSubtreeActive(resourceOwner, element, false); throw; }
@@ -154,7 +159,7 @@ public sealed partial class CompiledSceneDocument : IFrameImportProvider
                 var copiedFrames = new List<CompiledFrameNode>();
                 if (vehicle is not null) copiedFrames.AddRange(vehicle.Templates);
                 var frame = RegisterCopiedHierarchy(element, parent, transform, copiedFrames);
-                frame.LocalTransform = stock.LocalTransform;
+                frame.LocalTransform = preparedSkinPlacement ?? stock.LocalTransform;
                 var tables = Descendants(entry).Where(n => n.Event == 2 && n.ObjectId != 0).Select(n => n.ObjectId).Distinct().Select(id =>
                 {
                     byte[] bytes = new byte[8];

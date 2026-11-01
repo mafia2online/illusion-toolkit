@@ -86,6 +86,7 @@ internal sealed class CompiledMeshDecoder
         var uvs = new Vector2[vertexCount];
         var decalUvs = _retainVertexColors && layouts.Any(l => (l.Flags & 0x400) != 0) ? new Vector2[vertexCount] : null;
         var colors = layouts.Any(l => l.Color >= 0) ? new Vector4[vertexCount] : null;
+        var secondaryColors = layouts.Any(l => l.SecondaryColor >= 0) ? new Vector4[vertexCount] : null;
         var tangents = new Vector3[vertexCount];
         var binormals = new Vector3[vertexCount];
         bool tangentSpace = layouts.Any(l => (l.Flags & 0x14) == 0x14);
@@ -171,6 +172,8 @@ internal sealed class CompiledMeshDecoder
                             boneWeights![vertex * 4 + slot] = invalid ? 0 : weight / 255f;
                         }
                 }
+                if (layout.SecondaryColor >= 0)
+                    secondaryColors![vertex] = new Vector4(data[layout.SecondaryColor + 2], data[layout.SecondaryColor + 1], data[layout.SecondaryColor], data[layout.SecondaryColor + 3]) / 255f;
                 if (layout.Color >= 0)
                     // Native declaration type4 maps to DXGI_B8G8R8A8_UNORM (87).
                     colors![vertex] = new Vector4(data[layout.Color + 2], data[layout.Color + 1], data[layout.Color], data[layout.Color + 3]) / 255f;
@@ -232,7 +235,9 @@ internal sealed class CompiledMeshDecoder
         {
             Name = name, World = world, Positions = positions, Normals = normals, UVs = uvs,
             DecalUVs = parts.Any(p => p.Surface?.VehicleDecal is not null) ? decalUvs : null,
-            Colors = _retainVertexColors || parts.Any(p => p.Surface is { Layers: >= 2 }) ? colors : null,
+            Colors = _retainVertexColors || parts.Any(p => p.Surface is { Layers: >= 2 } or { NativeVegetationWind: not null }) ? colors : null,
+            SecondaryColors = parts.Any(p => p.Surface?.NativeVegetationWind is not null) ? secondaryColors : null,
+            NativeWindGeometryBind = bindToLocal ?? Matrix4x4.Identity,
             Indices = selected.ToArray(), Parts = parts.ToArray(), Lod = level,
             Tangents = tangentSpace ? tangents : null, Binormals = tangentSpace ? binormals : null,
             BoneIndices = boneIndices, BoneWeights = boneWeights, Skeleton = boneIndices is null ? null : skeleton,
@@ -244,7 +249,7 @@ internal sealed class CompiledMeshDecoder
     internal static float Float(ReadOnlySpan<byte> data, int offset) => BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data[offset..]));
     internal static Vector3 Vector(ReadOnlySpan<byte> data) => new(Float(data, 0), Float(data, 4), Float(data, 8));
 
-    internal sealed record VertexLayout(uint Flags, int Stride, int Position, int Normal, int Skin, int Uv, int Color, int Morph);
+    internal sealed record VertexLayout(uint Flags, int Stride, int Position, int Normal, int Skin, int Uv, int Color, int Morph, int SecondaryColor);
     internal static int UvOffset(VertexLayout layout, int channel)
     {
         int offset = layout.Uv;
@@ -260,14 +265,14 @@ internal sealed class CompiledMeshDecoder
 
     internal static VertexLayout Layout(uint flags)
     {
-        int size = 0, position = -1, normal = -1, skin = -1, uv = -1, color = -1, morph = -1;
+        int size = 0, position = -1, normal = -1, skin = -1, uv = -1, color = -1, morph = -1, secondaryColor = -1;
         if ((flags & 1) != 0) { position = size; size += 8; }
         else if ((flags & 2) != 0) { position = size; size += 4; }
         else if ((flags & 0x10) != 0) size += 4;
         if ((flags & 4) != 0) { normal = size; size += 4; }
         if ((flags & 0x40) != 0) { skin = size; size += 8; }
         if ((flags & 0x80) != 0) { color = size; size += 4; }
-        if ((flags & 0x20000) != 0) size += 4;
+        if ((flags & 0x20000) != 0) { secondaryColor = size; size += 4; }
         if ((flags & 0x2000000) != 0) size += 4;
         if ((flags & 0x40000) != 0) size += 12;
         if ((flags & 0x100000) != 0) size += 4;
@@ -283,6 +288,6 @@ internal sealed class CompiledMeshDecoder
         if ((flags & 0x40000000) != 0) size += 16;
         if ((flags & 0x10000000) != 0) size += 64;
         if ((flags & 0x8000000) != 0) size += 12;
-        return new VertexLayout(flags, size, position, normal, skin, uv, color, morph);
+        return new VertexLayout(flags, size, position, normal, skin, uv, color, morph, secondaryColor);
     }
 }

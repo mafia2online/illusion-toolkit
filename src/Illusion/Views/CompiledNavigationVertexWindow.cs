@@ -71,6 +71,8 @@ internal sealed class CompiledNavigationVertexWindow : Window
         var tools=new StackPanel();
         tools.Children.Add(new TextBlock{Text="Edit interior heights, flip or subdivide triangles, extend open boundaries, and split compatible reciprocal seams. Native validation precedes normal Undo/Redo and Save/Build; original streaming identities stay intact.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
         tools.Children.Add(new TextBlock{Text="Zero-based navigation section"});tools.Children.Add(_sections);
+        var network = new Button { Content = "Open loaded network vertex editor…", Margin = new Thickness(0, 0, 0, 8) };
+        network.Click += (_, _) => new CompiledNavigationNetworkWindow(host) { Owner = this }.Show(); tools.Children.Add(network);
         tools.Children.Add(new TextBlock { Text = "Optional reciprocal streaming peer" }); tools.Children.Add(_peer);
         tools.Children.Add(_moveRepresentatives);
         var streamSplit = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };

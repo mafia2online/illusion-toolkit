@@ -25,6 +25,19 @@ public sealed partial class CompiledSceneDocument
         };
     }
 
+    /// <summary>Restores native wrapper staging after every failed edit has first undone its
+    /// allocations and budget actions. Never invoke this to discard a successfully applied edit.</summary>
+    public Action CaptureRevertedCarryCheckpoint()
+    {
+        var keys = _vehicleResources.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var restore = _vehicleResources.Values.Select(manager => manager.CaptureFlushCheckpoint()).ToArray();
+        return () =>
+        {
+            foreach (var key in _vehicleResources.Keys.Where(key => !keys.Contains(key)).ToArray()) _vehicleResources.Remove(key);
+            foreach (var checkpoint in restore) checkpoint();
+        };
+    }
+
     /// <summary>One canonical editable skeleton per owning scene object.</summary>
     public CompiledVehicleRig? VehicleRig(CompiledFrameNode frame)
     {
@@ -34,7 +47,8 @@ public sealed partial class CompiledSceneDocument
             _vehicleRigs.Remove(frame.Element);
         if (!_vehicleRigs.TryGetValue(frame.Element, out var rig))
             _vehicleRigs[frame.Element] = rig = CompiledVehicleRig.TryCreate(Graph, frame.Element, frame, frame.Name);
-        if (rig is not null) rig.MutationRefusal = () => !Components(frame.Element).Any(component =>
+        if (rig is not null) rig.MutationRefusal = () => !_vehicleRigs.TryGetValue(frame.Element, out var activeRig) || !ReferenceEquals(activeRig, rig)
+            || !Components(frame.Element).Any(component =>
                 ReferenceEquals(Graph.Resolve(Graph.Field(component, "m_ImmutableData")), rig.Immutable))
             ? "This skeleton no longer belongs to its canonical frame; refresh the skeleton tree before editing it."
             : ValidateSkeletonProxyMutation(rig.Immutable);

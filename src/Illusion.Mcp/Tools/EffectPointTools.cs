@@ -36,7 +36,7 @@ public sealed class EffectPointTools
     }
 
     [McpServerTool(Name = "effect_point_timeline")]
-    [Description("Replay one verified stationary Mafia III point or plane generation for an exact number of native ordered frames. Uses the original birth/aging/expiry/swap-delete/random ordering, including continuous emission where verified. Give copied archive, Generic index, generation GUID, frames, step seconds (default 1/60) and seed. Returns actual float clock, native random state and particles. Includes verified cone speed, acceleration, damping and distance culling. Effect hierarchy, external emitter motion and native particle pixel shaders remain outside this isolated preview; files are unchanged.")]
+    [Description("Replay one verified stationary Mafia III point, plane or box generation for an exact number of native ordered frames. Uses the original birth/aging/expiry/swap-delete/random ordering, including continuous emission where verified. Give copied archive, Generic index, generation GUID, frames, step seconds (default 1/60) and seed. Returns actual float clock, native random state and particles. Includes verified cone speed, acceleration, damping, distance culling, box surface/interior emission and billboard initial rotation/spin with native random variance. Effect hierarchy, external emitter motion and native particle pixel shaders remain outside this isolated preview; files are unchanged.")]
     public static string Timeline(ArchiveService archives, string sdsPath, int resourceIndex, string generation,
         int frames, float step = 1 / 60f, uint seed = 1)
     {
@@ -91,10 +91,12 @@ public sealed class EffectPointTools
     {
         generation = $"0x{snapshot.GenerationId:X16}", material = $"0x{snapshot.MaterialGuid:X16}", time = snapshot.Time,
         frames = snapshot.Frames, randomState = snapshot.RandomState,
+        integerRandomStateX = snapshot.IntegerRandomStateX, integerRandomStateY = snapshot.IntegerRandomStateY,
         emitterShape = snapshot.EmitterShape, emitterSize = new[] { snapshot.EmitterSize.X, snapshot.EmitterSize.Y },
+        emitterDimensions = new[] { snapshot.EmitterDimensions.X, snapshot.EmitterDimensions.Y, snapshot.EmitterDimensions.Z },
         particles = snapshot.Particles.Select(p => new { position = new[] { p.Position.X, p.Position.Y, p.Position.Z },
             halfSize = new[] { p.HalfSize.X, p.HalfSize.Y }, color = new[] { p.Color.X, p.Color.Y, p.Color.Z, p.Color.W },
-            atlasUv = new[] { p.AtlasUv.X, p.AtlasUv.Y, p.AtlasUv.Z, p.AtlasUv.W }, emissivity = new[] { p.Emissivity.X, p.Emissivity.Y, p.Emissivity.Z },
+            atlasFrame = p.AtlasFrame, atlasUv = new[] { p.AtlasUv.X, p.AtlasUv.Y, p.AtlasUv.Z, p.AtlasUv.W }, emissivity = new[] { p.Emissivity.X, p.Emissivity.Y, p.Emissivity.Z },
             normalizedAge = p.NormalizedAge, lifetime = p.Lifetime, ageSeconds = p.AgeSeconds, emissionTime = p.EmissionTime, velocity = new[] { p.Velocity.X, p.Velocity.Y, p.Velocity.Z } }).ToArray()
     };
 }

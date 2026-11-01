@@ -16,6 +16,10 @@ public sealed record SurfaceMaterial(int Layers, string? Layer2Diffuse, string? 
     public VehicleDecalMaterial? VehicleDecal { get; init; }
     /// <summary>Verified native water defining-pass T031 color and T032 template weights.</summary>
     public NativeWaterDefinitionMaterial? NativeWaterDefinition { get; init; }
+    /// <summary>Verified native LARGE vegetation current-position material controls.</summary>
+    public NativeVegetationWindMaterial? NativeVegetationWind { get; init; }
+    /// <summary>Explicit native vegetation path whose current deformation is not supported.</summary>
+    public string? NativeVegetationWindRefusal { get; init; }
 }
 
 public sealed record VehicleDirtMaterial(string MaskTexture, Vector3 PaletteA0, Vector3 PaletteA1,
@@ -31,3 +35,6 @@ public sealed record VehicleDirtNormalMaterial(string Texture, string SecondaryM
 public sealed record VehicleDecalMaterial(string Texture, float Opacity);
 
 public sealed record NativeWaterDefinitionMaterial(string ColorTexture, string MaskTexture, string? FlowTexture = null);
+
+/// <summary>Native D137/D138 and D185..189 controls, without inferred weather or FAST simulation inputs.</summary>
+public sealed record NativeVegetationWindMaterial(Vector4 Pivot, Vector3 Leaf, Vector3 D185, Vector3 D186, Vector3 D187, Vector3 D188, float D189);

@@ -6,12 +6,12 @@ namespace Illusion.Assets.Compiled;
 
 public sealed partial class CompiledSceneDocument
 {
-    private (MeshData?[] Meshes, NativeMeshLod Table, NativeLodBounds Bounds) DecodeNativePlacementTemplate(
+    private (MeshData?[] Meshes, NativeMeshLod Table, NativeLodBounds Bounds, bool RestBaked) DecodeNativePlacementTemplate(
         CompiledFrameNode frame, CompiledElement visual, CompiledMeshDecoder decoder)
     {
     var set = Graph.Resolve(Graph.Field(visual, "m_MeshSet"));
     var levels = Graph.Items(Graph.Field(set, "m_LODs"));
-    int count = levels.Count;
+    int count = levels.Count; bool restBaked = false;
     var meshes = new MeshData?[count]; var distances = new uint[count]; var valid = new bool[count]; var empty = new bool[count];
     for (int level = 0; level < count; level++)
     {
@@ -26,7 +26,7 @@ public sealed partial class CompiledSceneDocument
         if (!valid[level] || empty[level]) continue;
         var mesh = DecodeVisual(frame, visual, decoder, level)
             ?? throw new NotSupportedException("Native placement prototype has an unsupported mesh buffer.");
-        if (mesh.IsSkinned) throw new NotSupportedException("Skinned native placement requires verified instanced rest-pose conversion.");
+        if (mesh.IsSkinned) { mesh = CompiledPlacementRestMesh.Bake(mesh); restBaked = true; }
         meshes[level] = mesh;
     }
     if (!meshes.Any(mesh => mesh is not null)) throw new NotSupportedException("Native placement prototype has no mesh levels.");
@@ -35,6 +35,6 @@ public sealed partial class CompiledSceneDocument
         throw new NotSupportedException("Native placement visual bounds require a verified rigid binding.");
     var bytes = Graph.Data(data);
     var bounds = TransformNativeBounds(new(CompiledMeshDecoder.Vector(bytes[16..]), CompiledMeshDecoder.Vector(bytes[28..])), bind);
-        return (meshes, new(distances, valid, empty), bounds);
+        return (meshes, new(distances, valid, empty), bounds, restBaked);
     }
 }

@@ -124,6 +124,7 @@ public interface IEditorSession
     Task<string?> FlipNavigationEdgeAsync(string name, int section, int edge, string? executable) => Task.FromResult<string?>("native navigation topology editing is unavailable");
     Task<string?> SubdivideNavigationFaceAsync(string name, int section, int face, float[]? position, string? executable) => Task.FromResult<string?>("native navigation subdivision is unavailable");
     Task<string?> ExtrudeNavigationBoundaryAsync(string name, int section, int edge, float[]? position, string? executable) => Task.FromResult<string?>("native navigation boundary extrusion is unavailable");
+    Task<string?> DeformNavigationNetworkAsync(string name, int section, int[] loadedSections, int[] vertices, float[][] positions, string? executable, bool moveRepresentatives = false) => Task.FromResult<string?>("native navigation network deformation is unavailable");
     Task<string?> DeformNavigationStreamingAsync(string name, int section, int peer, int[] vertices, float[][] positions, string? executable, bool moveRepresentatives = false) => Task.FromResult<string?>("joint native navigation deformation is unavailable");
     Task<string?> SplitNavigationStreamingAsync(string name, int section, int peer, int edge, float[]? position, string? executable, bool moveRepresentatives = false) => Task.FromResult<string?>("native navigation stream splitting is unavailable");
     string? NavigationStreamingCandidates(string name, int section, int peer, int limit, out int[] edges) { edges = []; return "native navigation stream candidates are unavailable"; }
@@ -147,6 +148,10 @@ public interface IEditorSession
     { result = null; return "native water surface preview is unavailable"; }
     string? WaterOptics(bool? reflections, bool? refraction, out WaterSurfaceInfo? result)
     { result = null; return "Water optics are unavailable."; }
+    string? WaterContact(float[]? origin, int[]? texels, float[]? influences, int? frame, bool reset, bool clear, bool? jointFoam, out WaterContactInfo? result)
+    { result = null; return "Native contact preview is unavailable."; }
+    string? VegetationWind(bool? enabled, float? time, float[]? globalWind, float[]? localPosition, float[]? localParameters, out VegetationWindInfo? result)
+    { result = null; return "Native vegetation wind preview is unavailable."; }
     string? WaterFoam(bool? enabled, string? mode, int? frame, uint? seed, bool reset, out WaterSurfaceInfo? result)
     { result = null; return "native water foam diagnostics are unavailable"; }
     string? StreamWorld(bool enabled, bool winter, bool discardUnsavedEdits)
@@ -161,9 +166,15 @@ public interface IEditorSession
     }
     string? InspectLinkedProxyBones(string owner, out IReadOnlyList<LinkedProxyBoneInfo> bones)
     { bones = []; return "Prepared rigid bone inspection is unavailable."; }
+    string? AddLinkedProxyBone(string owner, string name, int parent, float[] localMatrix, float reach) => "Prepared bone insertion is unavailable.";
+    string? ReparentLinkedProxyBone(string owner, int bone, int parent) => "Prepared bone reparenting is unavailable.";
     string? SetLinkedProxyBone(string owner, int bone, float[] localMatrix) => "Prepared rigid bone authoring is unavailable.";
     string? CreateLinkedProxyGroup(string owner, string name, out string? path)
     { path = null; return "Prepared proxy group creation is unavailable."; }
+    string? ImportLinkedProxySkin(string owner,string parent,string resource,string guid,out string? path)
+    {path=null;return "Prepared skinned prop import is unavailable.";}
+    string? InspectLinkedProxySkinSources(string owner,out IReadOnlyList<LinkedProxySkinSourceInfo> sources)
+    {sources=[];return "Prepared skinned source inspection is unavailable.";}
     string? InspectLinkedProxy(string name, out LinkedProxyInfo? info)
     { info = null; return "linked proxy inspection is unavailable"; }
     string? PrepareLinkedProxy(string name, int expectedTriangles, int expectedDraws, out LinkedProxyInfo? info)
@@ -326,6 +337,8 @@ public interface IEditorSession
     /// library (.mtl) of their own. Nothing of the game is written. Null on success.</summary>
     string? ArchiveMaterials(string archive, bool all, string? saveTo, string? libraryTo, out ArchiveMaterialsInfo? result);
 
+    string? AnimationAuthoring(string operation, int frame, int track, float[]? localMatrix, float? value, out AnimationAuthoringInfo? result)
+    { result = null; return "Native animation authoring is unavailable."; }
     string? AnimationOpen(string archive, int clip, double time, bool playing, out AnimationInfo? result)
     { result = null; return "Native animation preview is unavailable."; }
 }

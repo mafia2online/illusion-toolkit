@@ -101,7 +101,7 @@ public partial class ResourceEditorWindow : Window
         // Save is also available while a text field is focused, so the key can first COMMIT a just-typed
         // value (the fields commit on LostFocus) instead of dropping it — same rule as the map editor.
         CommandBindings.Add(new CommandBinding(EditorCommands.Save, (_, _) => SaveEdits(),
-            (_, e) => e.CanExecute = Stage.HasUnsavedEdits
+            (_, e) => e.CanExecute = Stage.HasUnsavedEdits || AnimationPreview?.HasAnimationEdits == true
                 || Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase));
         CommandBindings.Add(new CommandBinding(EditorCommands.Settings, (_, _) =>
             new SettingsWindow { Owner = this }.ShowDialog()));
@@ -382,7 +382,7 @@ public partial class ResourceEditorWindow : Window
 
     private void UpdateTitle() =>
         Title = "Resource Editor" + (_staged != null ? " — " + _staged.Name : "")
-              + (Stage.HasUnsavedEdits ? " *" : "");
+              + (Stage.HasUnsavedEdits || AnimationPreview?.HasAnimationEdits == true ? " *" : "");
 
     // The browser may never take more than half of what the stage column has to split — the render surface is
     // the point of the window, and on the smallest screen the column is barely 500px tall.
@@ -522,10 +522,11 @@ public partial class ResourceEditorWindow : Window
     private void SaveEdits()
     {
         CommitFocusedField();
-        if (!Stage.HasUnsavedEdits) return;
+        if (!Stage.HasUnsavedEdits && AnimationPreview?.HasAnimationEdits != true) return;
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            SaveAnimationEdits();
             Stage.SaveEdits();
         }
         catch (Exception ex)
@@ -545,7 +546,12 @@ public partial class ResourceEditorWindow : Window
     private void Build_Click(object sender, RoutedEventArgs e)
     {
         CommitFocusedField();
-        if (BuildWindow.Run(this, Stage) is { } report) ShowBuildResult(report);
+        try
+        {
+            SaveAnimationEdits();
+            if (BuildWindow.Run(this, Stage) is { } report) ShowBuildResult(report);
+        }
+        catch (Exception ex) { PostNotice("Native animation save failed: " + ex.Message, true); }
     }
 
     private void PostNotice(string message, bool isError)

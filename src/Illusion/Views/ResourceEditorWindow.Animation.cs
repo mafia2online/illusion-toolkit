@@ -39,11 +39,17 @@ public partial class ResourceEditorWindow
         var clear = new MenuItem { Header = "Restore authored scene pose" };
         clear.Click += (_, _) => AnimationPreview?.ClearSceneBinding(); tools.Items.Add(clear);
     }
+    internal int SaveAnimationEdits()
+    {
+        if (AnimationPreview is not { HasAnimationEdits: true } preview) return 0;
+        int count = preview.DirtyAnimationFiles; preview.SaveAnimations(); return count;
+    }
     public AnimationPreviewWindow OpenAnimationPreview(FileInfo? archive = null, bool activate = true)
     {
         if (AnimationPreview is null)
         {
             AnimationPreview = new AnimationPreviewWindow { Owner = this, ShowActivated = activate };
+            AnimationPreview.AuthoringChanged += () => { UpdateTitle(); System.Windows.Input.CommandManager.InvalidateRequerySuggested(); };
             AnimationPreview.Closed += (_, _) => AnimationPreview = null;
         }
         AnimationPreview.Show(); if (activate) AnimationPreview.Activate();

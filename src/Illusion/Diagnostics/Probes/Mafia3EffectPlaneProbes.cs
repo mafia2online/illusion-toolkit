@@ -33,9 +33,9 @@ internal static partial class Mafia3Probes
         // Original Tick1018B3FE0, Init1018B70A0, Birth1019DD750, Scale1019D85E0,
         // Position1019DBB70 and the real retail stack: 1000 frames, 768 live fields.
         check("plane timeline matches original ordered native Tick at1000frames", Convert.ToHexString(hash.GetHashAndReset())
-            == "0E8E73C913039FAB21EBEFC17D1B47DED7307AD235DDE10030BDF8DB05E6D792");
+            == "BF68DDCC8FCA65FF370664F202C264CD10EF157B172016883F82F6FBA3646ECB");
         var first = timeline.SampleFrames(61); var point = first.Particles.Single();
-        check("plane native birth consumes ordered random XY after life and size", first.RandomState == 3770629007
+        check("plane native birth consumes ordered random XY after life and size", first.RandomState == 3697797142
             && point.Position == new Vector3(.18224126f, .25585192f, 0) && point.AgeSeconds == 0 && point.Lifetime == .1f);
         while (!session.AdvanceToFrame(61)) { }
         check("plane incremental backwards seek restores exact native birth", session.Snapshot.RandomState == first.RandomState
@@ -62,7 +62,7 @@ internal static partial class Mafia3Probes
             return Convert.ToHexString(digest.GetHashAndReset());
         }
         check("retail plane cone-speed stack matches1000original native frames", MotionDigest(false)
-            == "B783F5F8C99CF6A9C21B9C7174B7BD7C4E485DA1A79FC348219013FAA42354D9");
+            == "544E433D377C4D0C8D3A41AF5CAB6CD724A5641DC7477323A5C4BBE0776C2086");
         var pointerUndo = new Dictionary<CompiledElement, byte[]>(); ulong nextId = 0xF123ABC000000001;
         void Constant(CompiledElement owner, string parameter, float value)
         {
@@ -83,7 +83,7 @@ internal static partial class Mafia3Probes
             Constant(movingBirth, "m_Rate", 120); Constant(movingBirth, "m_Amount", 1); Constant(movingBirth, "m_Life", .1f);
             Constant(movingSize, "m_Size", .1f); Constant(speed, "m_Speed", 5); Constant(speed, "m_SpeedVar", 2); Constant(speed, "m_SpeedMultiplier", 1.5f);
             check("plane XY plus cone subframe offsets and velocity match131736original native fields", MotionDigest(true)
-                == "10D4AA502EB1E843D8605C220A6DC229D60BE406C1CD06BC0013485A3211DA18");
+                == "5B70A1DC2F664C4C690735A534F993E6346682EA09B409FED2DAE6A0C7BC9083");
             check("plane multiple-birth motion retains native XY and subframe Z", movingTimeline!.SampleFrames(1).Particles.Any(p => p.AgeSeconds > 0 && p.Position.Z > 0 && p.Position.X != 0));
         }
         finally { foreach (var pair in pointerUndo) resource.Replace(pair.Key, pair.Value); }

@@ -776,6 +776,7 @@ internal sealed class BridgeSessionController : IDisposable
             var sharedMeshNotes = new List<(SceneNode Node, string Note)>();
             var editedBuffers = new List<(SceneNode Node, string Name, ulong Hash, string Archive)>();
             var geometry = new List<GeometryEditController.GeometryItem>();
+            var pairedRequests = new Dictionary<SceneNode, (CompiledSceneDocument Document, CompiledLinkedGeometryRequest Request)>();
             // Results already worked out in this push, per frame. Both levels of a mesh are one frame: they
             // share its quantization lattice, its bounds and — on a model — its pools, and a result is
             // computed against the frame as it stands. Two computed side by side against the SAME state each
@@ -923,7 +924,10 @@ internal sealed class BridgeSessionController : IDisposable
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
                         continue;
                     }
-                    if (!result.Unchanged && compiledEdits.Any(result.ConflictsWithCompiledWrites))
+                    var pairedDocument = fn is ICompiledMeshSource { GeometryBinding: { } preparedBinding }
+                        && FindDocument(node) is CompiledSceneDocument candidateDocument && candidateDocument.CanPlanLinkedProxyGeometry(preparedBinding)
+                        ? candidateDocument : null;
+                    if (!result.Unchanged && pairedDocument is null && compiledEdits.Any(result.ConflictsWithCompiledWrites))
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id,
                             Reason = "Another edited LOD shares this compiled storage. Edit one representation, then re-pull before further changes." });
@@ -943,6 +947,8 @@ internal sealed class BridgeSessionController : IDisposable
                     {
                         if (fn is ICompiledMeshSource) compiledEdits.Add(result);
                         geometry.Add(new GeometryEditController.GeometryItem(node, result));
+                        if (pairedDocument is not null && fn is ICompiledMeshSource { GeometryBinding: { } pairedBinding })
+                            pairedRequests[node] = (pairedDocument, new(pairedBinding, payload, node.Lod));
                         if (levelFrame != null)
                         {
                             if (!perFrame.TryGetValue(levelFrame, out List<BridgeMeshApplier.ApplyResult>? sofar)) perFrame[levelFrame] = sofar = [];
@@ -1132,6 +1138,27 @@ internal sealed class BridgeSessionController : IDisposable
                 sharedMeshNotes.RemoveAll(s => !_host.Tree.IsInScene(s.Node));
                 editedBuffers.RemoveAll(b => !_host.Tree.IsInScene(b.Node));
 
+                foreach (var group in pairedRequests.Where(pair => geometry.Any(item => ReferenceEquals(item.Node, pair.Key)))
+                             .GroupBy(pair => pair.Value.Document))
+                {
+                    var members = group.ToArray();
+                    var batch = group.Key.PlanLinkedProxyGeometryBatch(members.Select(pair => pair.Value.Request).ToArray(), out var batchReason);
+                    if (batch is null)
+                    {
+                        foreach (var member in members)
+                        {
+                            TakeBack(ack, exported, member.Key, batchReason ?? "Native geometry batch refused.");
+                            geometry.RemoveAll(item => ReferenceEquals(item.Node, member.Key));
+                        }
+                        continue;
+                    }
+                    for (int index = 0; index < members.Length; index++)
+                    {
+                        int position = geometry.FindIndex(item => ReferenceEquals(item.Node, members[index].Key));
+                        geometry[position] = new(members[index].Key, batch.Results[index]);
+                    }
+                }
+
                 // Counted and said of what lands, for the same reason.
                 touchedTotal = geometry.Sum(g => g.Result.TouchedVertices);
                 bool firstRebuild = false;
@@ -1143,7 +1170,11 @@ internal sealed class BridgeSessionController : IDisposable
                 }
                 // Said on EVERY rebuild, in full the first time an archive sees one: a push that rebuilt and did
                 // not say so read as one that had only moved vertices.
-                if (firstRebuild)
+                if (firstRebuild && geometry.Where(item => item.Result.TopologyRebuilt).All(item => item.Result.CompiledBatchMember))
+                {
+                    notesEarly.Add("native paired geometry rebuilt — fine LODs and the far proxy were regenerated together. Re-pull before the next edit.");
+                }
+                else if (firstRebuild)
                 {
                     notesEarly.Add("topology rebuilt — lower LODs and collision keep the OLD shape "
                         + "(the object may pop or collide as before at distance). Press Tab again to "

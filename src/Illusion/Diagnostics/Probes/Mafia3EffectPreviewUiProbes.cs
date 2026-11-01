@@ -90,6 +90,14 @@ internal static partial class Mafia3Probes
             check("point preview plane changes invalidate a previous fitted camera", PointUiField<Vector2>(window, "_center") == Vector2.Zero && PointUiField<float?>(window, "_fitExtent") is null);
             PointUiField<Button>(window, "_origin").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             check("point preview origin reset restores fixed camera zoom", PointUiField<Slider>(window, "_zoom").Value == 1 && PointUiField<Vector2>(window, "_center") == Vector2.Zero);
+            var boxCamera = cameraSnapshot with { EmitterShape = "box",EmitterDimensions = new(20,30,40),
+                Particles = [new(new Vector3(20,0,0),new Vector2(4,1),Vector4.One,new(0,0,1,1),Vector3.Zero,0,1) { Rotation = MathF.PI / 2 }] };
+            PointUiField<ComboBox>(window,"_plane").SelectedIndex = 0;
+            typeof(EffectPointPreviewWindow).GetProperty(nameof(window.Snapshot))!.SetValue(window,boxCamera);
+            PointUiInvoke(window,"FitView");
+            check("particle fit includes native box depth and rotated billboard bounds",Vector2.Distance(PointUiField<Vector2>(window,"_center"),new(5.5f,0)) < .00001f
+                && MathF.Abs(PointUiField<float?>(window,"_fitExtent")!.Value - 22) < .00001f);
+            PointUiInvoke(window,"ResetOrigin");
 
             var library = new CompiledEffectLibraryData(graph); var birth = library.Operators(flash).Single(o => o.TypeId == 0x3EBB96BE);
             foreach (var (field, value) in new[] { ("m_Amount", 4096f), ("m_Life", 100000000f) })

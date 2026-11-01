@@ -9,6 +9,13 @@ public static class CompiledSurfaceMaterials
     public static SurfaceMaterial? Terrain(ulong material, Func<string, string?> texture)
     {
         var info = MafiaMaterials.GetMaterialInfo(material, 0, 0);
+        if (info.ShaderId is 0x60912B19336956E4 or 0x46543D8110365C3A)
+            return new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
+                Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One)
+            { NativeVegetationWindRefusal = info.ShaderId == 0x60912B19336956E4 ? "Native FAST vegetation wind texture simulation is unavailable." : "Native SMALL vegetation deformation is not verified." };
+        if (CompiledVegetationMaterials.Read(info) is { } wind)
+            return new SurfaceMaterial(0, null, null, null, null, null, null, null, null,
+                Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One) { NativeVegetationWind = wind };
         if (info.ShaderId == 0x336972a36e4e0995)
         {
             float[]? Parameter(string id, int count)

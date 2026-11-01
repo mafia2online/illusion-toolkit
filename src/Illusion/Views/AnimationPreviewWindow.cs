@@ -17,8 +17,8 @@ using Microsoft.Win32;
 
 namespace Illusion.Views;
 
-/// <summary>Read-only playback of native Havok clips against their explicitly named skeleton.</summary>
-public sealed class AnimationPreviewWindow : Window
+/// <summary>Playback and native frame authoring against explicitly named Havok skeletons.</summary>
+public sealed partial class AnimationPreviewWindow : Window
 {
     private readonly Image _image = new() { Stretch = Stretch.Uniform };
     private readonly ComboBox _clips = new() { MinWidth = 180, Margin = new Thickness(6) };
@@ -80,6 +80,7 @@ public sealed class AnimationPreviewWindow : Window
         _play.Click += (_, _) => SetPlaying(!IsPlaying);
         toolbar.Children.Add(open); toolbar.Children.Add(_clips); toolbar.Children.Add(_play);
         DockPanel.SetDock(toolbar, Dock.Top); layout.Children.Add(toolbar);
+        InitializeAuthoring(layout);
         DockPanel.SetDock(_status, Dock.Bottom); layout.Children.Add(_status);
         DockPanel.SetDock(_seek, Dock.Bottom); layout.Children.Add(_seek);
         layout.Children.Add(_image); Content = layout;
@@ -87,6 +88,7 @@ public sealed class AnimationPreviewWindow : Window
         _seek.ValueChanged += (_, _) => { if (!_updating) Draw(); };
         _timer.Tick += (_, _) =>
         {
+            ValidateSceneBinding();
             DateTime now = DateTime.UtcNow;
             if (IsPlaying && _seek.Maximum > 0) Seek((float)((_seek.Value + (now - _lastTick).TotalSeconds) % _seek.Maximum));
             _lastTick = now;
@@ -117,9 +119,15 @@ public sealed class AnimationPreviewWindow : Window
     }
     public void ClearSceneBinding()
     {
+        bool hadBinding = _sceneBinding is not null || _sceneRig is not null;
         _sceneBinding?.Dispose(); _sceneBinding = null; _sceneRig = null;
         _sceneMorphClear?.Invoke(); _sceneMorph = null; _sceneMorphClear = null;
         _sceneChanged?.Invoke(); _sceneChanged = null; _sceneValid = null;
+        if (hadBinding) _status.Text = "Native clip preview: no scene rig bound.";
+    }
+    private void ValidateSceneBinding()
+    {
+        if (_sceneValid is not null && !_sceneValid()) ClearSceneBinding();
     }
     public void SetPlaying(bool playing) { IsPlaying = playing && _previews.Count != 0; _lastTick = DateTime.UtcNow; _play.Content = IsPlaying ? "Pause" : "Play"; }
     public void Seek(float seconds)
@@ -152,6 +160,8 @@ public sealed class AnimationPreviewWindow : Window
             _skeletons = manifest.GetFiles("hkAnimation").SelectMany(p => HavokAnimationClip.ReadSkeletons(File.ReadAllBytes(p))).ToArray();
         }
         var files = SdsManifest.Load(SdsMeshLoader.EnsureExtracted(archive)).GetFiles("hkAnimation");
+        if (_animationDocuments.Values.Any(document => document.IsDirty)) throw new InvalidOperationException("Save or undo animation edits before opening another archive.");
+        _animationHistory.Clear(); _animationDocuments.Clear(); _animationSources.Clear();
         ClearSceneBinding(); _previews.Clear(); _clips.Items.Clear(); int unsupported = 0;
         foreach (string path in files)
         {
@@ -159,19 +169,22 @@ public sealed class AnimationPreviewWindow : Window
             try { decoded = HavokAnimationClip.Read(File.ReadAllBytes(path)); }
             catch (Exception ex) when (ex is NotSupportedException or InvalidDataException) { unsupported++; continue; }
             if (decoded.Count == 0) unsupported++;
+            int nativeClip = -1;
             foreach (var clip in decoded)
             {
+                nativeClip++;
                 var skeleton = _skeletons.FirstOrDefault(s => s.Name == clip.SkeletonName);
                 if (skeleton is null) { unsupported++; continue; }
                 try { _ = clip.Sample(0); }
                 catch (Exception ex) when (ex is NotSupportedException or InvalidDataException) { unsupported++; continue; }
                 string label = Path.GetFileNameWithoutExtension(path) + " / " + clip.SkeletonName;
                 _previews.Add((label, new HavokAnimationPreview(clip, skeleton))); _clips.Items.Add(label);
+                _animationSources.Add((path, nativeClip));
             }
         }
         Title = "Mafia III animation — " + archive.Name;
         ArchivePath = archive.FullName;
-        _status.Text = $"{_previews.Count} playable native clips; {unsupported} unsupported clips. Read-only skeleton playback; float/morph tracks are not applied.";
+        _status.Text = $"{_previews.Count} playable native clips; {unsupported} unsupported clips. Frame authoring uses native interleaved keys; Save animation then Build its archive.";
         if (_previews.Count > 0) _clips.SelectedIndex = 0;
         else { _seek.IsEnabled = false; _image.Source = null; }
     }
@@ -201,7 +214,7 @@ public sealed class AnimationPreviewWindow : Window
         _drawRefusal = null;
         try
         {
-            if (_sceneValid is not null && !_sceneValid()) ClearSceneBinding();
+            ValidateSceneBinding();
             _sceneBinding?.Seek(CurrentTime);
             if (_sceneBinding is not null) _sceneMorph?.Invoke(preview, CurrentTime);
             _sceneChanged?.Invoke();
