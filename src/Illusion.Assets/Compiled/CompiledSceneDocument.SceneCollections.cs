@@ -37,6 +37,7 @@ public sealed partial class CompiledSceneDocument
     /// <summary>Preflight for native proxy-linked frames and newly exposed grouped scene-collection owners.</summary>
     public string? ValidateSceneCollectionMutation(IFrameNode source)
     {
+        if (CompiledVehicleRig.BoneMutationRefusal(source) is { } boneRefusal) return boneRefusal;
         var canonical = source is ICompiledMeshSource mesh ? mesh.CanonicalFrame : source;
         if (canonical is not CompiledFrameNode frame || !_frames.TryGetValue(frame.Element, out var stored)
             || !ReferenceEquals(frame, stored)) return null;

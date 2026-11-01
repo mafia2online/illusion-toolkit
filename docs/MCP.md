@@ -219,4 +219,10 @@ Ordered `effect_point_timeline` / `effect_point_preview` also support six verifi
 
 `lod_status` reports the current native coarse/fine hierarchy, world bounds, child completion, camera visibility and visible mesh counts. Rendering and picking use the same stable native hierarchy masks; manual visibility remains independent.
 
-`water_surface` also reports whether the optional eight-mip water normal lookup is configured. The viewport applies native fine-normal UV motion using the copied lookup and water material D267.y/w; live material edits update these parameters. Dynamic flow, shoreline attenuation, foam and native reflection shading remain unimplemented.
+`water_surface` also reports whether the optional eight-mip water normal lookup is configured. The viewport applies native fine-normal UV motion using the copied lookup and water material D267.y/w; live material edits update these parameters. The PC third definition target supplies authored flow from T003; FlowPartsDrawn reports parts with a valid flow texture. Missing flow inputs preserve zero-flow fallback. Shoreline attenuation, foam and native reflection shading remain unimplemented.
+
+`linked_proxy_inspect` reads a selected native fine owner and reports the verified coarse/fine family's replacement cost: frames, visuals, triangles, draws, textures, native buffers and conservative source payload bytes. It does not prepare geometry or enable edits. The same cost preview is available in both editors' Mafia III authoring window.
+
+`linked_proxy_prepare` requires the selected fine object's current `expectedTriangles` and `expectedDraws` from inspection. It prepares one undoable native family replacement; move the original fine objects to update both fine and far geometry, then use Save/Build. Generated far roots and material, geometry, rig and hierarchy edits stay protected. Keep the versioned metadata in `resources/.illusion/linked-proxies` for later paired editing; missing or stale metadata preserves read-only guards. The same inspect/prepare controls are available in both authoring windows.
+
+`lod_status` keeps `Visible` and `ChildrenReady` as native metadata. `RendererVisible` and `RendererFallback` separately expose conservative coarse retention where the toolkit has no decoded fine representation, including unsupported foliage. Manual eye visibility remains independent.

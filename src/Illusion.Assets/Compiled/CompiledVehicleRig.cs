@@ -22,6 +22,7 @@ public sealed class CompiledVehicleRig
     private readonly Bone[] _bones;
     private Matrix4x4[]? _animationPose;
     internal Func<string?>? MutationRefusal { get; set; }
+    internal static string? BoneMutationRefusal(IFrameNode source) => source is Bone bone ? bone.Owner.MutationRefusal?.Invoke() : null;
     internal long AuthoredRevision { get; private set; }
     public int Count => _bones.Length;
     public IReadOnlyList<Matrix4x4> LiveRest { get; }
@@ -181,6 +182,7 @@ public sealed class CompiledVehicleRig
     }
     private sealed class Bone(CompiledVehicleRig rig, int index) : IFrameNode, IPropertySource
     {
+        internal CompiledVehicleRig Owner => rig;
         public string TypeName => "Compiled skeleton bone";
         public bool IsOnNameTable => false;
         public int NameTableFlags => 0;

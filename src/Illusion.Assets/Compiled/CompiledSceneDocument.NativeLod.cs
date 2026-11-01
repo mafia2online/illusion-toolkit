@@ -15,6 +15,7 @@ public sealed partial class CompiledSceneDocument
     private void InitializeNativeLods(HashSet<CompiledResource> sceneResources)
     {
         _nativeLodVisuals.Clear(); NativeLods = null; NativeLodRefusal = null; NativeLodMetadataReady = false;
+        _nativeLodBoundsBaseline.Clear(); _nativeLodGroupFields.Clear(); _nativeLodLocalBoxes.Clear();
         try
         {
             var frames = _frames.Values.Where(frame => sceneResources.Contains(Graph.Owner(frame.Element))).ToArray();
@@ -62,6 +63,8 @@ public sealed partial class CompiledSceneDocument
                 definitions.Add(new(group.ObjectId, parent is null ? -1 : indices[parent],
                     Graph.Items(Graph.Field(group, "m_Children")).Select(child => indices[ResolveGroup(child)!]).ToArray(),
                     Vector(0), Vector(12), BinaryPrimitives.ReadSingleLittleEndian(Graph.Data(minimum)), childrenReady.Contains(group)));
+                _nativeLodBoundsBaseline.Add(group.ObjectId, new(Vector(0), Vector(12)));
+                _nativeLodGroupFields.Add(group.ObjectId, box);
             }
             var graph = new NativeLodGraph(definitions);
             foreach (var frame in frames)
@@ -80,6 +83,7 @@ public sealed partial class CompiledSceneDocument
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or KeyNotFoundException)
         {
             _nativeLodVisuals.Clear(); NativeLods = null; NativeLodMetadataReady = false;
+            _nativeLodBoundsBaseline.Clear(); _nativeLodGroupFields.Clear(); _nativeLodLocalBoxes.Clear();
             NativeLodRefusal = "Native automatic LOD visibility is unavailable: " + ex.Message;
         }
     }

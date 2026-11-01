@@ -28,5 +28,19 @@ internal static partial class Mafia3Probes
             refusal?.Contains("LOD group", StringComparison.Ordinal) == true && train.LocalTransform == beforeTrain && blocked.LocalTransform == beforeBlocked);
         check("refused linked LOD gizmo creates no history or native resource revisions", !host.History.CanUndo
             && bytes.All(pair => pair.Key.Revision == pair.Value.Revision && SHA256.HashData(pair.Key.ToArray()).AsSpan().SequenceEqual(pair.Value.Bytes)));
+        var rig = EntityCreationRows(document.Roots).Select(row => row.Source)
+            .OfType<CompiledSceneDocument.CompiledFrameNode>().Distinct()
+            .Where(frame => document.ValidateSceneCollectionMutation(frame) is not null)
+            .Select(document.VehicleRig).OfType<CompiledVehicleRig>().First();
+        var bone = rig.BoneSource(0); var beforeBone = bone.LocalTransform;
+        var boneRow = new SceneNode("linked LOD bone", "Bone", true) { Source = bone }; owner.AddChild(boneRow);
+        host.Selection.SetSelection([trainRow, boneRow], boneRow);
+        host.GizmoBeginDrag(GizmoMode.Move);
+        string? boneRefusal = host.Editing.TryGizmoApplyWorldDelta(Matrix4x4.CreateTranslation(.01f, 0, 0));
+        host.GizmoEndDrag();
+        check("mixed train and protected bone preflight refuses without rollback writes or exceptions",
+            boneRefusal?.Contains("LOD group", StringComparison.Ordinal) == true && train.LocalTransform == beforeTrain
+            && bone.LocalTransform == beforeBone && !host.History.CanUndo
+            && bytes.All(pair => pair.Key.Revision == pair.Value.Revision && SHA256.HashData(pair.Key.ToArray()).AsSpan().SequenceEqual(pair.Value.Bytes)));
     }
 }

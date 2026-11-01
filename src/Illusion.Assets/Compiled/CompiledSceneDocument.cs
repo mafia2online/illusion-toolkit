@@ -34,6 +34,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
 
     public CompiledSceneDocument(FileInfo archive, int lod = 0)
     {
+        CompiledProxySaveJournal.Recover();
         SourceArchive = archive;
         var archives = new List<FileInfo>();
         string stem = Path.GetFileNameWithoutExtension(archive.Name);
@@ -159,6 +160,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         var claimed = new HashSet<CompiledFrameNode>();
         foreach (var root in named)
             if (claimed.Add(root)) Roots.Add(Build(root, decoder, claimed, lod));
+        RefreshNativeLodRenderCoverage();
         foreach (string path in SdsManifest.Load(SdsMeshLoader.EnsureExtracted(archive)).GetFiles("SystemObjectDatabase"))
         {
             byte[] bytes = File.ReadAllBytes(path);
@@ -183,6 +185,7 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         LoadNavigationResources();
         LoadEffectResources();
         CaptureLoadedVehiclePlacements();
+        LoadLinkedProxyMappings();
     }
 
     internal IEnumerable<CompiledElement> Components(CompiledElement scene) =>
@@ -429,7 +432,9 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
         return $"Component {node.TypeId:X8}";
     }
 
-    public string SaveWorkingCopy()
+    public string SaveWorkingCopy() => SaveWorkingCopyWithProxyRecovery();
+
+    private string SaveWorkingCopyCore()
     {
         SaveNavigationResources();
         SaveWorldCollisionResources();
@@ -490,6 +495,8 @@ public sealed partial class CompiledSceneDocument : ISceneDocument
             get => ReadMatrix(_document.Graph.Data(LinkTransform ?? _document.Graph.Field(Element, "m_Transform")!));
             set
             {
+                if (_document.TryApplyLinkedProxyTransform(this, value, out var pairedRefusal)) return;
+                if (pairedRefusal is not null) throw new EditRefusedException(pairedRefusal);
                 if (_document.ValidateSceneCollectionMutation(this) is { } collectionRefusal) throw new EditRefusedException(collectionRefusal);
                 if (_document.ValidateVehiclePlacementTransform(this, value) is { } refusal) throw new EditRefusedException(refusal);
                 var graph = _document.Graph;

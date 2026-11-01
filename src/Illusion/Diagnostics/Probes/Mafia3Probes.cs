@@ -33,6 +33,12 @@ internal static partial class Mafia3Probes
             TestCompiledSceneCollectionGuards(Check);
             TestCompiledNativeLod(Check);
             TestCompiledNativeLodGpu(Check);
+            TestLinkedProxyHostPreparation(Check);
+            TestCompiledLinkedProxyAuthoring(Check);
+            TestCompiledLinkedProxyMaterials(Check);
+            TestCompiledNativeLodBounds(Check);
+            TestCompiledNativeLodRendering(Check);
+            TestCompiledLinkedProxyBreadth(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
@@ -49,6 +55,7 @@ internal static partial class Mafia3Probes
             TestCompiledWaterWavePreview(Check);
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
+            TestNativeWaterFoam(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);
@@ -188,6 +195,12 @@ internal static partial class Mafia3Probes
             TestCompiledSceneCollectionGuards(Check);
             TestCompiledNativeLod(Check);
             TestCompiledNativeLodGpu(Check);
+            TestLinkedProxyHostPreparation(Check);
+            TestCompiledLinkedProxyAuthoring(Check);
+            TestCompiledLinkedProxyMaterials(Check);
+            TestCompiledNativeLodBounds(Check);
+            TestCompiledNativeLodRendering(Check);
+            TestCompiledLinkedProxyBreadth(Check);
             TestVehicleVisualMaterials(Check);
             TestCompiledNavigation(Check);
             TestCompiledNavigationCook(Check);
@@ -204,6 +217,7 @@ internal static partial class Mafia3Probes
             TestCompiledWaterWavePreview(Check);
             TestCompiledWaterGeometryAuthoring(Check);
             TestNativeWaterSurface(Check);
+            TestNativeWaterFoam(Check);
             TestMipmappedWaterTextures(Check);
             TestCompiledSceneAnimation(Check);
             TestSkinnedPreviewBounds(Check);

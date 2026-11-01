@@ -223,7 +223,7 @@ internal sealed class TransformEditController
     {
         if (node.OwningDocumentNode()?.Source is not CompiledSceneDocument document) return null;
         var canonical = frame is ICompiledMeshSource visual ? visual.CanonicalFrame : frame;
-        return document.ValidateSceneCollectionMutation(canonical) ?? document.ValidateVehiclePlacementTransform(canonical, local);
+        return document.ValidateLinkedProxyTransform(canonical, local) ?? document.ValidateVehiclePlacementTransform(canonical, local);
     }
 
     private void CaptureGizmoBaseline()
@@ -377,6 +377,7 @@ internal sealed class TransformEditController
         foreach (SceneNode leaf in node.DescendantMeshLeaves())
             if (leaf.Mesh != null && leaf.Source is IFrameNode fn)
                 leaf.Mesh.SetWorld(fn.WorldTransform);
+        _host.RefreshLinkedProxyMeshes(node);
 
         // An actor's geometry does not hang under its tree node — it lives in the FrameResource branch, placed
         // by the actor's matrix. Moving the actor has to push those meshes' new worlds too.

@@ -253,6 +253,7 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<LuaTools>()
             .WithTools<EditorTools>()
             .WithTools<AuthoringTools>()
+            .WithTools<LinkedProxyTools>()
             .WithTools<EffectPreviewTools>()
             .WithTools<EffectPointTools>()
             .WithTools<WaterWaveTools>()

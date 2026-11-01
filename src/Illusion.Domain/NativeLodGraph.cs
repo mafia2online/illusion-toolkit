@@ -8,14 +8,34 @@ namespace Illusion.Domain;
 public sealed record NativeLodGroup(ulong Id, int Parent, IReadOnlyList<int> Children,
     Vector3 WorldMin, Vector3 WorldMax, float MinDistanceSquared, bool ChildrenReady);
 
+public readonly record struct NativeLodBounds(Vector3 Min, Vector3 Max);
+
 /// <summary>Immutable native coarse/fine hierarchy. This evaluates stable native masks;
 /// temporal transition fading and manual scene-tree visibility are separate concerns.</summary>
-public sealed class NativeLodGraph
+public sealed partial class NativeLodGraph
 {
     private readonly NativeLodGroup[] _groups;
     private readonly int[] _order;
-    public ReadOnlyCollection<NativeLodGroup> Groups { get; }
+    private sealed record BoundsState(NativeLodGroup[] Values, ReadOnlyCollection<NativeLodGroup> View);
+    private BoundsState _bounds = null!;
+    private long _boundsRevision;
+    public ReadOnlyCollection<NativeLodGroup> Groups => Volatile.Read(ref _bounds).View;
     public int Count => _groups.Length;
+    public long BoundsRevision => Interlocked.Read(ref _boundsRevision);
+
+    /// <summary>Opaque immutable bounds checkpoint. Restoring it preserves graph and membership identities.</summary>
+    public sealed class BoundsSnapshot
+    {
+        internal NativeLodGraph Owner { get; }
+        internal NativeLodGroup[] Values { get; }
+        internal BoundsSnapshot(NativeLodGraph owner, NativeLodGroup[] values) => (Owner, Values) = (owner, values);
+        public int Count => Values.Length;
+        public NativeLodBounds GetBounds(int group)
+        {
+            if ((uint)group >= Values.Length) throw new ArgumentOutOfRangeException(nameof(group));
+            return new(Values[group].WorldMin, Values[group].WorldMax);
+        }
+    }
 
     public NativeLodGraph(IEnumerable<NativeLodGroup> groups)
     {
@@ -55,7 +75,39 @@ public sealed class NativeLodGraph
             var parent = _groups[group.Parent];
             _groups[group.Parent] = parent with { WorldMin = Vector3.Min(parent.WorldMin, group.WorldMin), WorldMax = Vector3.Max(parent.WorldMax, group.WorldMax) };
         }
-        Groups = Array.AsReadOnly(_groups);
+        _bounds = new(_groups, Array.AsReadOnly(_groups));
+    }
+
+    public BoundsSnapshot CaptureBounds() => new(this, Volatile.Read(ref _bounds).Values);
+
+    /// <summary>Validates and computes replacement own bounds plus recursive child unions without mutation.</summary>
+    public BoundsSnapshot PrepareBounds(IReadOnlyDictionary<int, NativeLodBounds> ownBounds)
+    {
+        if (ownBounds.Count != Count) throw new ArgumentException("Replacement native LOD bounds must cover every group.", nameof(ownBounds));
+        var next = _groups.ToArray();
+        foreach (var (index, box) in ownBounds)
+        {
+            if ((uint)index >= Count || !float.IsFinite(box.Min.X) || !float.IsFinite(box.Min.Y) || !float.IsFinite(box.Min.Z)
+                || !float.IsFinite(box.Max.X) || !float.IsFinite(box.Max.Y) || !float.IsFinite(box.Max.Z)
+                || box.Min.X > box.Max.X || box.Min.Y > box.Max.Y || box.Min.Z > box.Max.Z)
+                throw new ArgumentException("Invalid replacement native LOD world bounds.", nameof(ownBounds));
+            next[index] = next[index] with { WorldMin = box.Min, WorldMax = box.Max };
+        }
+        for (int i = _order.Length - 1; i >= 0; i--)
+        {
+            var group = next[_order[i]];
+            if (group.Parent < 0) continue;
+            var parent = next[group.Parent];
+            next[group.Parent] = parent with { WorldMin = Vector3.Min(parent.WorldMin, group.WorldMin), WorldMax = Vector3.Max(parent.WorldMax, group.WorldMax) };
+        }
+        return new(this, next);
+    }
+
+    public void RestoreBounds(BoundsSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot.Owner, this)) throw new ArgumentException("Bounds checkpoint belongs to another native LOD graph.", nameof(snapshot));
+        Volatile.Write(ref _bounds, new(snapshot.Values, Array.AsReadOnly(snapshot.Values)));
+        Interlocked.Increment(ref _boundsRevision);
     }
 
     public static float DistanceSquaredToBounds(Vector3 point, Vector3 min, Vector3 max)
@@ -66,9 +118,8 @@ public sealed class NativeLodGraph
         return (x * x + y * y) + z * z;
     }
 
-    private byte Mask(int index, Vector3 point, float scaleSquared, bool hasScene)
+    private static byte Mask(NativeLodGroup group, Vector3 point, float scaleSquared, bool hasScene)
     {
-        var group = _groups[index];
         if (group.Children.Count == 0) return 1;
         return hasScene && DistanceSquaredToBounds(point, group.WorldMin, group.WorldMax) <= group.MinDistanceSquared * scaleSquared
             ? (byte)(group.ChildrenReady ? 2 : 1) : (byte)1;
@@ -86,11 +137,12 @@ public sealed class NativeLodGraph
     {
         if (visible.Length < Count) throw new ArgumentException("Native LOD visibility buffer is too small.", nameof(visible));
         float scale = ScaleSquared(point, switchScale);
+        var groups = Volatile.Read(ref _bounds).Values;
         Span<byte> masks = Count <= 256 ? stackalloc byte[Count] : new byte[Count];
         foreach (int index in _order)
         {
-            int parent = _groups[index].Parent;
-            byte mask = parent >= 0 && (masks[parent] & 2) == 0 ? (byte)0 : Mask(index, point, scale, hasScene);
+            int parent = groups[index].Parent;
+            byte mask = parent >= 0 && (masks[parent] & 2) == 0 ? (byte)0 : Mask(groups[index], point, scale, hasScene);
             masks[index] = mask; visible[index] = (mask & 1) != 0;
         }
     }
@@ -100,9 +152,10 @@ public sealed class NativeLodGraph
     {
         if ((uint)group >= Count) throw new ArgumentOutOfRangeException(nameof(group));
         float scale = ScaleSquared(point, switchScale);
-        if ((Mask(group, point, scale, hasScene) & 1) == 0) return false;
-        for (int parent = _groups[group].Parent; parent >= 0; parent = _groups[parent].Parent)
-            if ((Mask(parent, point, scale, hasScene) & 2) == 0) return false;
+        var groups = Volatile.Read(ref _bounds).Values;
+        if ((Mask(groups[group], point, scale, hasScene) & 1) == 0) return false;
+        for (int parent = groups[group].Parent; parent >= 0; parent = groups[parent].Parent)
+            if ((Mask(groups[parent], point, scale, hasScene) & 2) == 0) return false;
         return true;
     }
 }

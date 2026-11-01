@@ -1,0 +1,24 @@
+namespace Illusion.Rendering.Shaders;
+
+/// <summary>Source-owned ports checked against native PC PS4346, PS1566 and PS3783.
+/// Offscreen equations only; callers must supply verified depth, height and camera inputs.</summary>
+internal static class NativeWaterFoamShader
+{
+    internal const string Vertex = """
+struct Output { float4 Position:SV_Position; float2 UV:TEXCOORD0; };
+Output main(uint id:SV_VertexID)
+{
+    Output o; o.UV = float2((id << 1) & 2, id & 2);
+    o.Position = float4(o.UV * float2(2, -2) + float2(-1, 1), 0, 1); return o;
+}
+""";
+    internal const string Generation = """
+cbuffer A:register(b0){float4 D[3];}cbuffer B:register(b1){float4 V[33];}cbuffer C:register(b2){float4 G[55];}Texture2D<float4> Depth:register(t0);Texture2D<float4> Wave:register(t1);Texture2D<float4> Displacement:register(t2);Texture2D<float4> Height:register(t3);Texture3D<float4> Noise:register(t4);SamplerState Wrap:register(s0);SamplerState NoiseSampler:register(s1);SamplerState Point:register(s2);SamplerState Linear:register(s3);float4 main(float4 pos:SV_Position):SV_Target{float2 uv=pos.xy*V[10].zw;uv=uv*V[8].xy+V[8].zw;float2 c=uv*float2(2,-2)+float2(-1,1);float2 radial=c*length(c);float2 warped=radial*float2(.5,-.5)+.5;float inside=all(warped>0)&&all(warped<1)?1:0;float2 xy=V[0].xy-radial*256;float2 worldXY=xy+V[12].xy;float wave=Wave.Sample(Wrap,(worldXY-G[35].xy)*(1.0/96)+.5).x;float2 h=V[17].xy-worldXY;h=h*float2(1.0/512,-1.0/512)+.5;h=h*float2(2,-2)+float2(-1,1);h*=length(h);h=h*float2(.5,-.5)+.5;float3 waterPosition=float3(xy,Height.SampleLevel(Linear,h,0).x);float4 p=float4(waterPosition,1);float4 clip=float4(dot(V[22],p),dot(V[23],p),dot(V[24],p),dot(V[25],p));float2 screen=clip.xy/clip.w*float2(.5,-.5)+.5;float2 edge=min(screen,1-screen);float coverage=saturate(2*min(edge.x,edge.y));float3 disp=Displacement.SampleLevel(Linear,screen,0).xyz;waterPosition+=disp;p=float4(waterPosition,1);clip=float4(dot(V[22],p),dot(V[23],p),dot(V[24],p),dot(V[25],p));coverage*=all(clip.xyz>=-clip.w)&&all(clip.xyz<=clip.w)?1:0;screen=clip.xy/clip.w*float2(.5,-.5)+.5;float amp=length(disp)*D[2].x;float depth=Depth.SampleLevel(Point,screen,0).x;bool occluded=clip.w*V[1].w-depth<=0;amp*=occluded?1:0;amp*=coverage;float2 ndc=screen*float2(2,-2)+float2(-1,1);ndc.y*=V[21].w;float3 ray=float3(ndc.x*(V[21].z*V[21].y),V[21].y,ndc.y*(V[21].z*V[21].y));ray=float3(dot(V[30].xyz,ray),dot(V[31].xyz,ray),dot(V[32].xyz,ray));float3 bottom=ray*depth+V[0].xyz;float gap=length(waterPosition-bottom);float3 eye=V[0].xyz-waterPosition;float distance=length(eye);float distanceFactor=D[0].z*distance+1;gap*=max(abs(eye.z/max(distance,.00001)),.1);float near=gap<1?1-min(gap,1):0;float x=amp*near;float z=coverage*((occluded?-1:0)+x+1);float high=saturate(disp.z*distanceFactor-D[0].x)*D[0].y/D[0].x;float dl=length(disp*distanceFactor);float3 noiseUV=float3(waterPosition.xy*D[1].z,dl*(D[1].w*G[54].x));float n=saturate(Noise.Sample(NoiseSampler,noiseUV).x-D[1].x);n=dl*n*D[1].y/D[1].x;float amount=saturate(high+n);float y=amount*coverage*(occluded?1:0)+wave;return float4(x,y,z,1)*inside;}
+""";
+    internal const string History = """
+cbuffer A:register(b0){float4 D;}cbuffer B:register(b1){float4 V[13];}cbuffer C:register(b2){float4 G[38];}Texture2D<float4> Current:register(t0);Texture2D<float4> History:register(t1);SamplerState Point:register(s0);SamplerState Linear:register(s1);float4 main(float4 pos:SV_Position):SV_Target{float2 uv=pos.xy*V[10].zw;uv=uv*V[8].xy+V[8].zw;float2 c=uv*float2(2,-2)+float2(-1,1);float2 w=c*length(c);float2 warped=w*float2(.5,-.5)+.5;float2 prior=warped+(G[36].xy-G[36].zw)*float2(-1.0/512,1.0/512);prior=prior*float2(2,-2)+float2(-1,1);prior*=rsqrt(max(length(prior),.00001));prior=prior*float2(.5,-.5)+.5;float h=History.SampleLevel(Linear,prior,0).x;if(G[37].x!=0){float4 cur=Current.SampleLevel(Point,uv,0);float d=exp2(log2(lerp(D.x,D.y,cur.z))*G[37].x);float m=max(h,saturate(cur.x+cur.y));float life=d*m;float y=lerp(h,life,cur.w);float z=saturate(cur.z-cur.w+1);h=lerp(life,y,z);h*=all(warped>0)&&all(warped<1)?1:0;}return h.xxxx;}
+""";
+    internal const string Blur = """
+cbuffer A:register(b0){float4 C[66];}Texture2D<float4> Image:register(t0);SamplerState Linear:register(s0);float4 main(float4 pos:SV_Position,float2 uv:TEXCOORD0):SV_Target{uint count=(uint)C[0].x;float4 result=0;float weights=0;uint i=0;for(;i<count-3;i+=4){float4 a=Image.SampleLevel(Linear,uv+C[i+2].xy,0);float4 b=Image.SampleLevel(Linear,uv+C[i+3].xy,0);float4 c=Image.SampleLevel(Linear,uv+C[i+4].xy,0);float4 d=Image.SampleLevel(Linear,uv+C[i+5].xy,0);float4 group=b*C[i+3].z;group=a*C[i+2].z+group;group=c*C[i+4].z+group;group=d*C[i+5].z+group;result+=group;float w=C[i+3].z+C[i+2].z;w+=C[i+4].z;w+=C[i+5].z;weights+=w;}for(;i<count;i++){result=Image.SampleLevel(Linear,uv+C[i+2].xy,0)*C[i+2].z+result;weights+=C[i+2].z;}return result/max(weights,.00001);}
+""";
+}

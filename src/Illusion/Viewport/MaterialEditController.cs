@@ -1,5 +1,6 @@
 using Illusion.Assets;
 using Illusion.Assets.Bridge;
+using Illusion.Assets.Compiled;
 using Illusion.Assets.Materials;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
@@ -30,6 +31,17 @@ internal sealed class MaterialEditController
     /// <summary>Writes every dirty MTL library (timestamped backup + atomic replace). Null on success.</summary>
     public string? SaveDirtyMaterials(out int saved) => Catalog.SaveDirty(out saved);
 
+    private bool AllowDependencyMutation(ulong hash)
+    {
+        if (CompiledProxyMaterialGuard.ValidateMaterialMutation(hash) is not { } refusal) return true;
+        _host.RaiseNotice(refusal, isError: true); return false;
+    }
+
+    private static void EnsureDependencyMutation(ulong hash)
+    {
+        if (CompiledProxyMaterialGuard.ValidateMaterialMutation(hash) is { } refusal) throw new EditRefusedException(refusal);
+    }
+
     /// <summary>Loaded mesh parts currently rendering the material — the delete confirmation's blast radius.</summary>
     public int CountLoadedUses(ulong hash)
     {
@@ -50,6 +62,7 @@ internal sealed class MaterialEditController
         string? before = Catalog.GetTexture(hash, slotId);
         if (before == null) return false;
         if (before == textureName) return true; // no-op — nothing to record
+        if (!AllowDependencyMutation(hash)) return false;
         if (!Catalog.SetTexture(hash, slotId, textureName)) return false;
         _host.Editing.History.Push(new TextureEdit(this, hash, slotId, before, textureName));
         AfterMaterialChanged(hash);
@@ -58,6 +71,7 @@ internal sealed class MaterialEditController
 
     private void ApplyTexture(ulong hash, string slotId, string value)
     {
+        EnsureDependencyMutation(hash);
         if (Catalog.SetTexture(hash, slotId, value)) AfterMaterialChanged(hash);
     }
 
@@ -66,6 +80,7 @@ internal sealed class MaterialEditController
     /// <summary>Adds an empty texture slot to a material (undoable). False when it already exists.</summary>
     public bool AddTextureSlot(ulong hash, string slotId)
     {
+        if (!AllowDependencyMutation(hash)) return false;
         if (!Catalog.AddSampler(hash, slotId)) return false;
         _host.Editing.History.Push(new AddSlotEdit(this, hash, slotId));
         AfterMaterialChanged(hash);
@@ -75,6 +90,7 @@ internal sealed class MaterialEditController
     /// <summary>Removes a texture slot from a material (undoable — the exact sampler is restorable).</summary>
     public bool RemoveTextureSlot(ulong hash, string slotId)
     {
+        if (!AllowDependencyMutation(hash)) return false;
         object? token = Catalog.RemoveSampler(hash, slotId);
         if (token == null) return false;
         _host.Editing.History.Push(new RemoveSlotEdit(this, hash, slotId, token));
@@ -229,6 +245,7 @@ internal sealed class MaterialEditController
         string? oldName = Catalog.GetMaterial(hash)?.Name;
         if (oldName == null) return null;
         if (newName == oldName) return hash; // no-op — nothing to record
+        if (!AllowDependencyMutation(hash)) return null;
         ulong? newHash = Catalog.RenameMaterial(hash, newName);
         if (newHash == null) return null;
         _host.Editing.History.Push(new RenameEdit(this, hash, oldName, newHash.Value, newName));
@@ -240,6 +257,7 @@ internal sealed class MaterialEditController
     // its name, and undo must restore it byte-exactly.
     private void ApplyRename(ulong fromHash, string toName, ulong toHash)
     {
+        EnsureDependencyMutation(fromHash); EnsureDependencyMutation(toHash);
         if (Catalog.RenameMaterial(fromHash, toName, toHash) != null) AfterMaterialRenamed(fromHash, toHash);
     }
 
@@ -247,6 +265,7 @@ internal sealed class MaterialEditController
     /// Loaded meshes that still reference the hash fall back to placeholder textures.</summary>
     public bool DeleteMaterial(ulong hash)
     {
+        if (!AllowDependencyMutation(hash)) return false;
         object? token = Catalog.RemoveMaterial(hash);
         if (token == null) return false;
         _host.Editing.History.Push(new DeleteEdit(this, hash, token));
@@ -478,12 +497,14 @@ internal sealed class MaterialEditController
 
         public void Undo()
         {
+            EnsureDependencyMutation(_hash);
             _token = _owner.Catalog.RemoveSampler(_hash, _slotId);
             _owner.AfterMaterialChanged(_hash);
         }
 
         public void Redo()
         {
+            EnsureDependencyMutation(_hash);
             if (_token != null && _owner.Catalog.RestoreSampler(_hash, _token)) _owner.AfterMaterialChanged(_hash);
         }
     }
@@ -505,11 +526,13 @@ internal sealed class MaterialEditController
 
         public void Undo()
         {
+            EnsureDependencyMutation(_hash);
             if (_token != null && _owner.Catalog.RestoreSampler(_hash, _token)) _owner.AfterMaterialChanged(_hash);
         }
 
         public void Redo()
         {
+            EnsureDependencyMutation(_hash);
             _token = _owner.Catalog.RemoveSampler(_hash, _slotId);
             _owner.AfterMaterialChanged(_hash);
         }
@@ -578,12 +601,14 @@ internal sealed class MaterialEditController
 
         public void Undo()
         {
+            EnsureDependencyMutation(_hash);
             _token = _owner.Catalog.RemoveMaterial(_hash);
             _owner.AfterMaterialChanged(_hash);
         }
 
         public void Redo()
         {
+            EnsureDependencyMutation(_hash);
             if (_token != null && _owner.Catalog.RestoreMaterial(_token)) _owner.AfterMaterialChanged(_hash);
         }
     }
@@ -625,11 +650,13 @@ internal sealed class MaterialEditController
 
         public void Undo()
         {
+            EnsureDependencyMutation(_hash);
             if (_token != null && _owner.Catalog.RestoreMaterial(_token)) _owner.AfterMaterialChanged(_hash);
         }
 
         public void Redo()
         {
+            EnsureDependencyMutation(_hash);
             _token = _owner.Catalog.RemoveMaterial(_hash);
             _owner.AfterMaterialChanged(_hash);
         }

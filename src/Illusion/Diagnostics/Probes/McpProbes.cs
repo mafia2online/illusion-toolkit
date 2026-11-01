@@ -61,6 +61,8 @@ internal static class McpProbes
         "editor_status", "editor_list_areas", "editor_open_area", "scene_find", "scene_select",
         "editor_stream_world",
         "lod_status",
+        "linked_proxy_inspect",
+        "linked_proxy_prepare",
         "blender_open", "blender_push", "blender_end", "editor_notices", "editor_save", "editor_build",
         "camera_get", "camera_look_at", "camera_set", "camera_frame_selection", "view_set",
         "viewport_screenshot", "object_move", "scene_reparent", "scene_delete_selected", "scene_duplicate_selected",

@@ -59,7 +59,8 @@ internal static partial class Mafia3Probes
         try { _ = linkedRig.Append("itk_proxy_guard_probe", 0, System.Numerics.Matrix4x4.Identity, 1); }
         catch (EditRefusedException ex) { appendRefused = ex.Message.Contains("LOD group", StringComparison.Ordinal); }
         check("linked LOD bone adapters and authored rig append refuse before any resource changes",
-            boneRefused && appendRefused && bone.LocalTransform == boneOriginal && Exact());
+            boneRefused && appendRefused && bone.LocalTransform == boneOriginal
+            && document.ValidateSceneCollectionMutation(bone)?.Contains("LOD group", StringComparison.Ordinal) == true && Exact());
         VerifySceneCollectionHostGuards(document, blocked, train, check);
         document.SaveWorkingCopy();
         check("refused LOD authoring leaves saved compiled resources and manifests byte exact", Exact());

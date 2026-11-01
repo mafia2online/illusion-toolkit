@@ -16,6 +16,8 @@ internal sealed class CompiledAuthoringWindow : Window
 {
     private readonly D3DImageHost _host;
     private WaterWavePreviewWindow? _waterWaves;
+    private CompiledLinkedProxyPlan? _proxyPlan;
+    private SceneNode? _proxyOwner;
     private readonly TextBox _name = new() { Text = "new_group", Margin = new Thickness(0, 4, 0, 8) };
     private readonly ComboBox _kind = new() { ItemsSource = new[] { "box", "capsule", "convex", "triangle" }, SelectedIndex = 0, Margin = new Thickness(0, 4, 0, 8) };
     private readonly Vector3Box _size = new() { Label = "Box half-extents / capsule radius (X) and segment height (Z)", X = 0.5, Y = 0.5, Z = 0.5, Margin = new Thickness(0, 0, 0, 8) };
@@ -32,6 +34,28 @@ internal sealed class CompiledAuthoringWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var panel = new StackPanel { Margin = new Thickness(18) };
         panel.Children.Add(_selection);
+        panel.Children.Add(Button("Inspect linked proxy costs", () =>
+        {
+            _proxyPlan = null; _proxyOwner = null;
+            if (host.SelectedNode is not { } selected) return "Select a compiled scene object belonging to a linked coarse/fine family.";
+            if (host.InspectCompiledLinkedProxy(selected, out var plan) is { } refusal) return refusal;
+            if (plan is null) return "This object has no supported linked proxy family.";
+            _proxyPlan = plan; _proxyOwner = selected;
+            _status.Text = $"Family 0x{plan.ParentGroupId:X16}: {plan.FineFrames} fine frames. "
+                + $"Visuals {plan.BeforeVisuals:N0} → {plan.AfterVisuals:N0}; triangles {plan.BeforeTriangles:N0} → {plan.AfterTriangles:N0}; "
+                + $"draws {plan.BeforeDraws:N0} → {plan.AfterDraws:N0}. {plan.RequiredTextures:N0} textures; "
+                + $"{plan.SelectedNativeBufferBytes:N0} selected buffer bytes; {plan.ConservativeSourceGenericBytes:N0} conservative source bytes. "
+                + plan.CostNotice;
+            return _status.Text;
+        }));
+        panel.Children.Add(Button("Prepare paired proxy transforms", () =>
+        {
+            if (_proxyPlan is not { } plan || _proxyOwner is not { } owner || !ReferenceEquals(host.SelectedNode, owner))
+                return "Inspect the selected object's proxy costs before preparing its family.";
+            string? refusal = host.PrepareCompiledLinkedProxy(owner, plan);
+            _proxyPlan = null; _proxyOwner = null;
+            return refusal;
+        }, "Proxy family prepared. Move its fine objects to update both representations. Undo/Redo and Save/Build are available."));
         panel.Children.Add(new TextBlock { Text = "Group name" }); panel.Children.Add(_name);
         panel.Children.Add(Button("Create root group", () => host.CreateCompiledGroup(_name.Text, null, out _)));
         panel.Children.Add(Button("Create group under selection", () => host.SelectedNode is { } selected

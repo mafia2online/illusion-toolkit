@@ -60,7 +60,7 @@ public sealed unsafe class GpuMesh : IDisposable
     public bool NativeLodVisible { get; private set; } = true;
     public bool RenderVisible => Visible && NativeLodVisible;
     public void RefreshNativeLod(Vector3 point, float switchScale = 1)
-        => NativeLodVisible = NativeLod is not { } native || native.Graph.IsVisible(native.Group, point, switchScale);
+        => NativeLodVisible = NativeLod is not { } native || native.Graph.IsRenderVisible(native.Group, point, switchScale);
 
     /// <summary>Bridge edit mode: true renders the mesh desaturated/translucent in a separate pass
     /// (it is NOT part of the set currently open in Blender). Managed by SceneRenderer.SetGhostFocus.</summary>

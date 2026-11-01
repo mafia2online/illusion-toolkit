@@ -20,6 +20,14 @@ public sealed class SdsResourceCarry
     private static readonly string[] BudgetFields = ["SlotRam", "SlotVram", "OtherRam", "OtherVram"];
     public bool IsDirty { get; private set; }
 
+    /// <summary>Restores flush bookkeeping when a containing multi-resource save restores its files.</summary>
+    internal Action CaptureFlushCheckpoint()
+    {
+        byte[] saved = _saved;
+        string[] written = _writtenFiles.ToArray(); bool dirty = IsDirty;
+        return () => { _saved = saved; _writtenFiles.Clear(); _writtenFiles.UnionWith(written); IsDirty = dirty; };
+    }
+
     public SdsResourceCarry(string destinationFolder)
     {
         _folder = Path.GetFullPath(destinationFolder); _manifest = Path.Combine(_folder, "SDSContent.xml");

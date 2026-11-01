@@ -475,6 +475,18 @@ public sealed unsafe class SceneRenderer : IDisposable
         });
     }
 
+    /// <summary>Restores the relative draw order of surviving meshes after an undoable replacement.
+    /// Meshes introduced independently retain their current slots.</summary>
+    public void RestoreMeshOrder(IReadOnlyList<GpuMesh> preferred)
+    {
+        var present = _meshes.ToHashSet();
+        var ordered = preferred.Where(present.Contains).Distinct().ToArray();
+        var known = ordered.ToHashSet();
+        int next = 0;
+        for (int i = 0; i < _meshes.Count; i++)
+            if (known.Contains(_meshes[i])) _meshes[i] = ordered[next++];
+    }
+
     /// <summary>Creates GPU resources for one mesh without registering it. Device-only work
     /// (buffers, textures) — the D3D11 device is free-threaded, so this is safe on a loader thread.</summary>
     public GpuMesh CreateMeshGpu(Domain.MeshData md) => GpuMesh.Create(_gpu, md, Textures);

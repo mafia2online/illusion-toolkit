@@ -1178,6 +1178,12 @@ public sealed partial class D3DImageHost : ViewportControl, ITransformGizmoHost,
     public SaveReport SaveEditsReport()
     {
         var notSaved = new List<string>();
+        if (Assets.Compiled.CompiledProxyMaterialGuard.ValidateMaterialSave() is { } dependencyError)
+        {
+            RaiseNotice(dependencyError, isError: true);
+            notSaved.Add("prepared proxy material dependencies: " + dependencyError);
+            return new SaveReport(0, notSaved);
+        }
         string? materialError = MaterialEditing.SaveDirtyMaterials(out int savedLibraries);
         int saved = Persistence.SaveEdits(notSaved);
         if (materialError != null)

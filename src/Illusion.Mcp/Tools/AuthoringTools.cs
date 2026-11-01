@@ -7,7 +7,7 @@ namespace Illusion.Mcp.Tools;
 public sealed class AuthoringTools
 {
     [McpServerTool(Name = "lod_status")]
-    [Description("Inspect Mafia III native coarse/fine LOD groups in the current viewport: hierarchy, world bounds, squared switch distance, child-completer readiness and actual mesh visibility at the camera. Read-only. Manual tree visibility remains separate from native LOD selection.")]
+    [Description("Inspect Mafia III coarse/fine LOD groups: hierarchy, bounds, squared switch distance, native child-completer readiness and visibility. RendererVisible and RendererFallback separately report conservative coarse retention when fine geometry is not decoded; RenderVisibleMeshes also honors manual tree visibility. Read-only.")]
     public static async Task<string> LodStatus(IEditorSession editor, IUiThreadMarshal ui)
     {
         try

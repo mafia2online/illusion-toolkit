@@ -149,6 +149,10 @@ public interface IEditorSession
         => "whole-map streaming control is unavailable";
     string? NativeLodStatus(out IReadOnlyList<NativeLodInfo> groups)
     { groups = []; return "native LOD inspection is unavailable"; }
+    string? InspectLinkedProxy(string name, out LinkedProxyInfo? info)
+    { info = null; return "linked proxy inspection is unavailable"; }
+    string? PrepareLinkedProxy(string name, int expectedTriangles, int expectedDraws, out LinkedProxyInfo? info)
+    { info = null; return "linked proxy preparation is unavailable"; }
     string? EffectPreviewScreenshot(string path) => "native effect preview is unavailable";
     string? MorphChannels(string name, int lod, out MorphInfo? result)
     { result = null; return "native morph preview is unavailable"; }

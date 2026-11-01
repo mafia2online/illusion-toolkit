@@ -16,6 +16,15 @@ namespace Illusion.Assets.Materials;
 /// </summary>
 public sealed class MafiaMaterialCatalog : IMaterialCatalog
 {
+    public string? LastMutationRefusal { get; private set; }
+    private bool ProxyMutationBlocked(params ulong[] hashes)
+    {
+        LastMutationRefusal = null;
+        foreach (ulong hash in hashes)
+            if (Compiled.CompiledProxyMaterialGuard.ValidateMaterialMutation(hash) is { } refusal)
+            { LastMutationRefusal = refusal; return true; }
+        return false;
+    }
     public static MafiaMaterialCatalog Instance { get; } = new();
 
     private MafiaMaterialCatalog() { }
@@ -61,6 +70,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool SetTexture(ulong hash, string slotId, string textureName)
     {
+        if (ProxyMutationBlocked(hash)) return false;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat?.GetSamplerByKey(slotId) == null) return false;
@@ -84,6 +94,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
     /// already has succeeds without marking the library dirty.</summary>
     public bool SetFlags(ulong hash, MaterialFlags flags)
     {
+        LastMutationRefusal = null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat == null) return false;
@@ -97,6 +108,8 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public ulong? CreateMaterial(string library, string name, bool normalMapped)
     {
+        if (string.IsNullOrWhiteSpace(name)) { LastMutationRefusal = null; return null; }
+        if (ProxyMutationBlocked(Fnv64.Hash(name))) return null;
         MaterialLibrary? lib = FindLibrary(library);
         if (lib == null) return null;
         IMaterial? created = GameMaterialCreator.Add(
@@ -116,6 +129,8 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
     /// </summary>
     public ulong? CloneMaterial(ulong sourceHash, string newName, string library)
     {
+        if (string.IsNullOrWhiteSpace(newName)) { LastMutationRefusal = null; return null; }
+        if (ProxyMutationBlocked(Fnv64.Hash(newName))) return null;
         IMaterial? source = MafiaMaterials.Collection?.FindByHash(sourceHash);
         MaterialLibrary? lib = FindLibrary(library);
         if (source == null || lib == null || string.IsNullOrWhiteSpace(newName)) return null;
@@ -136,6 +151,8 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public ulong? RenameMaterial(ulong hash, string newName, ulong? restoreHash = null)
     {
+        if (string.IsNullOrWhiteSpace(newName)) { LastMutationRefusal = null; return null; }
+        if (ProxyMutationBlocked(hash, restoreHash ?? Fnv64.Hash(newName))) return null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat == null || string.IsNullOrWhiteSpace(newName)) return null;
@@ -193,6 +210,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public object? RemoveMaterial(ulong hash)
     {
+        if (ProxyMutationBlocked(hash)) return null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat == null) return null;
@@ -205,7 +223,9 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool RestoreMaterial(object token)
     {
+        LastMutationRefusal = null;
         if (token is not RemovalToken t) return false;
+        if (ProxyMutationBlocked(t.Material.GetMaterialHash())) return false;
         if (t.Library.Materials.ContainsKey(t.Material.GetMaterialHash())) return false;
         var swapped = new Dictionary<ulong, IMaterial>(t.Library.Materials)
         {
@@ -227,6 +247,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool AddSampler(ulong hash, string slotId)
     {
+        if (ProxyMutationBlocked(hash)) return false;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat == null || mat.GetSamplerByKey(slotId) != null) return false;
@@ -249,6 +270,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public object? RemoveSampler(ulong hash, string slotId)
     {
+        if (ProxyMutationBlocked(hash)) return null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         IMaterialSampler? sampler = mat?.GetSamplerByKey(slotId);
@@ -281,6 +303,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool RestoreSampler(ulong hash, object token)
     {
+        if (ProxyMutationBlocked(hash)) return false;
         if (token is not SamplerToken t) return false;
         IMaterial? mat = t.Library.LookupMaterialByHash(hash);
         if (mat == null || mat.GetSamplerByKey(t.Sampler.ID) != null) return false;
@@ -351,6 +374,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool SetParameter(ulong hash, string paramId, IReadOnlyList<float> values)
     {
+        LastMutationRefusal = null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         MaterialParameter? param = lib?.LookupMaterialByHash(hash)?.GetParameterByKey(paramId);
         if (lib == null || param == null) return false;
@@ -362,6 +386,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool AddParameter(ulong hash, string paramId, IReadOnlyList<float> values)
     {
+        LastMutationRefusal = null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         if (lib == null || mat == null || values.Count == 0) return false;
@@ -381,6 +406,7 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
 
     public bool RemoveParameter(ulong hash, string paramId)
     {
+        LastMutationRefusal = null;
         MaterialLibrary? lib = FindOwningLibrary(hash);
         IMaterial? mat = lib?.LookupMaterialByHash(hash);
         MaterialParameter? param = mat?.GetParameterByKey(paramId);
@@ -400,6 +426,8 @@ public sealed class MafiaMaterialCatalog : IMaterialCatalog
     public string? SaveDirty(out int saved)
     {
         saved = 0;
+        LastMutationRefusal = Compiled.CompiledProxyMaterialGuard.ValidateMaterialSave();
+        if (LastMutationRefusal is not null) return LastMutationRefusal;
         List<MaterialLibrary> pending;
         lock (_dirtySync) pending = _dirty.ToList();
 

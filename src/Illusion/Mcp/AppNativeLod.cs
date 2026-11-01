@@ -18,7 +18,8 @@ internal sealed partial class AppEditorSession
                 rows.Add(new(graphId, $"0x{group.Id:X16}", group.Parent < 0 ? null : $"0x{graph.Groups[group.Parent].Id:X16}",
                     [group.WorldMin.X, group.WorldMin.Y, group.WorldMin.Z], [group.WorldMax.X, group.WorldMax.Y, group.WorldMax.Z],
                     group.MinDistanceSquared, group.ChildrenReady, graph.IsVisible(i, renderer.Camera.Position),
-                    members.Length, members.Count(mesh => mesh.RenderVisible)));
+                    members.Length, members.Count(mesh => mesh.RenderVisible),
+                    graph.IsRenderVisible(i, renderer.Camera.Position), graph.RenderFallbackGroups.Contains(i)));
             }
             graphId++;
         }

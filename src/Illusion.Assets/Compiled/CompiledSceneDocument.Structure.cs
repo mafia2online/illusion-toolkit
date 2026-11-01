@@ -46,7 +46,7 @@ public sealed partial class CompiledSceneDocument
         var count = container.Values.First();
         if (count.DataSize != 4) throw new NotSupportedException("Unsupported compiled container count.");
         var plan = target ?? Plan(Graph.Owner(container));
-        if (target is null) _effectivePlans = null;
+        if (target is null) { _effectivePlans = null; _proxyStructuralRevision++; }
         var children = container.Children.Where(e => e.Event is not (2 or 4) || ReferenceEquals(e, count)).ToList();
         children.AddRange(items);
         if (children.SequenceEqual(container.Children)) plan.Children.Remove(container);

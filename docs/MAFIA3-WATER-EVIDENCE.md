@@ -148,3 +148,48 @@ banked coarse normals /128000pixels had maximum RGB-vector error0.00021143198
 (~0.0001221/channel),17pixels above0.00005, all below one8-bit output quantum.
 Three durable checks add third-MRT activation, missing-flow fallback without
 hiding geometry, and exact GPU restoration. All28 water GPU checks pass.
+
+## Offscreen foam generation and history
+
+The PC update at `142A93E50` generates foam with material
+`0B2348BC137E2526` / PS4346, applies horizontal and vertical 13-tap Gaussian
+blur (sigma 0.4, `pp_blur_custom4` / PS1566), then updates history with
+`304B24141FEA1E4B` / PS3783. The two current fields are 512-square RGBA8;
+the two history fields are 512-square R16F. The selected history is bound
+as t257. This is distinct from the t258 flow and t259 query textures.
+
+`NativeWaterFoam` implements these source-owned equations as a separate,
+opt-in offscreen module. It does not activate foam on map water. Each `Step`
+submits exactly one caller-controlled frame; there is no hidden replay loop.
+It requires explicit linear depth, expanded height, analytical displacement,
+native-layout view/global constants and a caller-provided blur sampler.
+Absent ripple foam is explicitly zero. Reset regenerates the native 32-cube
+R8 noise procedure with an explicit CRT seed (214013/2531011 low-byte output),
+without claiming the live game's preceding global RNG state. Inputs and the
+output SRV are borrowed; inputs must survive the call, output changes on
+Step/Reset and becomes invalid at disposal. The caller restores render state.
+
+Invalid dimensions, formats, constant layouts, nonfinite values, unsafe
+division thresholds and nonfinite/negative deltas are rejected before GPU
+writes. Reset clears clock and history. Sixteen durable offscreen GPU checks
+cover finite nonzero output, exact fixed-step and moving-camera replay,
+explicit seed variation, refusal without history writes and disposal.
+
+Ignored scratch oracles compare source shaders to unmodified user-owned
+original shaders: generation 1000 fields / 256000 pixels, history 1000 fields
+/ 256000 pixels, and blur 1000 fields / 256000 pixels each had zero numerical
+error. A complete-module oracle replaced only its three pixel shaders with
+the originals: ten 512-square output snapshots, including quantized
+intermediate targets and moving-camera history, were SHA256 byte exact.
+The native blur sampler descriptor remains unproven; the module deliberately
+requires an explicit caller sampler rather than inventing that contract.
+No proprietary shader or texture bytes are shipped.
+
+The separate height-capture oracle used actual main-water packed vertices:
+original VS5829/PS877 and source capture agreed on all 56405 covered pixels,
+including a +0.25 world-Z move. Original height-expansion PS1108 vs source
+agreed on 256000 pixels. Captured height is t255 for foam. It must not be
+substituted for analytical-field t256: PS7139 uses the square root of t256.x
+only to adjust ray distance. The existing geometry ray distance already
+propagates definition height; a canonical +0.25 Z move changed 17861 surface
+pixels and undo restored every resource byte and output pixel exactly.
