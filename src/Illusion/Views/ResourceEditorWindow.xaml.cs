@@ -30,7 +30,6 @@ public partial class ResourceEditorWindow : Window
     private LibraryCatalog? _catalog;
     private LibraryEntry? _staged;
     private MaterialEditorWindow? _materialEditor;
-    private double _browserHeight = 300;   // two rows of tiles — see the BrowserRow definition
 
     // The texture on the stage, if the stage is showing one, and the thing that draws it. The renderer owns
     // its own headless GPU stack, so a texture costs nothing until one is opened and does not bring the
@@ -77,7 +76,8 @@ public partial class ResourceEditorWindow : Window
         Browser.EntryActivated += StageEntry;
         Browser.MayActivate = MayStage;
         Browser.ResourceActivated += ShowResource;
-        Browser.CollapsedChanged += UpdateBrowserRow;
+        // Under the stage, capped at half of it, folded to its tab — see FoldingPaneRow.
+        _ = new FoldingPaneRow(StageColumn, BrowserRow, BrowserSplitter, ToolbarRow, Browser);
         Browser.ArchiveEdited += OnArchiveEdited;
 
         // The gate is IsTypingUncommitted and not IsTextFieldFocused: a numeric field keeps the caret after
@@ -373,31 +373,6 @@ public partial class ResourceEditorWindow : Window
     private void UpdateTitle() =>
         Title = "Resource Editor" + (_staged != null ? " — " + _staged.Name : "")
               + (Stage.HasUnsavedEdits ? " *" : "");
-
-    // The browser may never take more than half of what the stage column has to split — the render surface is
-    // the point of the window, and on the smallest screen the column is barely 500px tall.
-    private void StageColumn_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (BrowserRow == null) return; // fires during InitializeComponent, before the row definition exists
-        BrowserRow.MaxHeight = BrowserCap(e.NewSize.Height);
-        if (BrowserRow.Height.IsAbsolute && BrowserRow.Height.Value > BrowserRow.MaxHeight)
-            BrowserRow.Height = new GridLength(BrowserRow.MaxHeight);
-    }
-
-    private double BrowserCap(double columnHeight) =>
-        Math.Max(120, (columnHeight - ToolbarRow.ActualHeight - BrowserSplitter.Height) * 0.5);
-
-    private void UpdateBrowserRow()
-    {
-        // Catch a dragged height before the row falls back to Auto, so folding and reopening the browser does
-        // not undo the resize.
-        if (BrowserRow.Height.IsAbsolute && BrowserRow.Height.Value > 40) _browserHeight = BrowserRow.Height.Value;
-        bool open = !Browser.IsCollapsed;
-        double cap = BrowserCap(StageColumn.ActualHeight);
-        BrowserRow.MaxHeight = cap;
-        BrowserRow.Height = open ? new GridLength(Math.Min(_browserHeight, cap)) : GridLength.Auto;
-        BrowserSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-    }
 
     /// <summary>
     /// The content browser changed what an archive carries. Three things follow, and none of them is the

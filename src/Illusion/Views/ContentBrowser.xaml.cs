@@ -31,7 +31,7 @@ namespace Illusion.Views;
 /// (<see cref="IsCollapsed"/> / <see cref="CollapsedChanged"/>).
 /// </para>
 /// </summary>
-public partial class ContentBrowser : UserControl
+public partial class ContentBrowser : UserControl, IFoldingPane
 {
     public static readonly DependencyProperty IsSearchingProperty = DependencyProperty.Register(
         nameof(IsSearching), typeof(bool), typeof(ContentBrowser), new PropertyMetadata(false));

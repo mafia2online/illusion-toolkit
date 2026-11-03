@@ -35,8 +35,10 @@
         <v:ResourceSizeConverter x:Key="ResourceSize" />
 
 
+        <!-- The search field, the tile, the action button and the fold tab are shared with the props browser
+             under the map editor's viewport, so they live in EditorChrome; what is left here is this
+             browser's own. -->
         <StreamGeometry x:Key="BrowserFolder">M1.5,9.3 L1.5,4.2 L4.4,4.2 L5.6,5.5 L10.5,5.5 L10.5,9.3 Z</StreamGeometry>
-        <StreamGeometry x:Key="BrowserFind">M2.1,5.2 A3.1,3.1 0 1 1 8.3,5.2 A3.1,3.1 0 1 1 2.1,5.2 Z M7.5,7.5 L10.4,10.4</StreamGeometry>
         <!-- Up one level. A bare arrow, because at 13px it is the only thing that reads: a folder with an
              arrow inside it turns into a smudge, which was the first thing tried. -->
         <StreamGeometry x:Key="BrowserUpArrow">M6,10.4 L6,2.6 M2.4,6.2 L6,2.6 L9.6,6.2</StreamGeometry>
@@ -72,107 +74,6 @@
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
                                 <Setter Property="Cursor" Value="Arrow" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Import: the same box as the Up button, widened for a label, because it is the one control in the
-             row that CHANGES the archive rather than looking at it. Disabled outside an opened archive —
-             there is nothing to import into while the pane is listing folders. -->
-        <Style x:Key="BrowserAction" TargetType="Button">
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="{StaticResource TextStrong}" />
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
-                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1"
-                                Padding="9,0" SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
-                                <Setter Property="Foreground" Value="White" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.35" />
-                                <Setter Property="Cursor" Value="Arrow" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- The fold: a tab standing on the browser's top edge and sticking UP out of it, rounded on the
-             top corners only and open at the bottom, so it reads as one piece with the pane it opens. The
-             negative margin is what puts it outside; nothing between here and the window clips, so it draws
-             and takes clicks over the divider and the bottom of the stage.
-             Chevron down while the body is open (the way it will travel), up once it is folded away. -->
-        <Style x:Key="BrowserHandle" TargetType="ToggleButton">
-            <Setter Property="Focusable" Value="False" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Width" Value="58" />
-            <Setter Property="Height" Value="15" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
-            <Setter Property="VerticalAlignment" Value="Top" />
-            <Setter Property="Margin" Value="0,-14,0,0" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource EdgeRaised}"
-                                BorderThickness="1,1,1,0" CornerRadius="7,7,0,0" SnapsToDevicePixels="True">
-                            <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE70E;" Foreground="{StaticResource TextMuted}" Margin="0,1,0,0"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Chev" Property="Text" Value="&#xE70D;" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceRaisedHot}" />
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeHot}" />
-                                <Setter TargetName="Chev" Property="Foreground" Value="White" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Search field, matching the property panel's inputs. The left inset clears the magnifier. -->
-        <Style x:Key="BrowserSearch" TargetType="TextBox">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="CaretBrush" Value="White" />
-            <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
-                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="26,0,6,0" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -233,43 +134,6 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Row" Property="Background" Value="{StaticResource SelectionFill}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Archive tile: a square of empty space with a big type icon in it, the name, and the size. An
-             .sds is not opened to build this pane, so the icon is what a tile starts with; the archives that
-             hold one figure — people, clothes — then get its picture, drawn in the background and kept on
-             disk (see ArchiveThumb).
-             No card: a hundred filled, outlined boxes read as a wall rather than as a hundred things, so the
-             tile is nothing until the pointer or the selection is on it. What separates one from the next is
-             the gap, not a border.
-             100px with a 12px gap is measured, not taste: two rows of tile+gap have to clear the browser's
-             opening height at 720p, where the host caps it at half the stage (see ResourceEditorWindow),
-             once the panel's own 8px inset is off it. A row and a bit reads as a pane that failed to finish
-             drawing. -->
-        <Style x:Key="BrowserTile" TargetType="ListBoxItem">
-            <Setter Property="Margin" Value="0,0,12,12" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Bd" Width="100" Height="100" CornerRadius="8"
-                                Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionFill}" />
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

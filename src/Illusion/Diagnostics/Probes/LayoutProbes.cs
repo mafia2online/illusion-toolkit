@@ -79,9 +79,14 @@ internal static class LayoutProbes
 
             foreach ((string screen, double width, double height) in Layouts)
             {
-                content.Measure(new Size(width, height));
-                content.Arrange(new Rect(0, 0, width, height));
-                content.UpdateLayout();
+                // Twice: the props row's height cap follows the column's, which is only known after an
+                // arrange — the same second pass the live window gets for free from its SizeChanged.
+                for (int i = 0; i < 2; i++)
+                {
+                    content.Measure(new Size(width, height));
+                    content.Arrange(new Rect(0, 0, width, height));
+                    content.UpdateLayout();
+                }
 
                 Rect tools = Bounds(row, 0), action = Bounds(row, 1), modes = Bounds(row, 2);
                 sb.AppendLine($"— {screen} ({width}x{height} client): tools {Fmt(tools)}, " +
@@ -133,7 +138,32 @@ internal static class LayoutProbes
                     Check($"{screen}: viewport stays usable", viewportArea.ActualWidth >= 600,
                         $"viewport={viewportArea.ActualWidth:F0}x{viewportArea.ActualHeight:F0}");
                 }
+
+                // The props browser sits under the viewport, as the content browser sits under the resource
+                // editor's stage — and keeps the same rules: never more than half, both panes there.
+                double props = window.PropsPanel.ActualHeight;
+                sb.AppendLine($"  props h={props:F0}, viewport {viewportArea.ActualWidth:F0}x{viewportArea.ActualHeight:F0}");
+                Check($"{screen}: the props never out-grow the viewport", props <= viewportArea.ActualHeight,
+                    $"props={props:F0}, viewport={viewportArea.ActualHeight:F0}");
+                Check($"{screen}: both props panes are laid out",
+                    window.PropsPanel.Shelves.ActualWidth > 60 && window.PropsPanel.Tiles.ActualWidth > 100,
+                    $"shelves={window.PropsPanel.Shelves.ActualWidth:F0}, tiles={window.PropsPanel.Tiles.ActualWidth:F0}");
             }
+
+            // Folded away, the props are a hairline and their tab — and the viewport gets the height back.
+            double openViewport = ((FrameworkElement)window.ToolShelf.Parent).ActualHeight;
+            window.PropsPanel.IsCollapsed = true;
+            content.Measure(new Size(Layouts[^1].Width, Layouts[^1].Height));
+            content.Arrange(new Rect(0, 0, Layouts[^1].Width, Layouts[^1].Height));
+            content.UpdateLayout();
+            Check("map editor: folded, the props give up all of their height",
+                window.PropsPanel.ActualHeight <= 4, $"{window.PropsPanel.ActualHeight:F0}px");
+            Check("map editor: folded, the props' splitter is gone too",
+                window.PropsSplitter.Visibility == Visibility.Collapsed, window.PropsSplitter.Visibility.ToString());
+            Check("map editor: folding gives the height back to the viewport",
+                ((FrameworkElement)window.ToolShelf.Parent).ActualHeight > openViewport + 100,
+                $"{openViewport:F0} → {((FrameworkElement)window.ToolShelf.Parent).ActualHeight:F0}");
+            window.PropsPanel.IsCollapsed = false;
 
             CheckResourceEditor(Check, sb);
 
@@ -146,9 +176,12 @@ internal static class LayoutProbes
             try
             {
                 (double w, double h) = (Layouts[0].Width, Layouts[0].Height);
-                content.Measure(new Size(w, h));
-                content.Arrange(new Rect(0, 0, w, h));
-                content.UpdateLayout();
+                for (int i = 0; i < 2; i++)
+                {
+                    content.Measure(new Size(w, h));
+                    content.Arrange(new Rect(0, 0, w, h));
+                    content.UpdateLayout();
+                }
                 // The viewport draws through D3D and stays empty here; without a background the chrome would
                 // float on a transparent PNG.
                 if (content is Panel root) root.Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));

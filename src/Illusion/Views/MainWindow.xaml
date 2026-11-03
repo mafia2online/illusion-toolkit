@@ -88,25 +88,25 @@
             </StatusBarItem>
         </StatusBar>
 
-        <!-- Work area: props (left) | splitter | viewport | splitter | scene panel (right) -->
+        <!-- Work area: viewport column | splitter | scene panel (right) -->
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="PropsColumn" Width="330" MinWidth="0" />
-                <ColumnDefinition x:Name="PropsSplitterColumn" Width="Auto" />
                 <ColumnDefinition Width="*" MinWidth="200" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="380" MinWidth="220" />
             </Grid.ColumnDefinitions>
 
-            <!-- Props: the stock game's doors, furniture and plants, dragged from here into the viewport. A column
-                 of its own beside the viewport rather than a tab under the tree: it is used WITH the viewport, and
-                 wants the height. Shown and hidden from the toolbar's Props button; the splitter sizes it. -->
-            <v:PropsTabView x:Name="PropsPanel" Grid.Column="0" />
-            <GridSplitter x:Name="PropsSplitter" Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
-                          Background="{StaticResource Splitter}" />
+            <!-- Viewport column: toolbar · viewport · props browser — laid out as the resource editor's stage
+                 column, so both editors put things on the stage from a pane in the same place. -->
+            <Grid x:Name="ViewportColumn" Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" MinHeight="140" />
+                    <RowDefinition Height="Auto" />
+                    <!-- Opening height, cap and fold: see FoldingPaneRow and the resource editor's BrowserRow. -->
+                    <RowDefinition x:Name="PropsRow" Height="300" MinHeight="0" />
+                </Grid.RowDefinitions>
 
-            <!-- Viewport column: toolbar on top (only above the viewport, up to the hierarchy panel) -->
-            <DockPanel Grid.Column="2">
                 <!-- Toolbar row: tool tray · action bar · shading modes, in that child order. The action bar is
                      centred on the row and slides aside instead of overlapping when the tray reaches it —
                      see ToolbarRowPanel; the groups used to share one Grid cell and drew on top of each
@@ -116,7 +116,7 @@
                      stop mid-row; and since the theme's toolbar brush is translucent, painting it on both would
                      show the tray as a lighter patch. So the tray and its ToolBar go transparent and the row
                      carries the colour: the same band as before, now the full width of the viewport column. -->
-                <v:ToolbarRowPanel x:Name="ToolbarRow" DockPanel.Dock="Top" Background="{StaticResource SurfaceBand}">
+                <v:ToolbarRowPanel x:Name="ToolbarRow" Grid.Row="0" Background="{StaticResource SurfaceBand}">
                     <ToolBarTray x:Name="ToolTray" IsLocked="True" Background="Transparent">
                         <ToolBar Background="Transparent">
                             <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
@@ -133,11 +133,6 @@
                                           Content="❄" FontSize="15"
                                           ToolTip="Winter (_z district variants + ground_zima)"
                                           Checked="Winter_Changed" Unchecked="Winter_Changed" />
-                            <ToggleButton x:Name="PropsToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                          HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                          FontFamily="Segoe MDL2 Assets" Content="&#xE7B8;" FontSize="15" IsChecked="True"
-                                          ToolTip="Props — stock doors, furniture and plants to drag into the scene"
-                                          Checked="PropsToggle_Changed" Unchecked="PropsToggle_Changed" />
                             <Separator Margin="2,6" />
 
                             <!-- Layers: everything that only changes what the viewport DRAWS lives behind this
@@ -323,7 +318,7 @@
                     </v:CompactStrip>
                 </v:ToolbarRowPanel>
 
-                <Grid>
+                <Grid Grid.Row="1">
                     <vp:D3DImageHost x:Name="Viewport" />
 
                     <!-- Viewport tools + the gizmo overlays; shared with the resource editor. -->
@@ -364,14 +359,22 @@
                          Last in the Grid so it draws over the other overlays; see NoticeBanner. -->
                     <v:NoticeBanner x:Name="Notices" />
                 </Grid>
-            </DockPanel>
 
-            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
+                <GridSplitter x:Name="PropsSplitter" Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center" ResizeBehavior="PreviousAndNext"
+                              Background="{StaticResource Splitter}" />
+
+                <!-- Props: the stock game's doors, furniture and plants, dragged from here onto the viewport.
+                     Folded away and back by its own tab, like the resource editor's content browser. -->
+                <v:PropsBrowser x:Name="PropsPanel" Grid.Row="3" />
+            </Grid>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
                           Background="{StaticResource Splitter}" />
 
             <!-- Scene panel: stats · search · tree · splitter · property tabs. Shared with the resource
                  editor — see ScenePanel; the viewport it reports on is handed over in the constructor. -->
-            <v:ScenePanel x:Name="Scene" Grid.Column="4"
+            <v:ScenePanel x:Name="Scene" Grid.Column="2"
                           HeaderHeight="{Binding ActualHeight, ElementName=ToolbarRow}" />
         </Grid>
     </DockPanel>

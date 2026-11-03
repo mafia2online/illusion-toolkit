@@ -80,12 +80,12 @@
             <!-- Stage column: toolbar · render surface · content browser. The browser is a row rather than an
                  overlay so it takes its height from the stage honestly, and it can fold away entirely — on a
                  1280x720 screen the height is the scarce thing. -->
-            <Grid x:Name="StageColumn" Grid.Column="0" SizeChanged="StageColumn_SizeChanged">
+            <Grid x:Name="StageColumn" Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" MinHeight="140" />
                     <RowDefinition Height="Auto" />
-                    <!-- MaxHeight follows the column's height (StageColumn_SizeChanged): the browser may never
+                    <!-- MaxHeight follows the column's height (FoldingPaneRow): the browser may never
                          take more than half of what there is to split, however far the splitter is dragged.
                          The opening height is two rows of the browser's tiles plus its search bar — one and a
                          half rows of squares reads as a pane that failed to finish drawing.

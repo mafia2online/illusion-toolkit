@@ -80,12 +80,13 @@ internal static class PropCatalogProbes
             catch (Exception) { quiet = false; }
             Check("a prop whose archive cannot be read gets no picture and throws nothing", quiet);
 
-            // The tab itself, at the size it has in the editor: cards are made a page at a time, not for the
-            // whole catalog at once (a wrapping panel cannot virtualize, and 2,700 cards took two seconds).
-            var tab = new global::Illusion.Views.PropsTabView();
+            // The browser itself, at the size it has under the map editor's viewport: cards are made a page at a
+            // time, not for the whole catalog at once (a wrapping panel cannot virtualize, and 2,700 cards took
+            // two seconds).
+            var tab = new global::Illusion.Views.PropsBrowser();
             var window = new System.Windows.Window
             {
-                Width = 330, Height = 700, Left = -4000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                Width = 1100, Height = 300, Left = -4000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
                 WindowStyle = System.Windows.WindowStyle.None, Content = tab,
             };
             window.Show();
@@ -93,7 +94,7 @@ internal static class PropCatalogProbes
             while (tab.Tiles.Items.Count == 0 && DateTime.UtcNow < until) Pump(200);
             Pump(1500);
             int firstPage = tab.Tiles.Items.Count;
-            Check("the tab makes cards for a page of the catalog, not for all of it",
+            Check("the browser makes cards for a page of the catalog, not for all of it",
                 firstPage > 0 && firstPage < entries.Count && firstPage <= 400, $"{firstPage} cards for {entries.Count} objects");
             var scroller = Descendant<System.Windows.Controls.ScrollViewer>(tab.Tiles);
             scroller?.ScrollToVerticalOffset(scroller.ExtentHeight);    // the thumb dragged to the bottom
@@ -102,14 +103,31 @@ internal static class PropCatalogProbes
             Check("scrolling to the end of what is shown brings the next page, and only that",
                 scroller != null && afterScroll > firstPage && afterScroll <= firstPage * 3, $"{firstPage} → {afterScroll}");
             int withPicture = tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().Count(t => t.Thumbnail != null);
-            window.Hide();
+            // Folded by its tab and opened again — the control stays on screen while folded, so this is the
+            // path that has to restart the pictures, not the window's own visibility.
+            tab.IsCollapsed = true;
             Pump(400);
-            window.Show();
+            tab.IsCollapsed = false;
             Pump(6000);
             int afterReopen = tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().Count(t => t.Thumbnail != null);
-            Check("hidden and shown again, the tab goes on filling in pictures",
+            Check("folded and opened again, the browser goes on filling in pictures",
                 afterReopen > withPicture || tab.Tiles.Items.OfType<ViewModels.PropTileViewModel>().All(t => t.Thumbnail != null || t.ThumbnailTried),
                 $"{withPicture} → {afterReopen} of {afterScroll}");
+            // A look at the browser as it stands, back at the top of the list. Best-effort.
+            try
+            {
+                scroller?.ScrollToVerticalOffset(0);
+                Pump(300);
+                var shot = new RenderTargetBitmap((int)tab.ActualWidth, (int)tab.ActualHeight, 96, 96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                shot.Render(tab);
+                var png = new PngBitmapEncoder();
+                png.Frames.Add(BitmapFrame.Create(shot));
+                string shotPath = Path.Combine(Path.GetTempPath(), "illusion_prop_browser.png");
+                using (FileStream file = File.Create(shotPath)) png.Save(file);
+                sb.AppendLine("rendered -> " + shotPath);
+            }
+            catch (Exception rex) { sb.AppendLine("render skipped — " + rex.Message); }
             window.Close();
         }
         catch (Exception ex)

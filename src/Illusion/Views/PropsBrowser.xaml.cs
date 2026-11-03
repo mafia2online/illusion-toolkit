@@ -9,23 +9,39 @@ using Illusion.Viewport;
 namespace Illusion.Views;
 
 /// <summary>
-/// The Props tab: the stock objects <see cref="PropCatalog"/> finds in the extracted archives, as tiles to
-/// drag into the scene.
+/// The props browser under the map editor's viewport: the stock objects <see cref="PropCatalog"/> finds in the
+/// extracted archives, as tiles to drag into the scene.
 /// <para>
-/// The catalog is read in the background the first time the tab is shown (it is remembered on disk after
+/// The catalog is read in the background the first time the tiles are shown (it is remembered on disk after
 /// that). Pictures come afterwards, one per tick of the UI thread — the kept ones first, then the missing
-/// ones drawn in archive order, so an archive is read once for all of its tiles. Placing is not this tab's
+/// ones drawn in archive order, so an archive is read once for all of its tiles. Placing is not this pane's
 /// business: it raises <see cref="PlaceRequested"/>, and the window that knows which district is loaded
 /// answers it.
 /// </para>
+/// <para>
+/// Folding works as in the content browser: the tab hides the body and leaves a hairline; the host owns the
+/// row height (<see cref="FoldingPaneRow"/>) and the pane only says which form it is in.
+/// </para>
 /// </summary>
-public partial class PropsTabView : UserControl
+public partial class PropsBrowser : UserControl, IFoldingPane
 {
     /// <summary>The format the tiles are dragged in — what the viewport accepts as a drop.</summary>
     public const string DragFormat = "Illusion.Prop";
 
+    private sealed record CollisionOption(string Label, Assets.Collisions.CollisionChoice Choice);
+
+    private static readonly CollisionOption[] CollisionOptions =
+    [
+        new("Auto — its own, else convex hull", Assets.Collisions.CollisionChoice.Auto),
+        new("Convex hull", Assets.Collisions.CollisionChoice.Convex),
+        new("Box", Assets.Collisions.CollisionChoice.Box),
+        new("Every triangle (heavy)", Assets.Collisions.CollisionChoice.Mesh),
+        new("None", Assets.Collisions.CollisionChoice.None),
+    ];
+
     private const string AllShelves = "All";
 
+    private readonly List<PropShelfViewModel> _shelves = [];
     private readonly List<PropTileViewModel> _all = [];
 
     // A wrapping panel cannot virtualize, and the catalog is some 2,700 objects: every one of them given a
@@ -46,13 +62,16 @@ public partial class PropsTabView : UserControl
     private Point _pressedAt;
     private PropTileViewModel? _pressed;
 
-    public PropsTabView()
+    public PropsBrowser()
     {
         InitializeComponent();
-        CategoryBox.Items.Add(AllShelves);
-        foreach ((string name, _) in PropCatalog.Categories) CategoryBox.Items.Add(name);
-        CategoryBox.Items.Add("Other");
-        CategoryBox.SelectedIndex = 0;
+        _shelves.Add(new PropShelfViewModel(AllShelves));
+        foreach ((string name, _) in PropCatalog.Categories) _shelves.Add(new PropShelfViewModel(name));
+        _shelves.Add(new PropShelfViewModel("Other"));
+        Shelves.ItemsSource = _shelves;
+        Shelves.SelectedIndex = 0;
+        CollisionField.ItemsSource = CollisionOptions;
+        CollisionField.SelectedItem = CollisionOptions[0];
 
         _pictures = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(15) };
         _pictures.Tick += (_, _) =>
@@ -69,15 +88,17 @@ public partial class PropsTabView : UserControl
             }
         };
         Tiles.ItemsSource = _paged;
-        IsVisibleChanged += (_, _) =>
+        // The TILES' visibility, not the control's: folded, the control is still on screen (its tab is), and
+        // pictures drawn for a list nobody can see are a GPU and a disk kept busy for nothing.
+        Tiles.IsVisibleChanged += (_, _) =>
         {
-            if (!IsVisible)
+            if (!Tiles.IsVisible)
             {
                 _pictures.Stop();
                 return;
             }
             LoadCatalog(force: false);
-            // The timer was stopped when the tab was hidden, and a catalog that is already loaded has nothing
+            // The timer was stopped when the tiles were hidden, and a catalog that is already loaded has nothing
             // to restart it: cards whose pictures were still to come kept their placeholders until a filter
             // was touched.
             if (_loaded && _paged.Count > 0) _pictures.Start();
@@ -89,17 +110,33 @@ public partial class PropsTabView : UserControl
     /// of the camera). The window places the object.</summary>
     public event Action<PropEntry, Point?>? PlaceRequested;
 
+    /// <summary>The browser was folded away or opened again — the host re-sizes its row.</summary>
+    public event Action? CollapsedChanged;
+
+    /// <summary>Whether the body is folded away, leaving only the tab.</summary>
+    public bool IsCollapsed
+    {
+        get => CollapseBtn.IsChecked != true;
+        set => CollapseBtn.IsChecked = !value;
+    }
+
     /// <summary>The collision the chooser above the tiles asks scenery to bring.</summary>
     public Assets.Collisions.CollisionChoice Collision =>
-        CollisionBox.SelectedItem is ComboBoxItem { Tag: string tag }
-        && Enum.TryParse(tag, out Assets.Collisions.CollisionChoice choice)
-            ? choice
-            : Assets.Collisions.CollisionChoice.Auto;
+        CollisionField.SelectedItem is CollisionOption option ? option.Choice : Assets.Collisions.CollisionChoice.Auto;
+
+    private void Collapse_Changed(object sender, RoutedEventArgs e)
+    {
+        // IsChecked="True" in XAML fires this during InitializeComponent, before the body exists.
+        if (Body == null) return;
+        Body.Visibility = IsCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        CollapsedChanged?.Invoke();
+    }
 
     private void LoadCatalog(bool force)
     {
         if (_loading || (_loaded && !force)) return;
         _loading = true;
+        EmptyText.Visibility = Visibility.Collapsed;
         Status.Text = "Reading the archives…";
         Task.Run(() => PropCatalog.Load((archive, at, of) =>
                 Dispatcher.BeginInvoke(() => Status.Text = $"Reading {archive} ({at} of {of})…")))
@@ -118,22 +155,34 @@ public partial class PropsTabView : UserControl
             }), TaskScheduler.Default);
     }
 
-    private void Filter_Changed(object sender, RoutedEventArgs e)
+    private void Search_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (IsInitialized) ApplyFilter();
+    }
+
+    private void Shelves_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (IsInitialized) ApplyFilter();
     }
 
+    // The search narrows the whole catalog, the shelf counts follow it, and the shelf picks from what is left —
+    // so a search finds a prop whichever shelf happens to be open, and the counts say where its hits are.
     private void ApplyFilter()
     {
         string query = SearchBox.Text.Trim();
-        string shelf = CategoryBox.SelectedItem as string ?? AllShelves;
-        List<PropTileViewModel> shown = _all.Where(t =>
-                (shelf == AllShelves || t.Entry.Category == shelf)
-                && (query.Length == 0
-                    || t.Entry.Label.Contains(query, StringComparison.OrdinalIgnoreCase)
-                    || t.Entry.Archive.Contains(query, StringComparison.OrdinalIgnoreCase)
-                    || t.Entry.Category.Contains(query, StringComparison.OrdinalIgnoreCase)))
+        string shelf = (Shelves.SelectedItem as PropShelfViewModel)?.Name ?? AllShelves;
+        List<PropTileViewModel> found = _all.Where(t =>
+                query.Length == 0
+                || t.Entry.Label.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || t.Entry.Archive.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || t.Entry.Category.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        foreach (PropShelfViewModel row in _shelves)
+        {
+            row.Count = row.Name == AllShelves ? found.Count : found.Count(t => t.Entry.Category == row.Name);
+        }
+        List<PropTileViewModel> shown = shelf == AllShelves ? found : found.Where(t => t.Entry.Category == shelf).ToList();
         _filtered = shown;
         _paged.Clear();
         _firstInView = 0;
@@ -141,6 +190,10 @@ public partial class PropsTabView : UserControl
         if (_loaded)
         {
             Status.Text = $"{shown.Count} of {_all.Count} objects · drag one onto the viewport, or double-click it";
+            EmptyText.Text = _all.Count == 0
+                ? "No props in the extracted archives — extract some interiors, then Rescan"
+                : "Nothing here matches";
+            EmptyText.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         if (shown.Count > 0) _pictures.Start();
     }
@@ -227,7 +280,7 @@ public partial class PropsTabView : UserControl
             readFor.Thumbnail = read.IsCompletedSuccessfully ? _thumbnails.Draw(read.Result) : null;
             return;
         }
-        if (!IsVisible)
+        if (!Tiles.IsVisible)
         {
             _pictures.Stop();
             return;

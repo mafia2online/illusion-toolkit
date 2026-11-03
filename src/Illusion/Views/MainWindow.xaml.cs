@@ -116,18 +116,20 @@ public partial class MainWindow : Window
         // clicked object's archive when it hit one). Built in code — the target depends on the hit.
         Viewport.ViewportContextMenuRequested += ShowViewportContextMenu;
 
-        // Props: tiles of the Props tab are dragged onto the viewport (or double-clicked) to bring a stock
-        // object into the loaded district.
+        // Props: tiles of the props browser under the viewport are dragged onto it (or double-clicked) to bring
+        // a stock object into the loaded district. Its row is capped at half the column and folds to its tab,
+        // as the resource editor's content browser does.
+        _ = new FoldingPaneRow(ViewportColumn, PropsRow, PropsSplitter, ToolbarRow, PropsPanel);
         PropsPanel.PlaceRequested += PlaceProp;
         Viewport.AllowDrop = true;
         Viewport.DragOver += (_, e) =>
         {
-            e.Effects = e.Data.GetDataPresent(PropsTabView.DragFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Effects = e.Data.GetDataPresent(PropsBrowser.DragFormat) ? DragDropEffects.Copy : DragDropEffects.None;
             e.Handled = true;
         };
         Viewport.Drop += (_, e) =>
         {
-            if (e.Data.GetData(PropsTabView.DragFormat) is Assets.Library.PropEntry entry) PlaceProp(entry, e.GetPosition(Viewport));
+            if (e.Data.GetData(PropsBrowser.DragFormat) is Assets.Library.PropEntry entry) PlaceProp(entry, e.GetPosition(Viewport));
         };
 
         // Blender bridge notices arrive on protocol/background threads; NoticeBanner.Post marshals itself.
@@ -532,20 +534,7 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    // The Props button: the left column folds away to nothing and comes back at the width it had.
-    private double _propsWidth = 330;
-
-    private void PropsToggle_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsInitialized) return;
-        bool show = PropsToggle.IsChecked == true;
-        if (!show && PropsColumn.ActualWidth > 40) _propsWidth = PropsColumn.ActualWidth;
-        PropsColumn.Width = new GridLength(show ? _propsWidth : 0);
-        PropsPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        PropsSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    // A prop from the Props tab: carried into the loaded district (the season on screen), standing where the
+    // A prop from the props browser: carried into the loaded district (the season on screen), standing where the
     // drop landed on the scene — or, for a double-click, on whatever is in the middle of the view. Named after
     // what it is, made unique in the archive.
     private void PlaceProp(Assets.Library.PropEntry entry, Point? at)

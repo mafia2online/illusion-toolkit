@@ -5,7 +5,7 @@ using Illusion.Assets.Library;
 
 namespace Illusion.ViewModels;
 
-/// <summary>One tile of the Props tab: the library entry, its two lines of text and its picture, which
+/// <summary>One tile of the props browser: the library entry, its two lines of text and its picture, which
 /// arrives later than the tile — pictures are drawn in the background, a few at a time.</summary>
 public sealed class PropTileViewModel : INotifyPropertyChanged
 {
@@ -15,12 +15,13 @@ public sealed class PropTileViewModel : INotifyPropertyChanged
 
     public string Title => Entry.Label;
 
-    /// <summary>Where it comes from and what it is: "harry · Door · 1.1 × 0.2 × 2.3 m".</summary>
+    /// <summary>The line under the name: how big it is, "1.1 × 0.2 × 2.3 m". A tile is a hundred pixels wide,
+    /// so where it comes from and what it is are left to the tooltip.</summary>
     public string Detail => string.Create(CultureInfo.InvariantCulture,
-        $"{Entry.ArchiveName} · {KindText} · {Entry.Size[0]:0.#} × {Entry.Size[1]:0.#} × {Entry.Size[2]:0.#} m");
+        $"{Entry.Size[0]:0.#} × {Entry.Size[1]:0.#} × {Entry.Size[2]:0.#} m");
 
     public string ToolTip => string.Create(CultureInfo.InvariantCulture,
-        $"{Entry.Label}\n{Entry.Archive} — {Entry.Name}\n{KindText}, {Entry.Triangles:N0} triangles\nDrag onto the viewport, or double-click to place it in front of the camera.");
+        $"{Entry.Label}\n{Entry.Archive} — {Entry.Name}\n{KindText}, {Detail}, {Entry.Triangles:N0} triangles\nDrag onto the viewport, or double-click to place it in front of the camera.");
 
     private string KindText => Entry.Kind switch
     {
