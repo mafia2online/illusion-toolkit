@@ -57,8 +57,8 @@
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
                                 BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
-                            <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform" Fill="Transparent"
-                                  Stroke="{StaticResource TextStrong}" StrokeThickness="1.15" StrokeLineJoin="Round"
+                            <Path x:Name="Icon" Width="12" Height="12" Stretch="Uniform" Fill="Transparent"
+                                  Stroke="{StaticResource TextPrimary}" StrokeThickness="1.15" StrokeLineJoin="Round"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource BrowserUpArrow}"
                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -87,7 +87,7 @@
         <Style x:Key="BrowserTreeItem" TargetType="TreeViewItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TreeViewItem">
@@ -96,7 +96,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Border x:Name="Row" Grid.Row="0" CornerRadius="3" Padding="2,0" MinHeight="23">
+                            <Border x:Name="Row" Grid.Row="0" CornerRadius="4" Padding="2,0" MinHeight="24">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="Transparent" />
@@ -123,7 +123,7 @@
                                                       HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
-                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="14,0,0,0" />
+                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="12,0,0,0" />
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsExpanded" Value="False">
@@ -165,16 +165,16 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
                         <TextBox x:Name="SearchBox" Style="{StaticResource BrowserSearch}"
                                  ToolTip="Search the whole library — folders and archives"
                                  TextChanged="Search_TextChanged" />
-                        <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextDim}"
+                        <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextMuted}"
                               StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
                               HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-                        <TextBlock x:Name="SearchPlaceholder" Text="Search the library…" Foreground="{StaticResource TextFaint}"
-                                   FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
+                        <TextBlock x:Name="SearchPlaceholder" Text="Search library" Foreground="{StaticResource TextMuted}"
+                                   FontSize="12" Margin="28,0,0,0" VerticalAlignment="Center"
                                    IsHitTestVisible="False" />
                     </Grid>
 
@@ -197,13 +197,13 @@
                                     <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                                           Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                          VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                                          VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                                           Data="{Binding Resource, Converter={StaticResource Glyph}}"
                                           Stroke="{Binding Resource, Converter={StaticResource Tint}}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}" FontSize="12"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Text="{Binding TotalEntries}" Foreground="{StaticResource TextFaint}"
-                                               FontSize="10.5" VerticalAlignment="Center" Margin="8,0,2,0" />
+                                    <TextBlock Grid.Column="2" Text="{Binding TotalEntries, StringFormat=N0}" Foreground="{StaticResource TextMuted}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="8,0,2,0" />
                                 </Grid>
                             </HierarchicalDataTemplate>
                         </TreeView.Resources>
@@ -219,7 +219,7 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -238,12 +238,12 @@
                             <TextBox x:Name="FilterBox" Style="{StaticResource BrowserSearch}"
                                      ToolTip="Narrow down what is showing in this folder"
                                      TextChanged="Filter_TextChanged" />
-                            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextDim}"
+                            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextMuted}"
                                   StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
                                   HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-                            <TextBlock x:Name="FilterPlaceholder" Text="Filter this folder…" Foreground="{StaticResource TextFaint}"
-                                       FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
+                            <TextBlock x:Name="FilterPlaceholder" Text="Filter folder" Foreground="{StaticResource TextMuted}"
+                                       FontSize="12" Margin="28,0,0,0" VerticalAlignment="Center"
                                        IsHitTestVisible="False" />
                         </Grid>
 
@@ -304,19 +304,19 @@
                                     </GroupStyle.Panel>
                                     <GroupStyle.HeaderTemplate>
                                         <DataTemplate>
-                                            <StackPanel Margin="0,0,0,9">
+                                            <StackPanel Margin="0,0,0,8">
                                                 <StackPanel Orientation="Horizontal">
                                                     <Border Width="3" Height="12" CornerRadius="1.5"
                                                             VerticalAlignment="Center" Margin="0,0,8,0"
                                                             Background="{Binding Name, Converter={StaticResource SectionTint}}" />
-                                                    <TextBlock Foreground="White" FontSize="11.5"
+                                                    <TextBlock Foreground="{StaticResource TextPrimary}" FontSize="12"
                                                                FontWeight="SemiBold" VerticalAlignment="Center"
                                                                Text="{Binding Name, Converter={StaticResource SectionTitle}}" />
-                                                    <TextBlock Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                                    <TextBlock Foreground="{StaticResource TextMuted}" FontSize="11"
                                                                VerticalAlignment="Center" Margin="8,0,0,0"
-                                                               Text="{Binding ItemCount}" />
+                                                               Text="{Binding ItemCount, StringFormat=N0}" />
                                                 </StackPanel>
-                                                <Border Height="1" Background="{StaticResource FillCard}" Margin="0,6,12,0" />
+                                                <Border Height="1" Background="{StaticResource FillCard}" Margin="0,8,12,0" />
                                             </StackPanel>
                                         </DataTemplate>
                                     </GroupStyle.HeaderTemplate>
@@ -331,7 +331,7 @@
                                  alike. -->
                             <ListBox.Resources>
                                 <DataTemplate DataType="{x:Type lib:LibraryFolder}">
-                                    <Grid Margin="8,12,8,10" ToolTip="{Binding Path}">
+                                    <Grid Margin="8,12,8,8" ToolTip="{Binding Path}">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="*" />
                                             <RowDefinition Height="Auto" />
@@ -343,23 +343,23 @@
                                               Data="{StaticResource BrowserFolder}"
                                               Stroke="{Binding Resource, Converter={StaticResource Tint}}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                                    FontSize="11" FontWeight="SemiBold" TextAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextMuted}" FontSize="11"
                                                    TextAlignment="Center" Margin="0,2,0,0"
-                                                   Text="{Binding TotalEntries, StringFormat={}{0} archives}" />
+                                                   Text="{Binding TotalEntries, StringFormat={}{0:N0} archives}" />
                                     </Grid>
                                 </DataTemplate>
                                 <DataTemplate DataType="{x:Type lib:LibraryEntry}">
-                                    <Grid Margin="8,12,8,10">
+                                    <Grid Margin="8,12,8,8">
                                         <Grid.ToolTip>
                                             <!-- Where a hit came from: the tile has no room for the folder,
                                                  and while searching that is the one thing it needs to say. -->
                                             <StackPanel MaxWidth="320">
-                                                <TextBlock Text="{Binding Name}" Foreground="White"
+                                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                                            FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding FolderPath}" Foreground="{StaticResource TextMuted}"
+                                                <TextBlock Text="{Binding FolderPath}" Foreground="{StaticResource TextSecondary}"
                                                            FontSize="11" Margin="0,2,0,0" />
                                             </StackPanel>
                                         </Grid.ToolTip>
@@ -379,16 +379,16 @@
                                               Stroke="{Binding Resource, Converter={StaticResource Tint}}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="Collapsed" />
-                                        <Border Grid.Row="0" Margin="-5,-9,-5,0" CornerRadius="5" ClipToBounds="True">
+                                        <Border Grid.Row="0" Margin="-5,-9,-5,0" CornerRadius="4" ClipToBounds="True">
                                             <Image x:Name="Thumb" Stretch="Uniform"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                                    RenderOptions.BitmapScalingMode="HighQuality"
                                                    v:ArchiveThumb.Entry="{Binding}" />
                                         </Border>
-                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                                    FontSize="11" TextAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextMuted}" FontSize="11"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Size, Converter={StaticResource ByteSize}}" />
                                     </Grid>
@@ -404,12 +404,12 @@
                                      The tooltip carries the engine's own type name — that is what the game
                                      and every other tool call it, and the section is only our grouping. -->
                                 <DataTemplate DataType="{x:Type sds:SdsResource}">
-                                    <Grid Margin="8,12,8,10">
+                                    <Grid Margin="8,12,8,8">
                                         <Grid.ToolTip>
                                             <StackPanel MaxWidth="320">
-                                                <TextBlock Text="{Binding Name}" Foreground="White"
+                                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                                            FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding Type}" Foreground="{StaticResource TextMuted}"
+                                                <TextBlock Text="{Binding Type}" Foreground="{StaticResource TextSecondary}"
                                                            FontSize="11" Margin="0,2,0,0" />
                                             </StackPanel>
                                         </Grid.ToolTip>
@@ -424,10 +424,10 @@
                                               Data="{Binding Kind, Converter={StaticResource ArchiveGlyph}}"
                                               Stroke="{Binding Kind, Converter={StaticResource ArchiveTint}}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                                    FontSize="11" TextAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextMuted}" FontSize="11"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Converter={StaticResource ResourceSize}}" />
                                     </Grid>
@@ -437,7 +437,7 @@
 
                         <!-- Says why the pane is empty, which is otherwise indistinguishable from a stuck
                              browser. -->
-                        <TextBlock x:Name="EmptyText" Foreground="{StaticResource TextFaint}" FontSize="11.5"
+                        <TextBlock x:Name="EmptyText" Foreground="{StaticResource TextMuted}" FontSize="12"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Visibility="Collapsed" Text="Pick a folder on the left" />
 
@@ -447,7 +447,7 @@
                                 Background="{StaticResource SelectionFill}"
                                 BorderBrush="{StaticResource Accent}" BorderThickness="1.5"
                                 CornerRadius="6" Margin="-4">
-                            <TextBlock x:Name="DropHintText" Foreground="White" FontSize="12.5"
+                            <TextBlock x:Name="DropHintText" Foreground="{StaticResource TextPrimary}" FontSize="13"
                                        FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
                                        Margin="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>

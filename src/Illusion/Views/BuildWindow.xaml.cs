@@ -236,7 +236,7 @@ public sealed partial class BuildWindow : Window
             {
                 // Packing it would write the same archive again: left unticked, for the user to tick if that is wanted.
                 // An export compares with the SHIPPED archive instead, which an archive already built differs from.
-                row.Summary = "Nothing differs from the game's archive as it is now.";
+                row.Summary = "Nothing differs from the game's archive as it is now";
                 if (_destination == ExportDestination.Game) row.IsChecked = false;
             }
             else
@@ -360,7 +360,7 @@ public sealed partial class BuildWindow : Window
         IntroText.Text = export
             ? "Exported is each ticked archive's saved working copy: a patch against the game's shipped archive, or the whole archive when the game has none of that name, with the materials it adds. The game's own archives are not touched."
             : "A Build packs each archive's whole working copy. Listed under an archive is everything in it that differs from what the game has now - not only what was changed today.";
-        FooterText.Text = export ? "Edited archives that are not in this export are listed unticked." : "Each archive replaced is kept in its 'backups' folder.";
+        FooterText.Text = export ? "Edited archives that are not in this export are listed unticked" : "Each archive replaced is kept in its 'backups' folder";
         if (!export)
         {
             ShowList(_pending, _pending);
@@ -425,7 +425,7 @@ public sealed partial class BuildWindow : Window
     {
         string name = ProjectBox.Text.Trim();
         string output = OutputBox.Text.Trim();
-        string? problem = ExportProject.CheckName(name) ?? (output.Length == 0 ? "Choose the folder the export is written to." : null);
+        string? problem = ExportProject.CheckName(name) ?? (output.Length == 0 ? "Choose the folder the export is written to" : null);
         if (problem != null)
         {
             AppDialog.Show(this, new DialogOptions { Title = "Export", Icon = DialogIcon.Info, Heading = "Not exported", Text = problem });

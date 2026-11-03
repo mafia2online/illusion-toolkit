@@ -201,7 +201,7 @@ public partial class MaterialEditorWindow : Window
             if (!carried.Contains(d.Id))
                 paramRows.Add(new ParamEditRow(d, CommitParamText));
         ParamsList.ItemsSource = paramRows;
-        ParamsCaption.Text = $"PARAMETERS ({info.Parameters.Count}/{paramRows.Count})";
+        ParamsCaption.Text = $"Parameters ({info.Parameters.Count}/{paramRows.Count})";
         NoParamsText.Visibility = paramRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         DeleteBtn.IsEnabled = true;
@@ -444,7 +444,7 @@ public partial class MaterialEditorWindow : Window
         string current = "—";
         if (_contextNode.Source is IMaterialSlotEditor editor && editor.GetSlotMaterial(_contextSlot) is { } bound)
             current = _viewport.MaterialCatalog.GetMaterial(bound)?.Name ?? ("0x" + bound.ToString("X"));
-        AssignContextLabel.Text = $"SLOT {_contextSlot + 1} · {_contextNode.Name}";
+        AssignContextLabel.Text = $"Slot {_contextSlot + 1} · {_contextNode.Name}";
         AssignBtn.ToolTip =
             $"Assign the selected material to slot {_contextSlot + 1} of \"{_contextNode.Name}\" (currently {current}).";
 

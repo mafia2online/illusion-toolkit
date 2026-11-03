@@ -153,16 +153,17 @@
     <Color x:Key="ShadowColor">#000000</Color>
 
     <!-- ══════════════════════════════ Text ══════════════════════════════
-         Seven steps, from the thing you are reading down to the thing you are not. White at an alpha rather
-         than a grey, so a label keeps its weight on every plate in the scheme. -->
+         Three roles and no more: what you read, what explains it, and what you only glance at. White at an
+         alpha rather than a grey, so a label keeps its weight on every plate in the scheme. There used to be
+         seven steps, and the bottom two fell under 4:1 on the window plate — a muted caption still has to be
+         read. Hierarchy past these three comes from size and weight, not from another shade. -->
 
+    <!-- Names, values, the text of a control: everything the eye lands on first. -->
     <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="TextStrong" Color="#D0FFFFFF" />
+    <!-- A sentence that explains the line above it, a status message, a description. -->
     <SolidColorBrush x:Key="TextSecondary" Color="#B0FFFFFF" />
-    <SolidColorBrush x:Key="TextMuted" Color="#99FFFFFF" />
-    <SolidColorBrush x:Key="TextDim" Color="#80FFFFFF" />
-    <SolidColorBrush x:Key="TextFaint" Color="#66FFFFFF" />
-    <SolidColorBrush x:Key="TextGhost" Color="#59FFFFFF" />
+    <!-- Section captions, counts, units, placeholders, meta. About 5:1 on the window plate. -->
+    <SolidColorBrush x:Key="TextMuted" Color="#80FFFFFF" />
 
     <!-- ══════════════════════════════ Glyph ink ══════════════════════════════
          Neutral greys for drawn icons — the render-mode spheres, the tool shelf, the eye toggle. Not text: an

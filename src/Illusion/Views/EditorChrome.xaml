@@ -33,6 +33,15 @@
         <StreamGeometry x:Key="IconZones">M1.6,1.6 L10.4,1.6 L10.4,10.4 L1.6,10.4 Z M6,1.6 L6,10.4 M1.6,6 L10.4,6</StreamGeometry>
         <StreamGeometry x:Key="IconInstances">M1.4,7.4 L4.4,7.4 L4.4,10.4 L1.4,10.4 Z M4.9,1.6 L7.9,1.6 L7.9,4.6 L4.9,4.6 Z M7.6,6.4 L10.6,6.4 L10.6,9.4 L7.6,9.4 Z</StreamGeometry>
         <StreamGeometry x:Key="IconNavigation">M2.6,9.4 L5.4,6.2 L7.4,8.2 L10,3.4 M1.3,10.4 A1.3,1.3 0 1 1 3.9,10.4 A1.3,1.3 0 1 1 1.3,10.4 Z M8.8,2.6 A1.3,1.3 0 1 1 11.4,2.6 A1.3,1.3 0 1 1 8.8,2.6 Z</StreamGeometry>
+        <!-- What the area selector and the season switch load (12×12, same stroke). They replaced the text
+             characters "▦", "⌂" and "❄", which came from whatever font had them and sat off the toolbar's line:
+             a district is a folded map, an interior a house, winter a snowflake. -->
+        <StreamGeometry x:Key="IconDistrict">M1.4,2.8 L4.4,1.6 L7.6,2.8 L10.6,1.6 L10.6,9.2 L7.6,10.4 L4.4,9.2 L1.4,10.4 Z M4.4,1.6 L4.4,9.2 M7.6,2.8 L7.6,10.4</StreamGeometry>
+        <StreamGeometry x:Key="IconInterior">M1.4,5.8 L6,1.8 L10.6,5.8 M2.8,4.6 L2.8,10.4 L9.2,10.4 L9.2,4.6 M5,10.4 L5,7.4 L7,7.4 L7,10.4</StreamGeometry>
+        <StreamGeometry x:Key="IconWinter">M6,1 L6,11 M1.67,3.5 L10.33,8.5 M1.67,8.5 L10.33,3.5 M4.7,1.6 L6,3 L7.3,1.6 M4.7,10.4 L6,9 L7.3,10.4 M9.16,2.67 L8.6,4.5 L10.46,4.93 M2.84,9.33 L3.4,7.5 L1.54,7.07 M10.46,7.07 L8.6,7.5 L9.16,9.33 M1.54,4.93 L3.4,4.5 L2.84,2.67</StreamGeometry>
+        <!-- Keymap row buttons: unbind (a cross) and back-to-default (an arrow turning back). -->
+        <StreamGeometry x:Key="IconUnbind">M3,3 L9,9 M9,3 L3,9</StreamGeometry>
+        <StreamGeometry x:Key="IconResetKey">M1.5,6 A4.5,4.5 0 1 0 6,1.5 A4.875,4.875 0 0 0 2.63,2.87 L1.5,4 M1.5,1.5 L1.5,4 L4,4</StreamGeometry>
 
         <!-- Eye toggle icons (~16×16): open eye with pupil / closed lid with lashes. -->
         <StreamGeometry x:Key="IconEyeOpen">M1.5,8 C4.5,4 11.5,4 14.5,8 C11.5,12 4.5,12 1.5,8 Z M6,8 A2,2 0 1 1 10,8 A2,2 0 1 1 6,8 Z</StreamGeometry>
@@ -64,7 +73,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Border x:Name="Bd" Background="{StaticResource SurfaceChip}" CornerRadius="4">
-                            <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform"
+                            <Path x:Name="Icon" Width="12" Height="12" Stretch="Uniform"
                                   Fill="Transparent" Stroke="{StaticResource GlyphOn}" StrokeThickness="1.2"
                                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource IconEyeOpen}"
@@ -98,7 +107,7 @@
                     <ControlTemplate TargetType="ToggleButton">
                         <Border Background="Transparent" Width="16">
                             <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE76C;" Foreground="{StaticResource TextMuted}"
+                                       Text="&#xE76C;" Foreground="{StaticResource TextSecondary}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        RenderTransformOrigin="0.5,0.5" />
                         </Border>
@@ -111,7 +120,7 @@
                                 </Setter>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chev" Property="Foreground" Value="White" />
+                                <Setter TargetName="Chev" Property="Foreground" Value="{StaticResource TextPrimary}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -121,25 +130,25 @@
 
         <!-- Scene stats strip: a large value over a small caption. -->
         <Style x:Key="StatNumber" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
         <Style x:Key="StatLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
-            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,1,0,0" />
         </Style>
 
         <!-- Center action bar: blue "Play" button (rectangular, glyph + label). -->
         <Style x:Key="PlayButton" TargetType="Button">
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{StaticResource Accent}" />
-            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Padding" Value="16,0" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -148,7 +157,7 @@
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="13" Text="&#xE768;"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text="Play" FontWeight="SemiBold" Margin="7,0,0,0"
+                                <TextBlock Text="Play" FontWeight="SemiBold" Margin="8,0,0,0"
                                            VerticalAlignment="Center" />
                             </StackPanel>
                         </Border>
@@ -167,9 +176,9 @@
 
         <!-- Center action bar: square gray icon buttons (multiplayer, build). Dims when disabled. -->
         <Style x:Key="ToolSquareButton" TargetType="Button">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
@@ -201,16 +210,16 @@
              Components | Raw. Same cell shape and accent as the numbered strip below it, but radio buttons:
              there are exactly two, they are named rather than numbered, and neither is a list of anything. -->
         <Style x:Key="SegmentButton" TargetType="RadioButton">
-            <Setter Property="Height" Value="22" />
+            <Setter Property="Height" Value="24" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
             <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                Padding="10,0">
+                                Padding="12,0">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -235,7 +244,7 @@
                                  answer. -->
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
-                                <Setter Property="Foreground" Value="{StaticResource TextFaint}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
                                 <Setter Property="Cursor" Value="Arrow" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -277,17 +286,17 @@
         </Style>
 
         <Style x:Key="NumberStripItem" TargetType="ListBoxItem">
-            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="MinWidth" Value="28" />
             <Setter Property="Height" Value="24" />
             <Setter Property="Margin" Value="0,0,4,4" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
             <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                Padding="7,0">
+                                Padding="8,0">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -315,8 +324,8 @@
         <!-- Render-mode selector (Blender-style): square icon toggles, mutually exclusive via GroupName.
              Gray by default, accent-blue when active (the current shading mode). -->
         <Style x:Key="RenderModeButton" TargetType="RadioButton">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
@@ -553,7 +562,7 @@
             </Setter>
         </Style>
 
-        <!-- Flat icon-only tab cell. Idle = transparent + dim (TextDim). Selected = selection
+        <!-- Flat icon-only tab cell. Idle = transparent + muted (TextMuted). Selected = selection
              tint fill (SelectionFill) + a 2px accent bar on the inner right edge + white glyph.
              Hover = subtle FillHover row-hover tint. Glyph comes from Tag; Header stays for the
              tooltip/accessibility only (not shown). -->
@@ -565,12 +574,12 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
-                        <Grid Width="32" Height="30" SnapsToDevicePixels="True">
-                            <Border x:Name="Cell" Background="Transparent" CornerRadius="4" Margin="2,1" />
+                        <Grid Width="32" Height="32" SnapsToDevicePixels="True">
+                            <Border x:Name="Cell" Background="Transparent" CornerRadius="4" Margin="2" />
                             <Border x:Name="AccentBar" Width="2" HorizontalAlignment="Right" Opacity="0"
                                     Background="{TemplateBinding Foreground}" SnapsToDevicePixels="True" />
                             <TextBlock x:Name="Glyph" FontFamily="Segoe MDL2 Assets"
-                                       FontSize="15" Opacity="0.62"
+                                       FontSize="16" Opacity="0.62"
                                        Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
                                        Foreground="{TemplateBinding Foreground}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -578,7 +587,7 @@
                                  already draws. A tab and a tile meaning the same resource must not be two
                                  different pictures, so those tabs put the browser's own geometry in Icon
                                  and this Path shows instead of the glyph above. -->
-                            <Path x:Name="Vector" Width="15" Height="15" Stretch="Uniform" Opacity="0.62"
+                            <Path x:Name="Vector" Width="16" Height="16" Stretch="Uniform" Opacity="0.62"
                                   Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{Binding (v:TabIcon.Icon), RelativeSource={RelativeSource TemplatedParent}}"
@@ -619,7 +628,7 @@
             <Setter Property="BorderBrush" Value="{StaticResource EdgeFaint}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="11,10" />
+            <Setter Property="Padding" Value="12,12" />
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
@@ -639,35 +648,33 @@
 
         <!-- Selection header: object name (bold) over a dim type caption. -->
         <Style x:Key="PropTitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
         <Style x:Key="PropSubtitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="Margin" Value="0,2,0,0" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
-        <!-- Section caption (uppercase-ish label above a group of rows). -->
-        <Style x:Key="PropCaption" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
-            <Setter Property="FontSize" Value="10.5" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="1,0,0,7" />
+        <!-- Section caption over a group of rows: the app's one Caption, in sentence case like every other
+             label, with the wider gap a card of rows needs under its name. -->
+        <Style x:Key="PropCaption" TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+            <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
         <!-- Read-only metadata: "Label   value" row (label dim-left, value white-right). -->
         <Style x:Key="MetaLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
-            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="MetaValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="FontFamily" Value="Consolas" />
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -676,16 +683,16 @@
 
         <!-- One "label … value" metadata row (used across SDS / FrameResource / Scene tabs). -->
         <Style x:Key="MetaRow" TargetType="Grid">
-            <Setter Property="Margin" Value="0,0,0,7" />
+            <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
         <!-- Plain single-line input styled to match the Vector3Box cells (dark, rounded, accent on focus).
              Used for the camera-speed field so it reads as the same kind of control, just without the axis
              prefix / copy button. -->
         <Style x:Key="InputField" TargetType="TextBox">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Height" Value="24" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Height" Value="{Binding Path=(v:Density.ControlHeight), RelativeSource={RelativeSource Self}}" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="MinWidth" Value="64" />
             <Setter Property="CaretBrush" Value="White" />
@@ -695,7 +702,7 @@
                     <ControlTemplate TargetType="TextBox">
                         <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
                                 BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="8,0,8,0" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -723,20 +730,20 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Height" Value="24" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="{StaticResource TextStrong}" />
-            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
                                 BorderBrush="{StaticResource EdgeInput}" BorderThickness="1"
-                                Padding="9,0" SnapsToDevicePixels="True">
+                                Padding="8,0" SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
-                                <Setter Property="Foreground" Value="White" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
@@ -759,18 +766,18 @@
         <Style x:Key="BrowserHandle" TargetType="ToggleButton">
             <Setter Property="Focusable" Value="False" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Width" Value="58" />
-            <Setter Property="Height" Value="15" />
+            <Setter Property="Width" Value="56" />
+            <Setter Property="Height" Value="16" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Top" />
-            <Setter Property="Margin" Value="0,-14,0,0" />
+            <Setter Property="Margin" Value="0,-16,0,0" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Border x:Name="Bd" Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource EdgeRaised}"
-                                BorderThickness="1,1,1,0" CornerRadius="7,7,0,0" SnapsToDevicePixels="True">
+                                BorderThickness="1,1,1,0" CornerRadius="6,6,0,0" SnapsToDevicePixels="True">
                             <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE70E;" Foreground="{StaticResource TextMuted}" Margin="0,1,0,0"
+                                       Text="&#xE70E;" Foreground="{StaticResource TextSecondary}" Margin="0,1,0,0"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -780,7 +787,7 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceRaisedHot}" />
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeHot}" />
-                                <Setter TargetName="Chev" Property="Foreground" Value="White" />
+                                <Setter TargetName="Chev" Property="Foreground" Value="{StaticResource TextPrimary}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -788,12 +795,13 @@
             </Setter>
         </Style>
 
-        <!-- A browser's search field, matching the property panel's inputs. The left inset clears the
-             magnifier (BrowserFind), which the host lays over the field. -->
+        <!-- A panel's search field (scene tree, browsers), matching the property panel's inputs. The left inset
+             clears the magnifier (BrowserFind), which the host lays over the field, and puts typed text on the
+             placeholder's 28 px line: border 1 + inset 25 + the text view's own 2. -->
         <Style x:Key="BrowserSearch" TargetType="TextBox">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Height" Value="24" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Height" Value="28" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CaretBrush" Value="White" />
             <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
@@ -802,7 +810,7 @@
                     <ControlTemplate TargetType="TextBox">
                         <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
                                 BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="26,0,6,0" VerticalAlignment="Center" />
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="25,0,8,0" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -854,6 +862,165 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- ================= Menus: the window menu bar and every context menu =================
+             Fluent's menu is sized for touch (14 px text, 40 px rows) and will not shrink by padding — it clips
+             the text — so the windows used to scale the whole bar to 0.8, which blurs every glyph that lands
+             between pixels. These templates draw it at its real size instead: 12 px text on 28 px rows, the
+             popup in the same card as the toolbar flyouts, hotkeys in a column of their own. Implicit, so the
+             context menus built in code get the same look without asking for it. -->
+
+        <!-- The card every menu popup is drawn in. Its margin is room for the shadow: the popup window has to
+             be that much bigger than the card, so each popup offsets itself back by the same 8 px. -->
+        <Style x:Key="MenuPopupCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PopupSurface}" />
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeNeutral}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Margin" Value="8,0,8,8" />
+            <Setter Property="MinWidth" Value="200" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Menu">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Menu">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ItemsPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="HasDropShadow" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Style="{StaticResource MenuPopupCard}" Margin="0,0,8,8">
+                            <ItemsPresenter Grid.IsSharedSizeScope="True"
+                                            KeyboardNavigation.DirectionalNavigation="Cycle"
+                                            KeyboardNavigation.TabNavigation="Cycle" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Margin="8,4" Background="{StaticResource EdgeSoft}" SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A word on the bar. Its list drops straight down, left edges flush. -->
+        <ControlTemplate x:Key="MenuTopLevelTemplate" TargetType="MenuItem">
+            <Grid SnapsToDevicePixels="True">
+                <Border x:Name="Bd" Margin="0,2" Padding="8,0" MinHeight="24" CornerRadius="4" Background="Transparent">
+                    <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+                </Border>
+                <Popup x:Name="PART_Popup" Placement="Bottom" HorizontalOffset="-8" VerticalOffset="2"
+                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                       AllowsTransparency="True" Focusable="False" PopupAnimation="None">
+                    <Border Style="{StaticResource MenuPopupCard}">
+                        <ItemsPresenter Grid.IsSharedSizeScope="True"
+                                        KeyboardNavigation.DirectionalNavigation="Cycle"
+                                        KeyboardNavigation.TabNavigation="Cycle" />
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHot}" />
+                </Trigger>
+                <Trigger Property="IsSubmenuOpen" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHot}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- A row inside a list: name, then its hotkey in a column shared by the whole list, then the arrow of
+             a nested list. A nested list opens to the right with its first row level with this one. -->
+        <ControlTemplate x:Key="MenuSubmenuTemplate" TargetType="MenuItem">
+            <Grid SnapsToDevicePixels="True">
+                <Border x:Name="Bd" MinHeight="28" Padding="12,0,8,0" CornerRadius="4" Background="Transparent">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="MenuGesture" />
+                            <ColumnDefinition Width="16" />
+                        </Grid.ColumnDefinitions>
+                        <ContentPresenter Grid.Column="0" ContentSource="Header" RecognizesAccessKey="True"
+                                          VerticalAlignment="Center" />
+                        <TextBlock x:Name="Gesture" Grid.Column="1" Margin="24,0,0,0" VerticalAlignment="Center"
+                                   Text="{TemplateBinding InputGestureText}" Foreground="{StaticResource TextMuted}" />
+                        <Path x:Name="Arrow" Grid.Column="2" Width="4" Height="8" HorizontalAlignment="Right"
+                              VerticalAlignment="Center" Stretch="Uniform" Visibility="Collapsed"
+                              Data="M0,0 L4,4 L0,8" StrokeThickness="1.2" StrokeLineJoin="Round"
+                              Stroke="{StaticResource TextSecondary}" />
+                    </Grid>
+                </Border>
+                <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="-3" VerticalOffset="-5"
+                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                       AllowsTransparency="True" Focusable="False" PopupAnimation="None">
+                    <Border Style="{StaticResource MenuPopupCard}">
+                        <ItemsPresenter Grid.IsSharedSizeScope="True"
+                                        KeyboardNavigation.DirectionalNavigation="Cycle"
+                                        KeyboardNavigation.TabNavigation="Cycle" />
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="Role" Value="SubmenuHeader">
+                    <Setter TargetName="Arrow" Property="Visibility" Value="Visible" />
+                </Trigger>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHot}" />
+                    <Setter TargetName="Arrow" Property="Stroke" Value="{StaticResource TextPrimary}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Template" Value="{StaticResource MenuSubmenuTemplate}" />
+            <Style.Triggers>
+                <Trigger Property="Role" Value="TopLevelHeader">
+                    <Setter Property="Template" Value="{StaticResource MenuTopLevelTemplate}" />
+                </Trigger>
+                <Trigger Property="Role" Value="TopLevelItem">
+                    <Setter Property="Template" Value="{StaticResource MenuTopLevelTemplate}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
 </ResourceDictionary>

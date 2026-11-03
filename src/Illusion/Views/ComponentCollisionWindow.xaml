@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:v="clr-namespace:Illusion.Views"
+        v:Density.ControlHeight="28"
         Title="Collision"
         Width="560" SizeToContent="Height"
         ResizeMode="NoResize" ShowInTaskbar="False"
@@ -33,20 +34,20 @@
             <TextBlock Style="{StaticResource DimLabel}" Text="What it is" Margin="0,0,0,4" />
             <v:DropDownField x:Name="RoleBox" DisplayPath="Title" SelectionChanged="Role_Changed"
                              ToolTip="Body is the car's own solid; glass is a pane; a zone is the engine bay or the snow." />
-            <TextBlock x:Name="RoleHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+            <TextBlock x:Name="RoleHint" Style="{StaticResource DimLabel}" Margin="0,4,0,12"
                        TextWrapping="Wrap" />
 
             <TextBlock x:Name="ShapeCaption" Style="{StaticResource DimLabel}" Text="Shape" Margin="0,0,0,4" />
             <v:DropDownField x:Name="ShapeBox" DisplayPath="Title" SelectionChanged="Shape_Changed"
                              ToolTip="The form the collision takes." />
-            <TextBlock x:Name="ShapeHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+            <TextBlock x:Name="ShapeHint" Style="{StaticResource DimLabel}" Margin="0,4,0,12"
                        TextWrapping="Wrap" />
 
             <!-- The WHOLE size, never half of one and never a radius to double in your head. A capsule and a
                  cylinder take their width from the first two and their whole length from the third. -->
             <TextBlock x:Name="SizeCaption" Style="{StaticResource DimLabel}"
                        Text="Size in metres — the whole thing, not half of it" Margin="0,0,0,4" />
-            <Grid Margin="0,0,0,14">
+            <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="10" />
@@ -100,20 +101,19 @@
                            Margin="1,4,0,0" />
             </Grid>
 
-            <TextBlock x:Name="ErrorLabel" Foreground="{StaticResource StatusErrorText}" FontSize="11.5"
+            <TextBlock x:Name="ErrorLabel" Foreground="{StaticResource StatusErrorText}" FontSize="12"
                        Margin="0,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
 
         <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
-                BorderThickness="0,1,0,0" Padding="24,14">
+                BorderThickness="0,1,0,0" Padding="24,16">
             <DockPanel LastChildFill="False">
                 <TextBlock x:Name="FootNote" DockPanel.Dock="Left" Style="{StaticResource DimLabel}"
                            MaxWidth="280" TextWrapping="Wrap" VerticalAlignment="Center" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Margin="0,0,8,0"
                             Content="Cancel" Click="Cancel_Click" />
-                    <Button x:Name="AcceptButton" Style="{StaticResource AccentButton}" MinWidth="92"
-                            Height="32" Content="Add" IsDefault="True" Click="Accept_Click" />
+                    <Button x:Name="AcceptButton" Style="{StaticResource AccentButton}" MinWidth="92" Content="Add" IsDefault="True" Click="Accept_Click" />
                 </StackPanel>
             </DockPanel>
         </Border>

@@ -1,6 +1,8 @@
 <Window x:Class="Illusion.Views.StreamMapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        v:Density.ControlHeight="28"
         Title="Stream Map"
         Width="760" SizeToContent="Height"
         ResizeMode="NoResize" ShowInTaskbar="False"
@@ -25,13 +27,13 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="PathBox" Grid.Column="0" Padding="6,4" TextChanged="Path_Changed" />
-                <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Height="28" Padding="12,0"
+                <TextBox Style="{StaticResource DarkBox}" x:Name="PathBox" Grid.Column="0" TextChanged="Path_Changed" />
+                <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Padding="12,0"
                         Margin="8,0,0,0" Content="Browse…" Click="Browse_Click" />
             </Grid>
-            <TextBlock x:Name="FileText" Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,14" />
+            <TextBlock x:Name="FileText" Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,0,0,12" />
 
-            <Grid Margin="0,0,0,10">
+            <Grid Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="16" />
@@ -39,22 +41,22 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock Style="{StaticResource DimLabel}" Text="Find" Margin="0,0,0,4" />
-                    <TextBox x:Name="FindBox" Padding="6,4" TextChanged="Query_Changed"
+                    <TextBox Style="{StaticResource DarkBox}" x:Name="FindBox" TextChanged="Query_Changed"
                              ToolTip="Matched exactly, capitals and all" />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
                     <TextBlock Style="{StaticResource DimLabel}" Text="Replace with" Margin="0,0,0,4" />
-                    <TextBox x:Name="ReplaceBox" Padding="6,4" TextChanged="Query_Changed"
+                    <TextBox Style="{StaticResource DarkBox}" x:Name="ReplaceBox" TextChanged="Query_Changed"
                              ToolTip="May not make a string longer than it was: the edit is made in place" />
                 </StackPanel>
             </Grid>
 
             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                <CheckBox x:Name="PathCheck" IsChecked="True" Content="Archive paths" Margin="0,0,18,0"
+                <CheckBox x:Name="PathCheck" IsChecked="True" Content="Archive paths" Margin="0,0,16,0"
                           Checked="Query_Changed" Unchecked="Query_Changed" />
-                <CheckBox x:Name="EntityCheck" IsChecked="True" Content="Instance names" Margin="0,0,18,0"
+                <CheckBox x:Name="EntityCheck" IsChecked="True" Content="Instance names" Margin="0,0,16,0"
                           Checked="Query_Changed" Unchecked="Query_Changed" />
-                <CheckBox x:Name="LineCheck" IsChecked="True" Content="Line names" Margin="0,0,18,0"
+                <CheckBox x:Name="LineCheck" IsChecked="True" Content="Line names" Margin="0,0,16,0"
                           Checked="Query_Changed" Unchecked="Query_Changed" />
                 <CheckBox x:Name="GroupCheck" IsChecked="True" Content="Group names"
                           Checked="Query_Changed" Unchecked="Query_Changed" />
@@ -74,12 +76,12 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding Kind}" FontSize="11"
-                                               Foreground="{StaticResource TextDim}" VerticalAlignment="Center" />
+                                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="{Binding Before}" FontSize="12"
                                                Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                               TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
                                     <TextBlock Grid.Column="2" Text="{Binding After}" FontSize="12"
-                                               Foreground="White" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -87,21 +89,21 @@
                     </ListBox>
                     <TextBlock x:Name="EmptyLabel" Style="{StaticResource DimLabel}"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Text="Type what to find." />
+                               Text="Type what to find" />
                 </Grid>
             </Border>
         </StackPanel>
 
         <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
-                BorderThickness="0,1,0,0" Padding="24,14">
+                BorderThickness="0,1,0,0" Padding="24,16">
             <DockPanel LastChildFill="False">
                 <TextBlock x:Name="CountText" DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="470"
                            TextWrapping="Wrap" VerticalAlignment="Center"
-                           Text="The file is copied beside itself as a backup before it is written." />
+                           Text="The file is copied beside itself as a backup before it is written" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Height="32" Margin="0,0,8,0"
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="80" Margin="0,0,8,0"
                             Content="Close" Click="Close_Click" />
-                    <Button x:Name="ReplaceBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                    <Button x:Name="ReplaceBtn" Style="{StaticResource AccentButton}" MinWidth="92"
                             Content="Replace" IsEnabled="False" Click="Replace_Click" />
                 </StackPanel>
             </DockPanel>

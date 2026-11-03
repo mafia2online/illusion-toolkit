@@ -29,6 +29,14 @@ public partial class App : Application
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
 
+        // Every window lays out on whole pixels. Without it a single 15 px line of text pushes everything
+        // below it to x.2 and x.8: edges blur, and three fields splitting one row come out 97.7, 97.7 and 101.7
+        // wide. Set as a value on each window as it loads, because the property inherits only a value that was
+        // SET — a changed default on the Window type stays on the window and never reaches its controls
+        // (measured: the fields stayed at x.7). Context menus live outside any window and set it in their style.
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) => ((Window)sender).UseLayoutRounding = true));
+
         // Headless probes (--probe-*): diagnose load chains without UI,
         // reports are written to %TEMP%\illusion_*.txt.
         if (ProbeRunner.TryRun(e.Args))

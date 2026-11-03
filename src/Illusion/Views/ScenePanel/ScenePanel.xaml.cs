@@ -405,7 +405,7 @@ public partial class ScenePanel : UserControl
         // The strip's own colour: a warning only when one of the faults is a failure no shipped car raises.
         // 41 of the corpus's faults are how cars are written, and an amber band on a stock archive nobody has
         // touched is how the whole diagnosis learns to be ignored.
-        FaultToggle.Foreground = _components.HasBreak ? Palette.StatusWarn : Palette.TextDim;
+        FaultToggle.Foreground = _components.HasBreak ? Palette.StatusWarn : Palette.TextMuted;
         FaultToggle.IsChecked = _components.FaultsOpen;
         FaultScroll.Visibility = _components.FaultsOpen ? Visibility.Visible : Visibility.Collapsed;
         if (!ReferenceEquals(FaultList.ItemsSource, _components.Faults))
@@ -756,10 +756,13 @@ public partial class ScenePanel : UserControl
         foreach (SceneNode f in _viewport.Roots) files += f.Children.Count;
         StatFiles.Text = files.ToString("N0", CultureInfo.InvariantCulture);
         StatMeshes.Text = _viewport.MeshCount.ToString("N0", CultureInfo.InvariantCulture);
-        StatPolys.Text = FormatCompact(_viewport.TriangleCount);
+        // Same format as the two cells beside it — "1,535" next to "625.6K" read as two kinds of number — up to a
+        // million; past that (the whole map streamed in) the full figure no longer fits the narrow cell.
+        long tris = _viewport.TriangleCount;
+        StatPolys.Text = tris >= 1_000_000 ? FormatCompact(tris) : tris.ToString("N0", CultureInfo.InvariantCulture);
     }
 
-    // Compact number for the narrow stats cell: 1.2M / 45.6K / 8,900.
+    // Compact number for a narrow cell: 1.2M / 45.6K / 8,900.
     internal static string FormatCompact(long n) =>
         n >= 1_000_000 ? (n / 1_000_000.0).ToString("0.0", CultureInfo.InvariantCulture) + "M"
         : n >= 10_000 ? (n / 1_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "K"

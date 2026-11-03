@@ -87,7 +87,7 @@ public sealed partial class CarFieldsWindow : Window
     /// no use without the sentence that says what it does.</summary>
     private UIElement Build(CarField field)
     {
-        var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+        var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
         stack.Children.Add(new TextBlock
         {
             Text = field.Label,
@@ -125,7 +125,7 @@ public sealed partial class CarFieldsWindow : Window
             {
                 Text = field.Hint,
                 Style = (Style)FindResource("DimLabel"),
-                Margin = new Thickness(0, 6, 0, 0),
+                Margin = new Thickness(0, 4, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
             });
         }

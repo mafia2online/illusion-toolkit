@@ -538,7 +538,7 @@ internal static class EditorProbes
 
         // Resting on it.
         Views.HoverPopup.RaiseHover(button, entering: true);
-        Pump(TimeSpan.FromMilliseconds(120));
+        Pump(TimeSpan.FromMilliseconds(40));
         check("Hover flyout: nothing opens before the delay is up", button.IsChecked != true, "");
         Pump(TimeSpan.FromMilliseconds(400));
         check("Hover flyout: resting on the button opens it", button.IsChecked == true, "");

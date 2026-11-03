@@ -173,8 +173,8 @@ public partial class LauncherWindow : Window
             WarnText.Text = validPath
                 ? "The game is not unpacked. Click the unpack button before opening the editors."
                 : string.IsNullOrWhiteSpace(PathBox.Text)
-                    ? "No game folder chosen yet — pick it with the folder button, or type the path."
-                    : "Enter a valid Mafia II install path (the pc folder or the game root).";
+                    ? "No game folder chosen yet — pick it with the folder button, or type the path"
+                    : "Enter a valid Mafia II install path (the pc folder or the game root)";
         }
     }
 
@@ -276,7 +276,7 @@ public partial class LauncherWindow : Window
         try
         {
             await Task.Run(() => ResourceUnpacker.UnpackAll(progress, CancellationToken.None));
-            WorkStatus.Text = "Unpacking complete.";
+            WorkStatus.Text = "Unpacking complete";
         }
         catch (Exception ex)
         {

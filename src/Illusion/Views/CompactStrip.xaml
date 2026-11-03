@@ -10,16 +10,16 @@
         <!-- Drop button: exactly the toolbar's square icon button (see ToolSquareButton), no chevron — the
              toolbar is a row of square buttons and this one has no reason to look different. -->
         <Style x:Key="StripDropButton" TargetType="ToggleButton">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="15" Text="&#xE7C5;"
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE7C5;"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -44,10 +44,10 @@
             <ToggleButton x:Name="DropBtn" Style="{StaticResource StripDropButton}" />
             <!-- Opens on hover as well as on click — see HoverPopup, wired in the ctor. -->
             <Popup x:Name="DropPopup" IsOpen="{Binding IsChecked, ElementName=DropBtn}" Placement="Bottom"
-                   AllowsTransparency="True" PopupAnimation="Fade" Closed="Popup_Closed">
+                   AllowsTransparency="True" Closed="Popup_Closed">
                 <Border x:Name="PopupBox" Background="{StaticResource PopupSurface}"
                         BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
-                        CornerRadius="6" Padding="6" Margin="0,3,8,8"
+                        CornerRadius="6" Padding="4" Margin="0,4,8,8"
                         PreviewMouseLeftButtonUp="PopupBox_MouseUp">
                     <Border.Effect>
                         <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />

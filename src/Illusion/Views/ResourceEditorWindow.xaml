@@ -16,10 +16,7 @@
          The size floor matches the map editor's, and for the same reason — see MainWindow. -->
 
     <DockPanel>
-        <Menu DockPanel.Dock="Top" Padding="0">
-            <Menu.LayoutTransform>
-                <ScaleTransform ScaleX="0.8" ScaleY="0.8" />
-            </Menu.LayoutTransform>
+        <Menu DockPanel.Dock="Top">
             <MenuItem Header="File">
                 <MenuItem x:Name="SaveMenuItem" Header="Save" Command="{x:Static v:EditorCommands.Save}" />
                 <MenuItem Header="Build SDS…" Click="Build_Click" />
@@ -58,15 +55,15 @@
             </MenuItem>
         </Menu>
 
-        <StatusBar DockPanel.Dock="Bottom" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">
-            <StatusBarItem Grid.Column="0" Padding="6,1">
+        <StatusBar DockPanel.Dock="Bottom" Height="32" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">
+            <StatusBarItem Grid.Column="0" Padding="12,0" VerticalContentAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <v:Vector3Box x:Name="CamPosBox" Compact="True" Decimals="2" VerticalAlignment="Center"
-                                  Margin="2,1,0,1" ToolTip="Camera position (X, Y, Z)" />
+                                  ToolTip="Camera position (X, Y, Z)" />
                 </StackPanel>
             </StatusBarItem>
-            <StatusBarItem Grid.Column="1" Padding="10,1">
-                <TextBlock x:Name="FpsText" VerticalAlignment="Center" FontFamily="Consolas" Opacity="0.85" Text="" />
+            <StatusBarItem Grid.Column="1" Padding="12,0" VerticalContentAlignment="Center">
+                <TextBlock x:Name="FpsText" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{StaticResource TextSecondary}" Text="" />
             </StatusBarItem>
         </StatusBar>
 
@@ -107,10 +104,10 @@
                          The Layers button used to sit here. Its only entry was the collision overlay, and
                          that now lives on the Render tab where a car is worked on, so the button had nothing
                          left to open. -->
-                    <Path x:Name="StagedIcon" Width="17" Height="17" Stretch="Uniform" VerticalAlignment="Center"
-                          Margin="0,0,9,0" Fill="Transparent" Stroke="{StaticResource TextDim}"
+                    <Path x:Name="StagedIcon" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                          Margin="0,0,8,0" Fill="Transparent" Stroke="{StaticResource TextMuted}"
                           StrokeThickness="1.2" StrokeLineJoin="Round" Visibility="Collapsed" />
-                    <TextBlock x:Name="StagedText" Text="nothing loaded" Foreground="White" FontSize="13.5"
+                    <TextBlock x:Name="StagedText" Text="Nothing loaded" Foreground="{StaticResource TextPrimary}" FontSize="13"
                                FontWeight="SemiBold" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" MaxWidth="360" />
                     </StackPanel>
@@ -122,10 +119,10 @@
                         <Button x:Name="PlayBtn" Style="{StaticResource PlayButton}"
                                 ToolTip="Launch Mafia II" Click="Play_Click" />
                         <Button x:Name="MultiplayerBtn" Style="{StaticResource ToolSquareButton}"
-                                Content="&#xE774;" Margin="6,0,0,0"
+                                Content="&#xE774;" Margin="4,0,0,0"
                                 ToolTip="Launch Multiplayer" Click="Multiplayer_Click" />
                         <Button x:Name="BuildBtn" Style="{StaticResource ToolSquareButton}"
-                                Content="&#xE90F;" Margin="6,0,0,0"
+                                Content="&#xE90F;" Margin="4,0,0,0"
                                 ToolTip="Build — pack the edited archive back into its .sds"
                                 Click="Build_Click" />
                     </StackPanel>
@@ -210,8 +207,8 @@
                             <TextBlock Text="Nothing on the stage" Foreground="{StaticResource TextSecondary}" FontSize="15"
                                        FontWeight="SemiBold" HorizontalAlignment="Center"
                                        Margin="0,24,0,0" />
-                            <TextBlock Text="Double-click an archive below to open it" Foreground="{StaticResource TextGhost}"
-                                       FontSize="12" HorizontalAlignment="Center" Margin="0,7,0,0" />
+                            <TextBlock Text="Double-click an archive below to open it" Foreground="{StaticResource TextMuted}"
+                                       FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0" />
                         </StackPanel>
                     </Border>
 
@@ -234,8 +231,8 @@
                                            RenderOptions.BitmapScalingMode="HighQuality" />
                                 </Grid>
                             </Border>
-                            <TextBlock x:Name="TextureCaption" Grid.Row="1" Foreground="{StaticResource TextDim}"
-                                       FontSize="11.5" HorizontalAlignment="Center" Margin="0,16,0,0"
+                            <TextBlock x:Name="TextureCaption" Grid.Row="1" Foreground="{StaticResource TextMuted}"
+                                       FontSize="12" HorizontalAlignment="Center" Margin="0,16,0,0"
                                        TextTrimming="CharacterEllipsis" />
                         </Grid>
                     </Border>
@@ -246,14 +243,10 @@
                     <!-- Name of the helper glyph under the cursor; hidden until something is under it. -->
                     <v:GlyphHoverLabel x:Name="GlyphLabel" />
 
-                    <!-- Blender edit-mode frame: an orange glow over the stage while a bridge session is
-                         active. Purely visual (hit-test transparent). -->
-                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2.5"
-                            IsHitTestVisible="False" Visibility="Collapsed">
-                        <Border.Effect>
-                            <DropShadowEffect Color="{StaticResource BlenderColor}" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
-                        </Border.Effect>
-                    </Border>
+                    <!-- Blender edit-mode frame: a solid orange border round the stage while a bridge session
+                         is active — the same frame as the map editor's. Purely visual (hit-test transparent). -->
+                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2"
+                            IsHitTestVisible="False" Visibility="Collapsed" />
 
                     <v:NoticeBanner x:Name="Notices" />
                 </Grid>

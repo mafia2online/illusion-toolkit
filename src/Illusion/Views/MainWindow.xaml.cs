@@ -267,9 +267,9 @@ public partial class MainWindow : Window
         (PanelCaption.Text, PanelDelta.Decimals) = mode switch
         {
             // The unit is part of the caption: a bare "1.250" after a resize could be read as the new size.
-            GizmoMode.Rotate => ("ROTATED BY  (degrees)", 2),
-            GizmoMode.Scale => ("SCALED BY  (× original)", 3),
-            _ => ("MOVED BY  (units)", 3),
+            GizmoMode.Rotate => ("Rotated by (degrees)", 2),
+            GizmoMode.Scale => ("Scaled by (× original)", 3),
+            _ => ("Moved by (units)", 3),
         };
         GizmoPanel.Visibility = Visibility.Visible;
     }

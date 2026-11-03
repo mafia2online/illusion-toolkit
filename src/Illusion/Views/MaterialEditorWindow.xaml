@@ -24,7 +24,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Width="42" Height="42" CornerRadius="4" Margin="0,1,10,0"
+                <Border Grid.Column="0" Width="42" Height="42" CornerRadius="4" Margin="0,1,8,0"
                         VerticalAlignment="Top" Background="{StaticResource SurfaceWell}" BorderBrush="{StaticResource EdgeFaint}"
                         BorderThickness="1" ClipToBounds="True" ToolTip="{Binding ResolveNote}">
                     <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
@@ -42,11 +42,11 @@
              picker beside the same numbers (see ColorField). Which is which is decided per row. -->
         <DataTemplate x:Key="ParamEditorPlain">
             <v:CopyableTextField Label="{Binding Label}" Value="{Binding Text, Mode=TwoWay}"
-                                 ToolTip="{Binding Hint}" Margin="0,0,0,10" />
+                                 ToolTip="{Binding Hint}" Margin="0,0,0,8" />
         </DataTemplate>
         <DataTemplate x:Key="ParamEditorColor">
             <v:ColorField Label="{Binding Label}" Value="{Binding Text, Mode=TwoWay}"
-                          ToolTip="{Binding Hint}" Margin="0,0,0,10" />
+                          ToolTip="{Binding Hint}" Margin="0,0,0,8" />
         </DataTemplate>
         <v:ParamTemplateSelector x:Key="ParamEditor"
                                  Plain="{StaticResource ParamEditorPlain}"
@@ -73,9 +73,9 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Text="MATERIAL FILE" Style="{StaticResource Caption}" />
+            <TextBlock Grid.Row="0" Text="Material file" Style="{StaticResource Caption}" />
             <v:DropDownField Grid.Row="1" x:Name="LibraryCombo" SelectionChanged="Library_Changed" />
-            <TextBox Grid.Row="2" x:Name="SearchBox" Style="{StaticResource DarkBox}" Margin="0,8,0,6"
+            <TextBox Grid.Row="2" x:Name="SearchBox" Style="{StaticResource DarkBox}" Margin="0,8,0,8"
                      TextChanged="Search_Changed" ToolTip="Filter materials by name" />
             <Border Grid.Row="3" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4">
                 <ListBox x:Name="MaterialList" Background="Transparent" BorderThickness="0"
@@ -86,7 +86,7 @@
                          SelectionChanged="MaterialList_Changed">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="11.5"
+                            <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextPrimary}" FontSize="12"
                                        TextTrimming="CharacterEllipsis" />
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -100,10 +100,10 @@
                 <TextBox Grid.Column="0" x:Name="NewNameBox" Style="{StaticResource DarkBox}"
                          ToolTip="Name for a new material" KeyDown="NewNameBox_KeyDown" />
                 <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Content="New"
-                        Margin="6,0,0,0" Click="New_Click" />
+                        Margin="4,0,0,0" Click="New_Click" />
             </Grid>
             <Button Grid.Row="5" x:Name="DeleteBtn" Style="{StaticResource NeutralButton}"
-                    Foreground="{StaticResource StatusError}" Content="Delete" Margin="0,6,0,0"
+                    Foreground="{StaticResource StatusError}" Content="Delete" Margin="0,4,0,0"
                     HorizontalAlignment="Stretch" Click="Delete_Click" />
         </Grid>
 
@@ -116,7 +116,7 @@
             <!-- Name + hash: the project-style copyable fields (like the Object tab's identity section).
                  Committing a new name renames the material — the FNV64 hash re-derives automatically.
                  DataContext is a NameEditRow (null and disabled while no material is shown). -->
-            <StackPanel Grid.Row="0" x:Name="NamePanel" Margin="2,0,0,10" IsEnabled="False">
+            <StackPanel Grid.Row="0" x:Name="NamePanel" Margin="2,0,0,8" IsEnabled="False">
                 <v:CopyableTextField Label="Name" Value="{Binding Text, Mode=TwoWay}" />
                 <v:CopyableTextField Label="Hash" Value="{Binding HashHex, Mode=OneWay}" ReadOnly="True"
                                      Margin="0,4,0,0" />
@@ -149,9 +149,9 @@
             </Grid.RowDefinitions>
             <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,8,4">
-                <TextBlock Text="TEXTURES" Style="{StaticResource Caption}" Margin="0,0,0,8" />
+                <TextBlock Text="Textures" Style="{StaticResource Caption}" Margin="0,0,0,8" />
                 <ItemsControl x:Name="SlotsList" ItemTemplate="{StaticResource SlotEditor}" />
-                <TextBlock x:Name="NoSlotsText" Text="No texture slots." Style="{StaticResource DimLabel}"
+                <TextBlock x:Name="NoSlotsText" Text="No texture slots" Style="{StaticResource DimLabel}"
                            Visibility="Collapsed" />
                 <!-- One full-width accent "Add" button; the slot type is picked from its dropdown —
                      choosing a row adds the slot immediately. -->
@@ -163,13 +163,13 @@
                            Closed="AddSlotPopup_Closed">
                         <Border Background="{StaticResource PopupSurface}"
                                 BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
-                                CornerRadius="6" Padding="4" Margin="0,3,8,8"
+                                CornerRadius="6" Padding="4" Margin="0,4,8,8"
                                 MinWidth="{Binding ActualWidth, ElementName=AddSlotBtn}">
                             <Border.Effect>
                                 <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
                             </Border.Effect>
                             <ListBox x:Name="AddSlotList" Background="Transparent" BorderThickness="0"
-                                     FontSize="11.5" Foreground="White" MaxHeight="290"
+                                     FontSize="12" Foreground="{StaticResource TextPrimary}" MaxHeight="290"
                                      DisplayMemberPath="Display"
                                      ItemContainerStyle="{StaticResource PickerItem}"
                                      IsSynchronizedWithCurrentItem="False"
@@ -179,20 +179,20 @@
                     </Popup>
                 </Grid>
 
-                <TextBlock x:Name="ParamsCaption" Text="PARAMETERS" Style="{StaticResource Caption}"
+                <TextBlock x:Name="ParamsCaption" Text="Parameters" Style="{StaticResource Caption}"
                            Margin="0,20,0,8" />
                 <ItemsControl x:Name="ParamsList" ItemTemplateSelector="{StaticResource ParamEditor}" />
-                <TextBlock x:Name="NoParamsText" Text="No shader parameters." Style="{StaticResource DimLabel}"
+                <TextBlock x:Name="NoParamsText" Text="No shader parameters" Style="{StaticResource DimLabel}"
                            Visibility="Collapsed" />
             </StackPanel>
             </ScrollViewer>
 
             <!-- Mesh-slot assignment — pinned under the sidebar, shown only when the editor was opened
                  from a mesh's material tile. The label identifies the target mesh and slot. -->
-            <StackPanel Grid.Row="1" x:Name="AssignPanel" Visibility="Collapsed" Margin="0,10,8,0">
+            <StackPanel Grid.Row="1" x:Name="AssignPanel" Visibility="Collapsed" Margin="0,8,8,0">
                 <TextBlock x:Name="AssignContextLabel" Style="{StaticResource Caption}"
                            TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                <Button x:Name="AssignBtn" Style="{StaticResource AccentButton}" Height="28"
+                <Button x:Name="AssignBtn" Style="{StaticResource AccentButton}"
                         HorizontalAlignment="Stretch"
                         Content="Assign" Click="Assign_Click" />
             </StackPanel>

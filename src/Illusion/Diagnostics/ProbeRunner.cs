@@ -757,6 +757,12 @@ internal static class ProbeRunner
             case "--probe-mcp":
                 McpProbes.RunMcpProbe();
                 return true;
+            // Pictures of the chrome in the dark theme: launcher, settings, both editors with something loaded,
+            // every window off the desktop and never activated. Optional args = district, car.
+            // Output: %TEMP%\illusion_shot_*.png + illusion_shots.txt
+            case "--probe-shots":
+                ShotProbes.Run(args.Length >= 2 ? args[1] : "hill", args.Length >= 3 ? args[2] : "shubert_38");
+                return true;
             // The same tools against the editor itself: a real window with a district loaded. Nothing is saved.
             // Output: %TEMP%\illusion_editor_tools_live.txt
             case "--probe-editor-tools-live":

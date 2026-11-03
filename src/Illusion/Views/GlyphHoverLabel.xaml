@@ -8,10 +8,10 @@
          screen says which one it is — a car carries twenty dummies, and four of them are climb boxes. Shown
          on hover only: a permanent label per glyph would be the clutter this layer was written to avoid. -->
 
-    <Border Background="{StaticResource ScrimTooltip}" CornerRadius="4" Padding="7,3">
-        <TextBlock FontSize="11.5" TextOptions.TextFormattingMode="Display">
+    <Border Background="{StaticResource ScrimTooltip}" CornerRadius="4" Padding="8,4">
+        <TextBlock FontSize="12" TextOptions.TextFormattingMode="Display">
             <Run x:Name="NameRun" Foreground="{StaticResource TextPrimary}" />
-            <Run x:Name="KindRun" Foreground="{StaticResource TextDim}" />
+            <Run x:Name="KindRun" Foreground="{StaticResource TextMuted}" />
         </TextBlock>
     </Border>
 </UserControl>

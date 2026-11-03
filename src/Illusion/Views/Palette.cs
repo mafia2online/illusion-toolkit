@@ -19,7 +19,7 @@ public static class Palette
     public static Brush TextPrimary => Get("TextPrimary");
 
     /// <summary>Secondary label text.</summary>
-    public static Brush TextDim => Get("TextDim");
+    public static Brush TextMuted => Get("TextMuted");
 
     /// <summary>A drawn icon's neutral ink, and its shaded side.</summary>
     public static Brush GlyphInk => Get("GlyphInk");

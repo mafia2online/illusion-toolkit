@@ -7,7 +7,7 @@
          frame object carries, and the parent it hangs off. -->
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="10,10,10,4">
+        <StackPanel Margin="8,8,8,4">
             <!-- Header: name + type on the left, the mesh's triangle count on the right. -->
             <Border Style="{StaticResource PropCard}">
                 <Grid>
@@ -19,10 +19,10 @@
                         <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
                         <TextBlock Text="{Binding ObjectType}" Style="{StaticResource PropSubtitle}" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
-                        <TextBlock Text="{Binding TriangleCountText}" Foreground="White"
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <TextBlock Text="{Binding TriangleCountText}" Foreground="{StaticResource TextPrimary}"
                                    FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                        <TextBlock Text="triangles" Foreground="{StaticResource TextDim}" FontSize="10"
+                        <TextBlock Text="triangles" Foreground="{StaticResource TextMuted}" FontSize="11"
                                    HorizontalAlignment="Right" Margin="0,1,0,0" />
                     </StackPanel>
                 </Grid>
@@ -30,10 +30,10 @@
 
             <Border Style="{StaticResource PropCard}">
                 <StackPanel>
-                    <TextBlock Text="TRANSFORM" Style="{StaticResource PropCaption}" />
-                    <v:Vector3Box Label="Position" Decimals="3" Margin="0,0,0,7"
+                    <TextBlock Text="Transform" Style="{StaticResource PropCaption}" />
+                    <v:Vector3Box Label="Position" Decimals="3" Margin="0,0,0,8"
                                   X="{Binding PosX}" Y="{Binding PosY}" Z="{Binding PosZ}" />
-                    <v:Vector3Box Label="Rotation" Decimals="2" Margin="0,0,0,7"
+                    <v:Vector3Box Label="Rotation" Decimals="2" Margin="0,0,0,8"
                                   X="{Binding RotX}" Y="{Binding RotY}" Z="{Binding RotZ}" />
                     <v:Vector3Box Label="Scale" Decimals="3"
                                   X="{Binding ScaleX}" Y="{Binding ScaleY}" Z="{Binding ScaleZ}" />
@@ -48,15 +48,15 @@
             <Border Style="{StaticResource PropCard}"
                     Visibility="{Binding CanReparent, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="HIERARCHY" Style="{StaticResource PropCaption}" />
+                    <TextBlock Text="Hierarchy" Style="{StaticResource PropCaption}" />
                     <TextBlock Text="Parent — pick a new one to reparent" Style="{StaticResource MetaLabel}"
                                Margin="0,0,0,4" TextWrapping="Wrap" />
                     <!-- Search box (magnifier + placeholder) filters the candidate list. -->
                     <Grid Margin="0,0,0,4">
-                        <TextBox Style="{StaticResource InputField}" Padding="24,3,6,3"
+                        <TextBox Style="{StaticResource InputField}" Padding="24,4,6,4"
                                  Text="{Binding ParentSearchText, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
-                                   Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
+                                   Foreground="{StaticResource TextMuted}" Margin="8,0,0,0"
                                    HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
                     </Grid>
                     <!-- IsSynchronizedWithCurrentItem=False is load-bearing: bound to a
@@ -71,15 +71,15 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
-                                <Setter Property="Foreground" Value="{StaticResource TextStrong}" />
-                                <Setter Property="Padding" Value="6,3" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                                <Setter Property="Padding" Value="6,4" />
                                 <Setter Property="Cursor" Value="Hand" />
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="ListBoxItem">
-                                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3"
+                                            <Border x:Name="Bd" Background="Transparent" CornerRadius="4"
                                                     Padding="{TemplateBinding Padding}">
-                                                <TextBlock Text="{Binding Display}" FontSize="11.5"
+                                                <TextBlock Text="{Binding Display}" FontSize="12"
                                                            TextTrimming="CharacterEllipsis" />
                                             </Border>
                                             <ControlTemplate.Triggers>

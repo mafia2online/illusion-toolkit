@@ -28,10 +28,10 @@
             <Path Width="46" Height="46" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource StageGlyph}"
                   StrokeThickness="1.5" StrokeLineJoin="Round" StrokeStartLineCap="Round"
                   StrokeEndLineCap="Round" Data="{StaticResource IconMesh}" HorizontalAlignment="Center" />
-            <TextBlock Text="No components" Foreground="{StaticResource TextMuted}"
-                       FontSize="12.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,0" />
+            <TextBlock Text="No components" Foreground="{StaticResource TextSecondary}"
+                       FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,0" />
             <TextBlock x:Name="EmptyHint" Text="Nothing in this car matched the search"
-                       Foreground="{StaticResource TextGhost}"
+                       Foreground="{StaticResource TextMuted}"
                        FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" />
         </StackPanel>
 
@@ -101,7 +101,7 @@
                     <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="VerticalContentAlignment" Value="Center" />
-                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="TreeViewItem">
@@ -110,8 +110,10 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <Border x:Name="Row" Grid.Row="0" CornerRadius="3"
-                                            Padding="2,0" MinHeight="23">
+                                    <!-- Right padding: the tree's scroll bar lies OVER the rows (Fluent), and a
+                                         right-aligned summary without room for it reads "body," cut in half. -->
+                                    <Border x:Name="Row" Grid.Row="0" CornerRadius="4"
+                                            Padding="2,0,8,0" MinHeight="24">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="Transparent" />
@@ -139,7 +141,7 @@
                                                               VerticalAlignment="Center" />
                                         </Grid>
                                     </Border>
-                                    <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="14,0,0,0" />
+                                    <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="12,0,0,0" />
                                 </Grid>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsExpanded" Value="False">
@@ -171,7 +173,7 @@
                         <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Kind, Converter={StaticResource ComponentGlyph}}">
                             <Path.Style>
                                 <Style TargetType="Path">
@@ -188,7 +190,7 @@
                                 </Style>
                             </Path.Style>
                         </Path>
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White"
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -200,12 +202,12 @@
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
-                        <TextBlock Grid.Column="2" Text="{Binding Kind}" Foreground="{StaticResource TextFaint}"
-                                   FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
+                        <TextBlock Grid.Column="2" Text="{Binding Kind}" Foreground="{StaticResource TextMuted}"
+                                   FontSize="11" VerticalAlignment="Center" Margin="8,0,4,0" />
                         <!-- What did not stitch about THIS component, on its own row. The car's full list is
                              above the tree; this is what makes a fault something a modder trips over rather
                              than something they have to go and read. The tooltip carries every one of them. -->
-                        <Path Grid.Column="3" Width="11" Height="11" Stretch="Uniform" Fill="Transparent"
+                        <Path Grid.Column="3" Width="12" Height="12" Stretch="Uniform" Fill="Transparent"
                               StrokeThickness="1.2"
                               StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               VerticalAlignment="Center" Margin="0,0,4,0" SnapsToDevicePixels="True"
@@ -216,7 +218,7 @@
                                     <!-- Faint for a component the game simply ships this way — 24 door parts
                                          over the corpus have no door row — and a warning only for a failure
                                          no shipped car raises. -->
-                                    <Setter Property="Stroke" Value="{StaticResource TextFaint}" />
+                                    <Setter Property="Stroke" Value="{StaticResource TextMuted}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding HasBreak}" Value="True">
                                             <Setter Property="Stroke" Value="{StaticResource StatusWarn}" />
@@ -243,13 +245,13 @@
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Stroke="{Binding Kind, Converter={StaticResource ComponentTint}}"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Kind, Converter={StaticResource DamageGlyph}}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}"
-                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         <TextBlock Grid.Column="2" Text="{Binding Summary}"
-                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,4,0" />
                     </Grid>
                 </DataTemplate>
@@ -268,8 +270,8 @@
                         <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                              Stroke="{StaticResource TextFaint}"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Stroke="{StaticResource TextMuted}"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Label, Converter={StaticResource HandleGlyph}}">
                             <Path.Style>
                                 <Style TargetType="Path">
@@ -288,10 +290,10 @@
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                                    <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding HasFields}" Value="False">
-                                            <Setter Property="Foreground" Value="{StaticResource TextGhost}" />
+                                            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
                                             <Setter Property="FontStyle" Value="Italic" />
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -299,7 +301,7 @@
                             </TextBlock.Style>
                         </TextBlock>
                         <TextBlock Grid.Column="2" Text="{Binding Summary}"
-                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,4,0" />
                     </Grid>
                 </DataTemplate>
@@ -317,14 +319,14 @@
                         <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                              Stroke="{StaticResource TextFaint}"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Stroke="{StaticResource TextMuted}"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{StaticResource IconCollision}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}"
-                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Grid.Column="2" Text="{Binding Size}" Foreground="{StaticResource TextFaint}"
-                                   FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
+                        <TextBlock Grid.Column="2" Text="{Binding Size}" Foreground="{StaticResource TextMuted}"
+                                   FontSize="11" VerticalAlignment="Center" Margin="8,0,4,0" />
                     </Grid>
                 </DataTemplate>
 
@@ -343,13 +345,13 @@
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Stroke="{Binding Row.Kind, Converter={StaticResource ComponentTint}}"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Row.Kind, Converter={StaticResource ComponentGlyph}}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}"
-                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         <TextBlock Grid.Column="2" Text="{Binding Summary}"
-                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,4,0" />
                     </Grid>
                 </DataTemplate>
@@ -369,10 +371,10 @@
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Stroke="{Binding Role, Converter={StaticResource MarkerTint}}"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Role, Converter={StaticResource MarkerGlyph}}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}"
-                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </Grid>
                 </HierarchicalDataTemplate>
@@ -392,13 +394,13 @@
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Stroke="{Binding Marker.Role, Converter={StaticResource MarkerTint}}"
                               Opacity="0.75"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True"
                               Data="{Binding Marker.Role, Converter={StaticResource MarkerGlyph}}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}"
-                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         <TextBlock Grid.Column="2" Text="{Binding Name}"
-                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,4,0"
                                    TextTrimming="CharacterEllipsis" MaxWidth="120" />
                     </Grid>

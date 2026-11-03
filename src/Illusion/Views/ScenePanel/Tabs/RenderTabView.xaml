@@ -7,39 +7,37 @@
          Each row reuses the scene tree's node-kind glyph+color (Scene teal for proxy
          SCENES vs Mesh green for proxy MESHES) so the two read apart at a glance.
          All switches are OFF by default (no IsChecked). -->
-    <StackPanel Margin="12,10,12,10">
+    <StackPanel Margin="12">
         <!-- Collision first, and on THIS tab rather than behind the Layers button: it is the one
              overlay a car is actually worked on with, and burying the answer to "where is this
              car solid" behind a popup made it something you had to remember rather than see. -->
-        <TextBlock Text="Overlays" Foreground="{StaticResource TextDim}"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
-        <Border Height="1" Background="{StaticResource EdgeFaint}" Margin="0,0,0,2" />
+        <TextBlock Text="Overlays" Style="{StaticResource Caption}" />
+        <Border Height="1" Background="{StaticResource EdgeFaint}" />
 
-        <Grid x:Name="PartShapesRow" Margin="0,8,0,12"
+        <Grid x:Name="PartShapesRow" Margin="0,8,0,24"
               ToolTip="The physics a car is actually hit by — the mesh never is. Drawn for the whole car, not just the selected part.&#10;&#10;ORANGE — a placed physics shape with no surface named: the body, the doors, the bumpers.&#10;BLUE — glass. Every window is one of these, and it is glass by its type, not by a material.&#10;AMBER — a zone: the engine bay, the snow volumes.&#10;ANY OTHER COLOUR — a shape that names a physics surface, painted the way that surface is painted in the world's own collision.">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Vermilion}"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Vermilion}"
                   StrokeThickness="1.2" StrokeLineJoin="Round"
                   Data="{StaticResource IconCollision}" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Collision" Foreground="White" FontSize="12" />
+                <TextBlock Text="Collision" Foreground="{StaticResource TextPrimary}" FontSize="12" />
                 <TextBlock Text="Coloured by what each volume is"
-                           Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
                           Checked="PartShapes_Changed" Unchecked="PartShapes_Changed" />
         </Grid>
 
-        <TextBlock Text="Scene filters" Foreground="{StaticResource TextDim}"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
-        <Border Height="1" Background="{StaticResource EdgeFaint}" Margin="0,0,0,2" />
+        <TextBlock Text="Scene filters" Style="{StaticResource Caption}" />
+        <Border Height="1" Background="{StaticResource EdgeFaint}" />
 
         <!-- (a) proxy scenes — Scene glyph, cyan PaletteInk.Cyan -->
         <Grid x:Name="ProxyScenesRow" Margin="0,8,0,0">
@@ -48,14 +46,14 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="{StaticResource IconScene}" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render proxy scenes" Foreground="White" FontSize="12" />
-                <TextBlock Text="Neighboring proxy districts" Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Proxy scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock Text="Neighboring proxy districts" Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="ProxyScenesToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -70,14 +68,14 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Mint}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Mint}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="{StaticResource IconMesh}" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render proxy meshes" Foreground="White" FontSize="12" />
-                <TextBlock Text="Embedded proxy_ in this scene" Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Proxy meshes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock Text="Embedded proxy_ in this scene" Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="ProxyMeshesToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -85,21 +83,21 @@
                           Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
         </Grid>
 
-        <!-- (c) snow scenes — inline snowflake, denim PaletteInk.Denim -->
+        <!-- (c) snow scenes — the Winter switch's snowflake, denim PaletteInk.Denim -->
         <Grid x:Name="SnowScenesRow" Margin="0,8,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Denim}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Denim}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="M6,1 L6,11 M1.7,3.5 L10.3,8.5 M1.7,8.5 L10.3,3.5" />
+                  Data="{StaticResource IconWinter}" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render snow scenes" Foreground="White" FontSize="12" />
-                <TextBlock Text="Winter snow — follows the ❄ selector" Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Snow scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock Text="Winter snow, follows the Winter switch" Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -115,14 +113,14 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Magenta}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Magenta}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="M3.2,8.8 A1.6,1.6 0 1 1 3.2,8.79 M8.8,3.2 A1.6,1.6 0 1 1 8.8,3.19 M4.4,7.6 L7.6,4.4" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render skeletons" Foreground="White" FontSize="12" />
-                <TextBlock Text="Bones of skinned models — a car's parts" Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Skeletons" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock Text="Bones of skinned models — a car's parts" Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="SkeletonToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -138,15 +136,15 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Steel}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Steel}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="M1,3.4 L6,0.8 L11,3.4 L11,8.6 L6,11.2 L1,8.6 Z M6,5.6 L6,11.2 M1,3.4 L6,5.6 L11,3.4" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render helpers" Foreground="White" FontSize="12" />
-                <TextBlock x:Name="HelpersSubtitle" Text="Dummies, points, volumes — no geometry of their own"
-                           Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Helpers" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock x:Name="HelpersSubtitle" Text="Dummies, points and volumes"
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="HelpersToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -163,15 +161,15 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Sky}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Sky}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="M6,0.8 A5.2,5.2 0 1 1 5.99,0.8 Z M6,0.8 A2.2,5.2 0 1 1 5.99,0.8 Z M0.8,6 A5.2,2.2 0 1 1 11.2,6" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render hit boxes" Foreground="White" FontSize="12" />
+                <TextBlock Text="Hit boxes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
                 <TextBlock x:Name="HitBoxSubtitle" Text="What a bullet has to be inside to count"
-                           Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="HitBoxToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -186,14 +184,14 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Orange}" StrokeThickness="1.2"
+            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Orange}" StrokeThickness="1.2"
                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Render actors" Foreground="White" FontSize="12" />
-                <TextBlock Text="Sounds, lights, triggers — things with no mesh" Foreground="{StaticResource TextDim}"
-                           FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Actors" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                <TextBlock Text="Sounds, lights, triggers — things with no mesh" Foreground="{StaticResource TextMuted}"
+                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <ToggleButton Grid.Column="2" x:Name="ActorsToggle"
                           Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"

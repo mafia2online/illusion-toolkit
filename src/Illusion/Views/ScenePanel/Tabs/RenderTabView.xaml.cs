@@ -87,7 +87,7 @@ public partial class RenderTabView : UserControl
         if (_viewport == null) return;
         int hidden = _viewport.HiddenHelperCount;
         HelpersSubtitle.Text = HelpersToggle.IsChecked == true && hidden > 0
-            ? $"Dummies, points, volumes — {hidden} unnamed placeholder{(hidden == 1 ? "" : "s")} left out"
-            : "Dummies, points, volumes — no geometry of their own";
+            ? $"{hidden} unnamed placeholder{(hidden == 1 ? "" : "s")} left out"
+            : "Dummies, points and volumes";
     }
 }

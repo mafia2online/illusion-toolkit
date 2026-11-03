@@ -340,7 +340,7 @@ public partial class ResourceEditorWindow : Window
     {
         // The resource's own icon and its name — the same glyph the browser marks it with, so the title
         // bar and the shelf below say the same thing about the same file.
-        StagedText.Text = _staged is { } staged ? PrettyName(staged.Name) : "nothing loaded";
+        StagedText.Text = _staged is { } staged ? PrettyName(staged.Name) : "Nothing loaded";
         StagedIcon.Visibility = _staged != null ? Visibility.Visible : Visibility.Collapsed;
         if (_staged is { } shown)
         {

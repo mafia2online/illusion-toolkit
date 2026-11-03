@@ -1,6 +1,7 @@
 <UserControl x:Class="Illusion.Views.ViewportToolShelf"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views"
              VerticalAlignment="Top" HorizontalAlignment="Left" Margin="12">
 
     <!-- The viewport's own tools, Blender-style: what a drag does (select / move / rotate / scale) above the
@@ -8,17 +9,17 @@
          a viewport is a viewport, and the tools that act on it have nothing to do with whether the content
          came from a district or off the library shelf. -->
 
-    <Border Padding="5" Background="{StaticResource ScrimShelf}" CornerRadius="6">
+    <Border Padding="4" Background="{StaticResource ScrimShelf}" CornerRadius="6">
         <StackPanel>
             <RadioButton x:Name="ToolSelect" GroupName="ViewportTool" IsChecked="True"
                          Style="{StaticResource ToolButton}" ToolTip="Select">
-                <Path Width="22" Height="22" Stretch="Uniform" Fill="{StaticResource GlyphInk}"
+                <Path Width="20" Height="20" Stretch="Uniform" Fill="{StaticResource GlyphInk}"
                       Data="{StaticResource IconToolSelect}" />
             </RadioButton>
             <RadioButton x:Name="ToolMove" GroupName="ViewportTool" Margin="0,8,0,0"
                          Style="{StaticResource ToolButton}"
                          ToolTip="Move — while dragging: X/Y/Z locks an axis, Shift+X/Y/Z locks a plane, Shift snaps to steps, Ctrl slows it down for fine work">
-                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
                       Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" StrokeLineJoin="Round"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       Data="{StaticResource IconToolMove}" />
@@ -26,7 +27,7 @@
             <RadioButton x:Name="ToolRotate" GroupName="ViewportTool" Margin="0,8,0,0"
                          Style="{StaticResource ToolButton}"
                          ToolTip="Rotate — while dragging: X/Y/Z picks the axis to turn about, Shift snaps to 15°, Ctrl slows it down for fine work">
-                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
                       Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" StrokeLineJoin="Round"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       Data="{StaticResource IconToolRotate}" />
@@ -34,20 +35,20 @@
             <RadioButton x:Name="ToolScale" GroupName="ViewportTool" Margin="0,8,0,0"
                          Style="{StaticResource ToolButton}"
                          ToolTip="Scale — while dragging: X/Y/Z locks an axis, Shift+X/Y/Z locks a plane, Shift snaps to steps, Ctrl slows it down for fine work">
-                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
                       Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" StrokeLineJoin="Round"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       Data="{StaticResource IconToolScale}" />
             </RadioButton>
 
-            <Border Height="1" Background="{StaticResource EdgeStrong}" Margin="4,10,4,0" />
+            <Border Height="1" Background="{StaticResource EdgeStrong}" Margin="4,8,4,0" />
 
             <!-- Below the rule sit the two MODE toggles — the ones that change what the app does rather than
                  which handle the gizmo shows. -->
-            <ToggleButton x:Name="ToolWalk" Margin="0,10,0,0"
+            <ToggleButton x:Name="ToolWalk" Margin="0,8,0,0"
                           Style="{StaticResource ToolToggleButton}"
                           ToolTip="Walk mode (Space) — the keyboard flies the camera: WASD to move, Shift to cover ground, Ctrl to creep, middle drag to look. Off: the camera is mouse-only (middle drag orbits, Shift+middle pans, wheel zooms) and G / R / S move, rotate and scale the selection.">
-                <Path Width="22" Height="22" Stretch="Uniform" Fill="{StaticResource GlyphInk}"
+                <Path Width="20" Height="20" Stretch="Uniform" Fill="{StaticResource GlyphInk}"
                       Stroke="{StaticResource GlyphInk}" StrokeThickness="2.1" StrokeLineJoin="Round"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       Data="{StaticResource IconToolWalk}" />
@@ -65,36 +66,38 @@
             <!-- A new loading zone, made where the view looks. It goes with the Loading zones layer: enabled
                  while that layer is on, and not there at all on a stage that has no map. -->
             <StackPanel x:Name="ZoneTools">
-                <Border Height="1" Background="{StaticResource EdgeStrong}" Margin="4,10,4,0" />
-                <ToggleButton x:Name="ToolNewZone" Margin="0,10,0,0" IsEnabled="False"
+                <Border Height="1" Background="{StaticResource EdgeStrong}" Margin="4,8,4,0" />
+                <ToggleButton x:Name="ToolNewZone" Margin="0,8,0,0" IsEnabled="False"
                               Style="{StaticResource ToolToggleButton}" Checked="NewZone_Opened"
                               ToolTipService.ShowOnDisabled="True"
                               ToolTip="New loading zone - switch the Loading zones layer on (Layers) to use it">
-                    <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                    <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
                           Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" StrokeLineJoin="Round"
                           StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                           Data="M1.6,1.6 L10.4,1.6 L10.4,10.4 L1.6,10.4 Z M6,3.7 L6,8.3 M3.7,6 L8.3,6" />
                 </ToggleButton>
                 <Popup x:Name="NewZonePopup" IsOpen="{Binding IsChecked, ElementName=ToolNewZone, Mode=TwoWay}" StaysOpen="False"
                        Placement="Right" PlacementTarget="{Binding ElementName=ToolNewZone}" HorizontalOffset="10"
-                       AllowsTransparency="True" PopupAnimation="Fade" Closed="NewZone_Closed">
+                       AllowsTransparency="True" Closed="NewZone_Closed">
+                    <!-- A small form, so it takes a dialog's control height rather than the panel's. -->
                     <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
-                            CornerRadius="6" Padding="14,12" Width="300" PreviewKeyDown="NewZone_KeyDown">
+                            CornerRadius="6" Padding="16" Width="300" PreviewKeyDown="NewZone_KeyDown"
+                            v:Density.ControlHeight="28">
                         <StackPanel>
-                            <TextBlock Text="New loading zone" Foreground="White" FontSize="13" FontWeight="SemiBold" />
-                            <TextBlock Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,4,0,10"
+                            <TextBlock Text="New loading zone" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource DimLabel}" TextWrapping="Wrap" Margin="0,4,0,8"
                                        Text="A box is made where the view looks and picked; Move and Scale then put it in place. The game loads a zone's districts for a player who appears inside it when the zone's name has two words after its number (AREA900_DOCK_SOUTH)." />
-                            <TextBlock Style="{StaticResource DimLabel}" Text="Name" Margin="0,0,0,3" />
-                            <TextBox x:Name="NewZoneName" Padding="6,4" MaxLength="60" TextChanged="NewZoneName_Changed" />
-                            <TextBlock x:Name="NewZoneNameHint" Foreground="#D9B36A" TextWrapping="Wrap" Margin="0,5,0,0"
+                            <TextBlock Style="{StaticResource DimLabel}" Text="Name" Margin="0,0,0,4" />
+                            <TextBox x:Name="NewZoneName" Style="{StaticResource DarkBox}" MaxLength="60" TextChanged="NewZoneName_Changed" />
+                            <TextBlock x:Name="NewZoneNameHint" Foreground="{StaticResource StatusWarn}" TextWrapping="Wrap" Margin="0,4,0,0"
                                        Visibility="Collapsed"
                                        Text="One word after the number: the game will not load the districts for a player who appears inside this zone. Two words do it - AREA900_DOCK_SOUTH." />
-                            <TextBlock Style="{StaticResource DimLabel}" Text="Keeps loaded" Margin="0,10,0,3" />
-                            <ComboBox x:Name="NewZoneDistrict1" />
-                            <ComboBox x:Name="NewZoneDistrict2" Margin="0,6,0,0" />
-                            <TextBlock x:Name="NewZoneRefusal" Foreground="#E08A6A" TextWrapping="Wrap" Margin="0,10,0,0"
+                            <TextBlock Style="{StaticResource DimLabel}" Text="Keeps loaded" Margin="0,8,0,4" />
+                            <ComboBox x:Name="NewZoneDistrict1" v:Density.FitCombo="True" />
+                            <ComboBox x:Name="NewZoneDistrict2" v:Density.FitCombo="True" Margin="0,4,0,0" />
+                            <TextBlock x:Name="NewZoneRefusal" Foreground="{StaticResource StatusErrorText}" TextWrapping="Wrap" Margin="0,8,0,0"
                                        Visibility="Collapsed" />
-                            <Button Style="{StaticResource AccentButton}" Content="Create" Height="30" MinWidth="96"
+                            <Button Style="{StaticResource AccentButton}" Content="Create" MinWidth="96"
                                     HorizontalAlignment="Right" Margin="0,12,0,0" Click="NewZone_Create" />
                         </StackPanel>
                     </Border>

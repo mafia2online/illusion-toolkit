@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:v="clr-namespace:Illusion.Views"
+        v:Density.ControlHeight="28"
         Title="Restore Backup"
         Width="560" SizeToContent="Height"
         ResizeMode="NoResize" ShowInTaskbar="False"
@@ -43,11 +44,11 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding StampText}" FontSize="12"
-                                               Foreground="White" VerticalAlignment="Center" />
+                                               Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontSize="12"
                                                Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="2" Text="{Binding FileName}" FontSize="11"
-                                               Foreground="{StaticResource TextDim}" FontFamily="Consolas"
+                                               Foreground="{StaticResource TextMuted}" FontFamily="Consolas"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -55,21 +56,21 @@
                     </ListBox>
                     <TextBlock x:Name="EmptyLabel" Style="{StaticResource DimLabel}"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Text="No backups yet — every Build saves one." Visibility="Collapsed" />
+                               Text="No backups yet — every Build saves one" Visibility="Collapsed" />
                 </Grid>
             </Border>
         </StackPanel>
 
         <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
-                Padding="24,14">
+                Padding="24,16">
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"
                            TextWrapping="Wrap" VerticalAlignment="Center"
-                           Text="Replaces the game archive and its extracted files; the scene reloads." />
+                           Text="Replaces the game archive and its extracted files; the scene reloads" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Margin="0,0,8,0"
                             Content="Cancel" Click="Cancel_Click" />
-                    <Button x:Name="RestoreBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                    <Button x:Name="RestoreBtn" Style="{StaticResource AccentButton}" MinWidth="92"
                             Content="Restore" IsEnabled="False" Click="Restore_Click" />
                 </StackPanel>
             </DockPanel>

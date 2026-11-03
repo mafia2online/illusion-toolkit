@@ -16,9 +16,9 @@
             <Path Width="46" Height="46" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource StageGlyph}"
                   StrokeThickness="1.5" StrokeLineJoin="Round" StrokeStartLineCap="Round"
                   StrokeEndLineCap="Round" Data="{StaticResource IconScene}" HorizontalAlignment="Center" />
-            <TextBlock x:Name="EmptyTitle" Text="No hierarchy yet" Foreground="{StaticResource TextMuted}" FontSize="12.5"
+            <TextBlock x:Name="EmptyTitle" Text="No hierarchy yet" Foreground="{StaticResource TextSecondary}" FontSize="13"
                        FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,0" />
-            <TextBlock x:Name="EmptyHint" Text="Open a resource to see what is in it" Foreground="{StaticResource TextGhost}"
+            <TextBlock x:Name="EmptyHint" Text="Open a resource to see what is in it" Foreground="{StaticResource TextMuted}"
                        FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" />
         </StackPanel>
 
@@ -55,7 +55,7 @@
                          handled in code (SceneTree_PreviewMouseLeftButtonDown). -->
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="VerticalContentAlignment" Value="Center" />
-                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="TreeViewItem">
@@ -64,8 +64,8 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <Border x:Name="Row" Grid.Row="0" CornerRadius="3"
-                                            Padding="2,0" MinHeight="23">
+                                    <Border x:Name="Row" Grid.Row="0" CornerRadius="4"
+                                            Padding="2,0" MinHeight="24">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="Transparent" />
@@ -93,7 +93,7 @@
                                                               VerticalAlignment="Center" />
                                         </Grid>
                                     </Border>
-                                    <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="14,0,0,0" />
+                                    <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="12,0,0,0" />
                                 </Grid>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsExpanded" Value="False">
@@ -122,7 +122,7 @@
                         <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True">
+                              VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True">
                             <Path.Style>
                                 <Style TargetType="Path">
                                     <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Slate}" />
@@ -209,7 +209,7 @@
                                 </Style>
                             </Path.Style>
                         </Path>
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White"
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextPrimary}"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">

@@ -15,7 +15,7 @@
          rows are put back together per wheel here, which is the tab's whole reason for existing. -->
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="10,10,10,4">
+        <StackPanel Margin="8,8,8,4">
             <Border Style="{StaticResource PropCard}">
                 <StackPanel>
                     <TextBlock Text="Tuning" Style="{StaticResource PropTitle}" />
@@ -26,7 +26,7 @@
                          because their names are hashes of definitions kept in another
                          archive. Hidden when there is only one, since a picker with one
                          entry is a label that looks clickable. -->
-                    <StackPanel Margin="0,9,0,0"
+                    <StackPanel Margin="0,8,0,0"
                                 Visibility="{Binding HasManyTuningTables, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="Table" Style="{StaticResource MetaLabel}"
                                    Margin="0,0,0,4" />
@@ -39,7 +39,7 @@
                                     <!-- The number is the button; what the table IS rides in
                                          the tooltip and on the card below, so a strip of six
                                          digits is never six digits of nothing. -->
-                                    <TextBlock Text="{Binding Number}" FontSize="11.5"
+                                    <TextBlock Text="{Binding Number}" FontSize="12"
                                                ToolTip="{Binding Label}" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -48,18 +48,18 @@
                     <!-- Matches the row's name, its full name in the struct, and its value —
                          "camber", "Wheel3.Camber" and "wheel_civ09" are all questions this
                          tab gets asked. -->
-                    <Grid Margin="0,9,0,0">
+                    <Grid Margin="0,8,0,0">
                         <!-- Delayed for the same reason as the prefab box beside it: the tuning tab
                              is 771 fields, and narrowing it per keystroke is a full rebuild. -->
                         <TextBox x:Name="TuningSearchBox" Style="{StaticResource InputField}"
                                  Padding="24,0,6,0"
                                  Text="{Binding TuningSearch, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
-                                   Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
+                                   Foreground="{StaticResource TextMuted}" Margin="8,0,0,0"
                                    HorizontalAlignment="Left" VerticalAlignment="Center"
                                    IsHitTestVisible="False" />
-                        <TextBlock Text="Find a value…" Foreground="{StaticResource TextFaint}"
-                                   FontSize="11.5" Margin="26,0,0,0" VerticalAlignment="Center"
+                        <TextBlock Text="Find a value…" Foreground="{StaticResource TextMuted}"
+                                   FontSize="12" Margin="24,0,0,0" VerticalAlignment="Center"
                                    IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -73,7 +73,7 @@
                             </TextBlock.Style>
                         </TextBlock>
                     </Grid>
-                    <TextBlock Text="Nothing here matches." Style="{StaticResource MetaLabel}"
+                    <TextBlock Text="Nothing here matches" Style="{StaticResource MetaLabel}"
                                Margin="2,8,0,0"
                                Visibility="{Binding TuningNothingFound, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
@@ -105,12 +105,12 @@
                                                                 Background="{Binding Accent}" />
                                                         <TextBlock Grid.Column="1" Text="{Binding Title}"
                                                                    Style="{StaticResource PropCaption}"
-                                                                   FontSize="12.5" Margin="0"
+                                                                   FontSize="13" Margin="0"
                                                                    VerticalAlignment="Center" />
                                                         <TextBlock Grid.Column="2" Text="{Binding Badge}"
-                                                                   FontSize="10.5" Margin="7,0,0,0"
+                                                                   FontSize="11" Margin="8,0,0,0"
                                                                    VerticalAlignment="Center"
-                                                                   Foreground="{StaticResource TextFaint}" />
+                                                                   Foreground="{StaticResource TextMuted}" />
                                                     </Grid>
                                                 </ToggleButton>
                                             </Grid>
@@ -156,7 +156,7 @@
                                                             <ItemsControl ItemsSource="{Binding Rows}">
                                                                 <ItemsControl.ItemTemplate>
                                                                     <DataTemplate>
-                                                                        <StackPanel Margin="0,0,0,10">
+                                                                        <StackPanel Margin="0,0,0,8">
                                                                             <!-- Name · switch. The
                                                                                  full name in the
                                                                                  struct rides in the

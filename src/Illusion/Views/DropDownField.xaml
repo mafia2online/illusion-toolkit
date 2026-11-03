@@ -13,13 +13,13 @@
                AllowsTransparency="True" PopupAnimation="Fade" Closed="Popup_Closed">
             <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource EdgeNeutral}"
                     BorderThickness="1" CornerRadius="6"
-                    Padding="4" MaxHeight="300" Margin="0,3,8,8"
+                    Padding="4" MaxHeight="300" Margin="0,4,8,8"
                     MinWidth="{Binding ActualWidth, ElementName=Btn}">
                 <Border.Effect>
                     <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
                 </Border.Effect>
-                <ListBox x:Name="List" Background="Transparent" BorderThickness="0" FontSize="11.5"
-                         Foreground="White" MaxHeight="290"
+                <ListBox x:Name="List" Background="Transparent" BorderThickness="0" FontSize="12"
+                         Foreground="{StaticResource TextPrimary}" MaxHeight="290"
                          ItemContainerStyle="{StaticResource PickerItem}"
                          IsSynchronizedWithCurrentItem="False"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"

@@ -70,7 +70,7 @@ public sealed partial class StreamMapWindow : Window
         }
         else if (!File.Exists(path))
         {
-            FileText.Text = "No such file.";
+            FileText.Text = "No such file";
         }
         else
         {
@@ -95,17 +95,17 @@ public sealed partial class StreamMapWindow : Window
         _preview = null;
         ReplaceBtn.IsEnabled = false;
         EditList.ItemsSource = null;
-        CountText.Text = "The file is copied beside itself as a backup before it is written.";
+        CountText.Text = "The file is copied beside itself as a backup before it is written";
         if (_file == null)
         {
-            EmptyLabel.Text = "No file open.";
+            EmptyLabel.Text = "No file open";
             EmptyLabel.Visibility = Visibility.Visible;
             return;
         }
         string find = FindBox.Text;
         if (find.Length == 0 || Fields == StreamMapFields.None)
         {
-            EmptyLabel.Text = find.Length == 0 ? "Type what to find." : "Tick at least one kind of text.";
+            EmptyLabel.Text = find.Length == 0 ? "Type what to find" : "Tick at least one kind of text";
             EmptyLabel.Visibility = Visibility.Visible;
             return;
         }
@@ -125,7 +125,7 @@ public sealed partial class StreamMapWindow : Window
         _preview = patch;
         EditList.ItemsSource = patch.Edits.Select(e => new EditRow(KindOf(e.Field), e.Before,
             e.Refused == null ? e.After : "refused: " + e.Refused, e.Refused ?? $"{e.Before}  →  {e.After}")).ToList();
-        EmptyLabel.Text = "Nothing in this file matches.";
+        EmptyLabel.Text = "Nothing in this file matches";
         EmptyLabel.Visibility = patch.Edits.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         int fits = patch.Edits.Count(e => e.Refused == null);

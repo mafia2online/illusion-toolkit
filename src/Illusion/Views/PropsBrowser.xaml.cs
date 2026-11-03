@@ -189,7 +189,7 @@ public partial class PropsBrowser : UserControl, IFoldingPane
         ShowAnotherPage();
         if (_loaded)
         {
-            Status.Text = $"{shown.Count} of {_all.Count} objects · drag one onto the viewport, or double-click it";
+            Status.Text = $"{shown.Count:N0} of {_all.Count:N0} objects · sizes in metres · drag one onto the viewport, or double-click it";
             EmptyText.Text = _all.Count == 0
                 ? "No props in the extracted archives — extract some interiors, then Rescan"
                 : "Nothing here matches";

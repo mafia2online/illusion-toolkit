@@ -7,7 +7,7 @@
          tile asks the host to open the material editor on that material/slot. -->
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="10,10,10,4">
+        <StackPanel Margin="8,8,8,4">
             <Border Style="{StaticResource PropCard}">
                 <StackPanel>
                     <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />

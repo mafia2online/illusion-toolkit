@@ -112,7 +112,7 @@ public sealed partial class LoadZonesWindow : Window
         else if (loaded.Count == 0)
         {
             SummaryText.Text = districts.Count == 0
-                ? "The zones that hold this point name no district."
+                ? "The zones that hold this point name no district"
                 : $"Only zones with one word in their name hold this point ({string.Join(", ", districts)}). They do not load a "
                     + "district by themselves: a player who appears here sees it unloaded until he crosses a zone named with two.";
         }
@@ -155,7 +155,7 @@ public sealed partial class LoadZonesWindow : Window
         FaceCombo.IsEnabled = ToBox.IsEnabled = MoveBtn.IsEnabled = picked;
         if (ZoneList.SelectedItem is not ZoneRow row)
         {
-            ZoneText.Text = "Pick a zone to see its box and move a face.";
+            ZoneText.Text = "Pick a zone to see its box and move a face";
             ToBox.Text = "";
             return;
         }

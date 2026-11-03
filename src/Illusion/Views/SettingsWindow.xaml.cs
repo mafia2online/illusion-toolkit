@@ -132,14 +132,14 @@ public partial class SettingsWindow : Window
         string path = GamePathBox.Text.Trim();
         if (path.Length == 0)
         {
-            Say(GamePathStatus, "Not set — the editors stay closed until it is.", Palette.StatusWarn);
+            Say(GamePathStatus, "Not set — the editors stay closed until it is", Palette.StatusWarn);
             return;
         }
 
         string? root = MafiaEnvironment.ResolveGameRoot(path);
         if (root == null || !Directory.Exists(root))
         {
-            Say(GamePathStatus, "No Mafia II install there.", Palette.StatusWarn);
+            Say(GamePathStatus, "No Mafia II install there", Palette.StatusWarn);
             return;
         }
 
@@ -150,7 +150,7 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            Say(GamePathStatus, "Found, but not unpacked yet — unpack it from the launcher.", Palette.StatusWarn);
+            Say(GamePathStatus, "Found, but not unpacked yet — unpack it from the launcher", Palette.StatusWarn);
         }
     }
 
@@ -198,7 +198,7 @@ public partial class SettingsWindow : Window
     {
         CheckUpdateBtn.IsEnabled = false;
         InstallUpdateBtn.Visibility = Visibility.Collapsed;
-        Say(UpdateStatusText, "Asking GitHub…", Palette.TextDim);
+        Say(UpdateStatusText, "Asking GitHub…", Palette.TextMuted);
 
         // force: this button exists precisely to ignore the answer the session already has.
         UpdateCheckResult result = await UpdateChecker.CheckAsync(force: true);
@@ -220,7 +220,7 @@ public partial class SettingsWindow : Window
 
         if (result is null)
         {
-            Say(UpdateStatusText, "Not looked yet in this session.", Palette.TextDim);
+            Say(UpdateStatusText, "Not looked yet in this session", Palette.TextMuted);
             return;
         }
 
@@ -259,7 +259,7 @@ public partial class SettingsWindow : Window
         if (_update is not { } release) return;
         if (EditorIsOpen)
         {
-            Say(UpdateStatusText, "Close the map editor first — installing restarts the toolkit.", Palette.StatusWarn);
+            Say(UpdateStatusText, "Close the map editor first — installing restarts the toolkit", Palette.StatusWarn);
             return;
         }
         if (!UpdateInstaller.CanInstall(out string reason))
@@ -280,7 +280,7 @@ public partial class SettingsWindow : Window
                 p.Total > 0
                     ? $"Downloading… {100L * p.Received / p.Total}%"
                     : "Downloading…",
-                Palette.TextDim));
+                Palette.TextMuted));
 
             try
             {
@@ -362,13 +362,13 @@ public partial class SettingsWindow : Window
         if (path.Length == 0)
         {
             if (_autoDetectedBlender is { } found) Say(BlenderPathStatus, "Found by itself: " + found, Palette.StatusOk);
-            else Say(BlenderPathStatus, "No Blender found on this machine — the bridge will not open.", Palette.StatusWarn);
+            else Say(BlenderPathStatus, "No Blender found on this machine — the bridge will not open", Palette.StatusWarn);
             return;
         }
 
         bool exists = File.Exists(path) || Directory.Exists(path);
         Say(BlenderPathStatus,
-            exists ? "Using this instead of searching." : "Nothing at that path.",
+            exists ? "Using this instead of searching" : "Nothing at that path",
             exists ? Palette.StatusOk : Palette.StatusWarn);
     }
 
@@ -415,13 +415,13 @@ public partial class SettingsWindow : Window
         {
             Say(McpPortStatus,
                 port == McpHostOptions.DefaultPort
-                    ? "The default."
-                    : "The server binds at startup, so this is taken up the next time the toolkit runs.",
-                Palette.TextDim);
+                    ? "The default"
+                    : "The server binds at startup, so this is taken up the next time the toolkit runs",
+                Palette.TextMuted);
         }
         else
         {
-            Say(McpPortStatus, "Has to be a number from 1 to 65535.", Palette.StatusWarn);
+            Say(McpPortStatus, "Has to be a number from 1 to 65535", Palette.StatusWarn);
         }
 
         McpServerState? state = App.McpServer?.State;
@@ -442,6 +442,29 @@ public partial class SettingsWindow : Window
         target.Foreground = brush;
     }
 
+    // A keymap row button's icon: drawn, not a text character — "✕" and "↺" came from two fonts and sat on
+    // two baselines. The stroke follows the button's Foreground, so the hover and disabled states carry over.
+    private System.Windows.Shapes.Path RowGlyph(string geometryKey)
+    {
+        var glyph = new System.Windows.Shapes.Path
+        {
+            Width = 12,
+            Height = 12,
+            Stretch = Stretch.Uniform,
+            Data = (Geometry)FindResource(geometryKey),
+            StrokeThickness = 1.25,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+        };
+        glyph.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, new System.Windows.Data.Binding(nameof(Control.Foreground))
+        {
+            RelativeSource = new System.Windows.Data.RelativeSource(
+                System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1),
+        });
+        return glyph;
+    }
+
     // ── Keymap ──
 
     private void BuildKeymap()
@@ -454,9 +477,9 @@ public partial class SettingsWindow : Window
         {
             var header = new TextBlock
             {
-                Text = group.ToUpperInvariant(),
+                Text = group,
                 Style = caption,
-                Margin = new Thickness(1, 16, 0, 7),
+                Margin = new Thickness(0, 16, 0, 8),
             };
             KeymapList.Children.Add(header);
 
@@ -475,7 +498,7 @@ public partial class SettingsWindow : Window
 
     private KeymapRow BuildRow(HotkeyAction action, Style hint, Style iconButton)
     {
-        var grid = new Grid { Margin = new Thickness(0, 0, 0, 9) };
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         for (int i = 0; i < 3; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -483,11 +506,11 @@ public partial class SettingsWindow : Window
         var label = new TextBlock
         {
             Text = action.Label,
-            Foreground = Brushes.White,
-            FontSize = 12.5,
+            Foreground = Palette.TextPrimary,
+            FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(1, 0, 12, 0),
+            Margin = new Thickness(0, 0, 12, 0),
         };
         grid.Children.Add(label);
 
@@ -514,6 +537,10 @@ public partial class SettingsWindow : Window
             };
             modifier.SelectionChanged += (_, _) => OnModifierPicked(action.Id, modifier);
             controls.Children.Add(modifier);
+
+            // No key to unbind on a modifier row — but the slot stays, so every row's reset button sits in
+            // one column instead of jumping left wherever a drop-down stands in for the key field.
+            controls.Children.Add(new Border { Width = Density.GetControlHeight(this), Margin = new Thickness(4, 0, 0, 0) });
         }
         else
         {
@@ -523,9 +550,9 @@ public partial class SettingsWindow : Window
 
             var clear = new Button
             {
-                Content = "✕",
+                Content = RowGlyph("IconUnbind"),
                 Style = iconButton,
-                Margin = new Thickness(6, 0, 0, 0),
+                Margin = new Thickness(4, 0, 0, 0),
                 ToolTip = "Unbind — the action keeps working from the menu, just not from a key",
             };
             clear.Click += (_, _) => Rebind(action.Id, Hotkey.None);
@@ -534,9 +561,9 @@ public partial class SettingsWindow : Window
 
         var reset = new Button
         {
-            Content = "↺",
+            Content = RowGlyph("IconResetKey"),
             Style = iconButton,
-            Margin = new Thickness(6, 0, 0, 0),
+            Margin = new Thickness(4, 0, 0, 0),
             ToolTip = "Back to the key this action shipped with",
         };
         reset.Click += (_, _) =>
@@ -550,7 +577,7 @@ public partial class SettingsWindow : Window
         {
             Text = action.Description,
             Style = hint,
-            Margin = new Thickness(1, 2, 12, 0),
+            Margin = new Thickness(0, 2, 12, 0),
         };
         Grid.SetRow(description, 1);
         grid.Children.Add(description);
@@ -560,7 +587,7 @@ public partial class SettingsWindow : Window
             Foreground = Palette.StatusWarn,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(1, 4, 12, 0),
+            Margin = new Thickness(0, 4, 12, 0),
             Visibility = Visibility.Collapsed,
         };
         Grid.SetRow(conflict, 2);
@@ -624,6 +651,8 @@ public partial class SettingsWindow : Window
 
     private void KeymapSearch_TextChanged(object sender, TextChangedEventArgs e)
     {
+        KeymapSearchPlaceholder.Visibility =
+            string.IsNullOrEmpty(KeymapSearch.Text) ? Visibility.Visible : Visibility.Collapsed;
         string needle = KeymapSearch.Text.Trim();
         HotkeyMap map = HotkeyMap.Current;
 

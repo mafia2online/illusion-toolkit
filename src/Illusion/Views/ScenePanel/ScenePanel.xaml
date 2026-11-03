@@ -28,8 +28,10 @@
 
         <!-- Loaded-scene stats: files (SDS) · meshes · polygons. UniformGrid = three exactly
              equal cells; content centered both ways, full-height hairline separators between.
-             Height comes from the host window's toolbar (HeaderHeight) so both top bars line up. -->
-        <Border Grid.Row="0" Margin="8,0,8,0" Padding="0,3" CornerRadius="6"
+             Height comes from the host window's toolbar (HeaderHeight) so both top bars line up — and with
+             it no padding of its own: the number and its caption are centred in whatever the toolbar leaves,
+             and a padding on top of a 40 px band cut the captions' descenders off. -->
+        <Border Grid.Row="0" Margin="8,0,8,0" CornerRadius="6"
                 Height="{Binding HeaderHeight, RelativeSource={RelativeSource AncestorType=UserControl}}"
                 Background="{StaticResource FillCard}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1">
             <UniformGrid Columns="3">
@@ -52,20 +54,21 @@
             </UniformGrid>
         </Border>
 
-        <!-- Search by name (magnifier glyph + placeholder overlay) -->
-        <Grid Grid.Row="1" Margin="8,8,8,4">
-            <TextBox x:Name="SearchBox" Padding="26,5,6,5" TextChanged="SearchBox_TextChanged" />
-            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="12"
-                       Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
-                       HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-            <TextBlock x:Name="SearchPlaceholder" Text="Search…" Foreground="{StaticResource TextFaint}"
+        <!-- Search by name: the browsers' search field, magnifier and placeholder laid over it. -->
+        <Grid Grid.Row="1" Margin="8,8,8,8">
+            <TextBox x:Name="SearchBox" Style="{StaticResource BrowserSearch}" TextChanged="SearchBox_TextChanged" />
+            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextMuted}"
+                  StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+            <TextBlock x:Name="SearchPlaceholder" Text="Search" Foreground="{StaticResource TextMuted}" FontSize="12"
                        Margin="28,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
         </Grid>
 
         <!-- Which reading of the hierarchy is on screen. Only a CAR has components, so on everything else the
              switch is not there at all and the frame tree is simply the tree. It sits above the tree because
              that is where the tree already is — the editor's layout does not move under the user. -->
-        <UniformGrid x:Name="TreeModeSwitch" Grid.Row="2" Columns="2" Margin="8,0,8,6"
+        <UniformGrid x:Name="TreeModeSwitch" Grid.Row="2" Columns="2" Margin="8,0,8,8"
                      Visibility="Collapsed">
             <RadioButton x:Name="ComponentsMode" GroupName="TreeMode" Style="{StaticResource SegmentButton}"
                          Content="Components" Margin="0,0,2,0" Checked="TreeMode_Changed"
@@ -83,7 +86,7 @@
              shipped cars that carry a single level: a level that does not exist is not offered, and saying so
              is better than a switch that comes and goes. Only beside the component tree — the frame tree
              lists frames, which have no level. -->
-        <UniformGrid x:Name="LodSwitch" Grid.Row="3" Columns="2" Margin="8,0,8,6" Visibility="Collapsed" />
+        <UniformGrid x:Name="LodSwitch" Grid.Row="3" Columns="2" Margin="8,0,8,8" Visibility="Collapsed" />
 
         <!-- The diagnosis. The editor opens every car, including the ones it cannot fully understand — those
              are the cars it is most needed for — so what did not stitch is said the moment the car opens,
@@ -91,7 +94,7 @@
              available, and a list that opens itself takes the tree's room to repeat what has been read.
              Each line leads to the component it is about; the ones that have none — a door row naming a bone
              nothing claims — exist only here, which is the whole reason for a list beside the tinted rows. -->
-        <Border x:Name="FaultStrip" Grid.Row="4" Margin="8,0,8,6" CornerRadius="6"
+        <Border x:Name="FaultStrip" Grid.Row="4" Margin="8,0,8,8" CornerRadius="6"
                 Background="{StaticResource FillCard}" BorderBrush="{StaticResource EdgeFaint}"
                 BorderThickness="1" Visibility="Collapsed">
             <StackPanel>
@@ -99,7 +102,7 @@
                               Click="Faults_Click" HorizontalContentAlignment="Stretch">
                     <ToggleButton.Template>
                         <ControlTemplate TargetType="ToggleButton">
-                            <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="8,5">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="8,4">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -114,17 +117,17 @@
                                                    RelativeSource={RelativeSource TemplatedParent}}"
                                           StrokeThickness="1.2" StrokeLineJoin="Round"
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                          VerticalAlignment="Center" Margin="0,0,7,0"
+                                          VerticalAlignment="Center" Margin="0,0,8,0"
                                           SnapsToDevicePixels="True" Data="{StaticResource IconWarning}" />
                                     <TextBlock x:Name="Summary" Grid.Column="1" FontSize="11"
-                                               Foreground="{StaticResource TextMuted}"
+                                               Foreground="{StaticResource TextSecondary}"
                                                VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"
                                                Text="{Binding Content,
                                                       RelativeSource={RelativeSource TemplatedParent}}" />
                                     <TextBlock x:Name="Chev" Grid.Column="2" FontFamily="Segoe MDL2 Assets"
                                                FontSize="8" Text="&#xE76C;"
-                                               Foreground="{StaticResource TextFaint}"
+                                               Foreground="{StaticResource TextMuted}"
                                                VerticalAlignment="Center" Margin="8,0,0,0"
                                                RenderTransformOrigin="0.5,0.5" />
                                 </Grid>
@@ -140,7 +143,7 @@
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="Bd" Property="Background"
                                             Value="{StaticResource FillHover}" />
-                                    <Setter TargetName="Summary" Property="Foreground" Value="White" />
+                                    <Setter TargetName="Summary" Property="Foreground" Value="{StaticResource TextPrimary}" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -153,7 +156,7 @@
                     <ItemsControl x:Name="FaultList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="Transparent" Padding="27,3,8,3"
+                                <Border Background="Transparent" Padding="28,4,8,4"
                                         MouseLeftButtonUp="Fault_Click" ToolTip="{Binding What}">
                                     <StackPanel>
                                         <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold"
@@ -165,7 +168,7 @@
                                                          and painting those as damage is how the strip stops
                                                          being read. -->
                                                     <Setter Property="Foreground"
-                                                            Value="{StaticResource TextMuted}" />
+                                                            Value="{StaticResource TextSecondary}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsBreak}" Value="True">
                                                             <Setter Property="Foreground"
@@ -175,8 +178,8 @@
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
-                                        <TextBlock Text="{Binding What}" FontSize="10.5"
-                                                   Foreground="{StaticResource TextFaint}"
+                                        <TextBlock Text="{Binding What}" FontSize="11"
+                                                   Foreground="{StaticResource TextMuted}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>

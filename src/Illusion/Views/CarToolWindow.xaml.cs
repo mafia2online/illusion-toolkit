@@ -63,7 +63,7 @@ public sealed partial class CarToolWindow : Window
                 CarLabel.Text = "Car to put in";
                 IntroText.Text = "Builds one car under another car's name. The replaced car keeps its name, its table rows "
                     + "and its place in traffic - only what it looks and drives like changes. No table is touched.";
-                HintText.Text = "The replaced archive is kept as a backup beside it.";
+                HintText.Text = "The replaced archive is kept as a backup beside it";
                 RunBtn.Content = "Replace";
                 break;
             default:
@@ -71,7 +71,7 @@ public sealed partial class CarToolWindow : Window
                 CarLabel.Text = "Car to export";
                 IntroText.Text = "Writes the car out as a multiplayer resource folder: package.json, the archives under "
                     + "sds\\cars and vehicles.json. Nothing of the game is changed.";
-                HintText.Text = "The archive is exported as it stands in pc\\sds\\cars - Build the car first.";
+                HintText.Text = "The archive is exported as it stands in pc\\sds\\cars - Build the car first";
                 RunBtn.Content = "Export";
                 break;
         }
@@ -118,7 +118,7 @@ public sealed partial class CarToolWindow : Window
         if (_tool == CarTool.Substitute)
         {
             complete &= Target.Length > 0;
-            if (Car.Length > 0 && string.Equals(Target, Car, StringComparison.OrdinalIgnoreCase)) wrong = "A car cannot take its own place.";
+            if (Car.Length > 0 && string.Equals(Target, Car, StringComparison.OrdinalIgnoreCase)) wrong = "A car cannot take its own place";
         }
         RunBtn.IsEnabled = complete && wrong == null;
         HintText.Text = wrong ?? _hint;

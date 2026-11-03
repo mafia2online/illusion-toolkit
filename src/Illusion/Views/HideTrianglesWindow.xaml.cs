@@ -152,7 +152,7 @@ public sealed partial class HideTrianglesWindow : Window
         HideBtn.IsEnabled = false;
         WholeMeshBtn.IsEnabled = _node != null;
         ClearBtn.IsEnabled = _picked.Count > 0;
-        string? said = _node == null ? "Nothing selected." : ClickMode ? CountPicked() : CountBox();
+        string? said = _node == null ? "Nothing selected" : ClickMode ? CountPicked() : CountBox();
         if (said != null) CountText.Text = said;
         ShowSharers();
 
@@ -196,7 +196,7 @@ public sealed partial class HideTrianglesWindow : Window
         }
         _plan = plan;
         int first = plan!.Triangles.Count(t => t.Lod == 0);
-        if (first == 0) return "Click a triangle of the mesh in the viewport.";
+        if (first == 0) return "Click a triangle of the mesh in the viewport";
         if (levels <= 1) return $"{first} triangle(s) picked.";
 
         // The picks are triangles of the level drawn up close. A coarser level is cut differently: only its
@@ -214,7 +214,7 @@ public sealed partial class HideTrianglesWindow : Window
         var max = new Vector3((float)MaxBox.X, (float)MaxBox.Y, (float)MaxBox.Z);
         if (min.X > max.X || min.Y > max.Y || min.Z > max.Z)
         {
-            return "The lower corner is above the upper one on some axis - such a box holds nothing.";
+            return "The lower corner is above the upper one on some axis - such a box holds nothing";
         }
         if (AppEditorSession.PlanHiddenTriangles(_node!, min, max, Material, out TriangleHider.Plan? plan) is { } notAMesh)
         {

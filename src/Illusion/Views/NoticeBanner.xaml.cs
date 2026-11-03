@@ -118,13 +118,13 @@ public partial class NoticeBanner : UserControl
         var layout = new DockPanel();
         DockPanel.SetDock(accent, Dock.Left);
         layout.Children.Add(accent);
-        layout.Children.Add(new Border { Padding = new Thickness(10, 8, 10, 8), Child = row });
+        layout.Children.Add(new Border { Padding = new Thickness(12, 8, 12, 8), Child = row });
 
         var visual = new Border
         {
             Background = Palette.ScrimPanel,
             CornerRadius = new CornerRadius(6),
-            Margin = new Thickness(0, 6, 0, 0),
+            Margin = new Thickness(0, 4, 0, 0),
             Cursor = Cursors.Hand,
             ToolTip = "Click to dismiss",
             Child = layout,

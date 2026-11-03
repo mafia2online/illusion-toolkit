@@ -13,7 +13,7 @@
          sixty operator cards between them. -->
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="10,10,10,4">
+        <StackPanel Margin="8,8,8,4">
             <Border Style="{StaticResource PropCard}">
                 <StackPanel>
                     <TextBlock Text="Effects" Style="{StaticResource PropTitle}" />
@@ -21,7 +21,7 @@
 
                     <!-- The picker carries the effect's ID, because that is what the rest of the
                          archive calls it; what it DOES rides on the card below. -->
-                    <StackPanel Margin="0,9,0,0"
+                    <StackPanel Margin="0,8,0,0"
                                 Visibility="{Binding HasManyEffects, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="Effect" Style="{StaticResource MetaLabel}" Margin="0,0,0,4" />
                         <ListBox Style="{StaticResource NumberStrip}"
@@ -30,22 +30,22 @@
                                  SelectedItem="{Binding SelectedEffect, Mode=TwoWay}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding Number}" FontSize="11.5"
+                                    <TextBlock Text="{Binding Number}" FontSize="12"
                                                ToolTip="{Binding Title}" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
                     </StackPanel>
 
-                    <ContentControl Content="{Binding SelectedEffect}" Margin="0,9,0,0">
+                    <ContentControl Content="{Binding SelectedEffect}" Margin="0,8,0,0">
                         <ContentControl.ContentTemplate>
                             <DataTemplate>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Title}" Style="{StaticResource PropCaption}" />
                                     <TextBlock Text="{Binding Summary}" Style="{StaticResource MetaLabel}"
-                                               Margin="0,3,0,0" />
+                                               Margin="0,4,0,0" />
                                     <TextBlock Text="{Binding Status}" Style="{StaticResource MetaLabel}"
-                                               Margin="0,3,0,0" />
+                                               Margin="0,4,0,0" />
                                 </StackPanel>
                             </DataTemplate>
                         </ContentControl.ContentTemplate>
@@ -55,7 +55,7 @@
                          emitters and curves that has to be coherent to render at all. The copy
                          does nothing until a field names its number, which is what the notice
                          after the click says. -->
-                    <Button Content="Add a copy of this effect" Margin="0,9,0,0"
+                    <Button Content="Add a copy of this effect" Margin="0,8,0,0"
                             HorizontalAlignment="Stretch"
                             ToolTip="Duplicates the effect under the lowest free id. Point FireID or RainID at that id for the game to use it."
                             Click="AddEffectCopy_Click" />
@@ -86,13 +86,13 @@
                                                                 Background="{Binding Accent}" />
                                                         <TextBlock Grid.Column="1" Text="{Binding Title}"
                                                                    Style="{StaticResource PropCaption}"
-                                                                   FontSize="12.5" Margin="0"
+                                                                   FontSize="13" Margin="0"
                                                                    VerticalAlignment="Center" />
                                                         <TextBlock Grid.Column="2" Text="{Binding Badge}"
-                                                                   FontSize="10.5" Margin="7,0,0,0"
+                                                                   FontSize="11" Margin="8,0,0,0"
                                                                    VerticalAlignment="Center"
                                                                    TextTrimming="CharacterEllipsis"
-                                                                   Foreground="{StaticResource TextFaint}" />
+                                                                   Foreground="{StaticResource TextMuted}" />
                                                     </Grid>
                                                 </ToggleButton>
                                             </Grid>
@@ -126,7 +126,7 @@
                                                             <ItemsControl ItemsSource="{Binding Rows}">
                                                                 <ItemsControl.ItemTemplate>
                                                                     <DataTemplate>
-                                                                        <StackPanel Margin="0,0,0,10">
+                                                                        <StackPanel Margin="0,0,0,8">
                                                                             <TextBlock Text="{Binding Label}"
                                                                                        ToolTip="{Binding Where}"
                                                                                        Style="{StaticResource MetaLabel}"

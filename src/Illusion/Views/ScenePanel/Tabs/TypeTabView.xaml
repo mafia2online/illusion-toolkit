@@ -7,7 +7,7 @@
          contextual tab whose header + content switch with the selection's type. -->
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="10,10,10,4">
+        <StackPanel Margin="8,8,8,4">
             <Border Style="{StaticResource PropCard}">
                 <StackPanel>
                     <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />

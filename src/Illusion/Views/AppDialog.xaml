@@ -1,6 +1,8 @@
 <Window x:Class="Illusion.Views.AppDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        v:Density.ControlHeight="28"
         Title="Illusion Toolkit"
         Width="420" SizeToContent="Height"
         ResizeMode="NoResize" ShowInTaskbar="False"
@@ -18,7 +20,6 @@
              size differs here, so this local override is BasedOn the shared style rather than copying it. -->
         <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource AccentButton}">
             <Setter Property="MinWidth" Value="92" />
-            <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="16,0" />
         </Style>
 
@@ -26,7 +27,6 @@
              the shared NeutralButton's fill is a dim gray-alpha rather than the accent. -->
         <Style x:Key="NeutralButton" TargetType="Button" BasedOn="{StaticResource NeutralButton}">
             <Setter Property="MinWidth" Value="92" />
-            <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="16,0" />
         </Style>
     </Window.Resources>
@@ -44,7 +44,7 @@
              status card), with the body wrapping below in the text column. When there is no heading the body
              moves up into the heading's row (code-behind) so the glyph stays centred on the first line; when
              there is no icon the gutter column collapses to nothing. -->
-        <Grid Grid.Row="0" Margin="24,22,24,22">
+        <Grid Grid.Row="0" Margin="24,20,24,20">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />  <!-- icon gutter -->
                 <ColumnDefinition Width="*" />     <!-- message -->
@@ -55,18 +55,18 @@
             </Grid.RowDefinitions>
 
             <TextBlock x:Name="IconGlyph" Grid.Row="0" Grid.Column="0" FontFamily="Segoe MDL2 Assets"
-                       FontSize="20" VerticalAlignment="Center" Margin="0,0,14,0" />
+                       FontSize="20" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock x:Name="HeadingText" Grid.Row="0" Grid.Column="1" FontSize="15" FontWeight="SemiBold"
                        TextWrapping="Wrap" VerticalAlignment="Center" />
             <TextBlock x:Name="BodyText" Grid.Row="1" Grid.Column="1" FontSize="13" TextWrapping="Wrap"
-                       Opacity="0.85" LineHeight="19" Margin="0,6,0,0" />
+                       Opacity="0.85" LineHeight="19" Margin="0,4,0,0" />
         </Grid>
 
         <!-- Command bar: hairline-topped strip. The verification checkbox sits on the left (aligned under the
              icon), the buttons on the right (aligned under the message) — a balanced bar, not one lonely button.
              Cancel + checkbox hide when unused. -->
         <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
-                Padding="24,14">
+                Padding="24,16">
             <DockPanel LastChildFill="False">
                 <CheckBox x:Name="CheckBoxControl" DockPanel.Dock="Left" FontSize="13"
                           VerticalAlignment="Center" />

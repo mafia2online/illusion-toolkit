@@ -1,15 +1,17 @@
 <UserControl x:Class="Illusion.Views.CopyableTextField"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
     <StackPanel DataContext="{Binding RelativeSource={RelativeSource AncestorType=UserControl}}">
-        <Grid Margin="1,0,0,3">
+        <Grid Margin="0,0,0,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{StaticResource TextDim}" FontSize="11.5"
+            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{StaticResource TextMuted}" FontSize="12"
                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <!-- Flat icon buttons (copy always, paste only when editable), dim glyph brightening on hover. -->
+            <!-- Flat icon buttons (copy always, paste only when editable), dim glyph brightening on hover. The
+                 same 24 px squares as a vector box's, so the two kinds of row line up in one card. -->
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <StackPanel.Resources>
                     <Style x:Key="IconBtn" TargetType="Button">
@@ -17,17 +19,20 @@
                         <Setter Property="Background" Value="Transparent" />
                         <Setter Property="BorderThickness" Value="0" />
                         <Setter Property="Padding" Value="0" />
+                        <Setter Property="Width" Value="24" />
+                        <Setter Property="Height" Value="24" />
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="Button">
-                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="3" Padding="4,2">
+                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="4">
                                         <TextBlock x:Name="Glyph" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                                   Text="{TemplateBinding Content}" Foreground="{StaticResource TextDim}" />
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Text="{TemplateBinding Content}" Foreground="{StaticResource TextMuted}" />
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
                                             <Setter TargetName="Bd" Property="Background" Value="{StaticResource EdgeFaint}" />
-                                            <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                                            <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource TextPrimary}" />
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -36,10 +41,10 @@
                     </Style>
                 </StackPanel.Resources>
                 <Button x:Name="PasteBtn" Style="{StaticResource IconBtn}" Content="&#xE77F;"
-                        Click="Paste_Click" ToolTip="Paste" Margin="0,0,2,0" />
+                        Click="Paste_Click" ToolTip="Paste" />
                 <Button Style="{StaticResource IconBtn}" Content="&#xE8C8;" Click="Copy_Click" ToolTip="Copy" />
                 <Button x:Name="DeleteBtn" Style="{StaticResource IconBtn}" Content="&#xE74D;"
-                        Click="Delete_Click" ToolTip="Remove" Margin="2,0,0,0" Visibility="Collapsed" />
+                        Click="Delete_Click" ToolTip="Remove" Visibility="Collapsed" />
             </StackPanel>
         </Grid>
 
@@ -47,7 +52,8 @@
                  Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
                  IsReadOnly="{Binding ReadOnly}"
                  KeyDown="Field_KeyDown"
-                 Foreground="White" FontSize="11.5" FontFamily="Consolas" Height="24" MinHeight="0"
+                 Foreground="{StaticResource TextPrimary}" FontSize="12" FontFamily="Consolas" MinHeight="0"
+                 Height="{Binding Path=(v:Density.ControlHeight), RelativeSource={RelativeSource Self}}"
                  CaretBrush="White" SelectionBrush="{StaticResource SelectionText}">
             <TextBox.Style>
                 <Style TargetType="TextBox">
@@ -56,7 +62,7 @@
                             <ControlTemplate TargetType="TextBox">
                                 <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
                                         BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
-                                    <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
+                                    <ScrollViewer x:Name="PART_ContentHost" Margin="8,0,8,0" VerticalAlignment="Center" />
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">

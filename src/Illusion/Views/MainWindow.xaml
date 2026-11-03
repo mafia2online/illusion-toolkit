@@ -16,12 +16,8 @@
 
 
     <DockPanel>
-        <!-- Menu: the Fluent template won't let us shrink the height via padding/height (it clips the text),
-             so we scale the whole menu with a LayoutTransform. -->
-        <Menu DockPanel.Dock="Top" Padding="0">
-            <Menu.LayoutTransform>
-                <ScaleTransform ScaleX="0.8" ScaleY="0.8" />
-            </Menu.LayoutTransform>
+        <!-- Menu: drawn by the toolkit's own templates (EditorChrome), at its real size. -->
+        <Menu DockPanel.Dock="Top">
             <!-- The gesture text on these items is filled in from the keymap (MainWindow.ApplyHotkeys) and
                  refreshed when it changes: a rebound key that still advertised the old one in the menu would
                  be worse than no hint at all. -->
@@ -72,19 +68,19 @@
         <!-- Status bar: camera position (per axis) + speed. Sizes are set on the fields themselves
              (no implicit Style — otherwise the Fluent theme gets overwritten). Fields are wide: Fluent draws
              a clear cross when focused, which a narrow field has no room for. -->
-        <StatusBar DockPanel.Dock="Bottom" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">
-            <StatusBarItem Grid.Column="0" Padding="6,1">
+        <StatusBar DockPanel.Dock="Bottom" Height="32" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">
+            <StatusBarItem Grid.Column="0" Padding="12,0" VerticalContentAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <v:Vector3Box x:Name="CamPosBox" Compact="True" Decimals="1" VerticalAlignment="Center"
-                                  Margin="2,1,0,1" ToolTip="Camera position (X, Y, Z)" />
+                                  ToolTip="Camera position (X, Y, Z)" />
                     <Border Width="1" Height="16" Background="{StaticResource EdgeSoft}" Margin="12,0" />
                     <TextBox x:Name="SpeedBox" Style="{StaticResource InputField}" Width="72" Text="100"
-                             VerticalAlignment="Center" Margin="0,1" ToolTip="Camera speed (units/s)"
+                             VerticalAlignment="Center" ToolTip="Camera speed (units/s)"
                              KeyDown="Speed_KeyDown" LostFocus="Speed_LostFocus" />
                 </StackPanel>
             </StatusBarItem>
-            <StatusBarItem Grid.Column="1" Padding="10,1">
-                <TextBlock x:Name="FpsText" VerticalAlignment="Center" FontFamily="Consolas" Opacity="0.85" Text="" />
+            <StatusBarItem Grid.Column="1" Padding="12,0" VerticalContentAlignment="Center">
+                <TextBlock x:Name="FpsText" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{StaticResource TextSecondary}" Text="" />
             </StatusBarItem>
         </StatusBar>
 
@@ -117,23 +113,49 @@
                      show the tray as a lighter patch. So the tray and its ToolBar go transparent and the row
                      carries the colour: the same band as before, now the full width of the viewport column. -->
                 <v:ToolbarRowPanel x:Name="ToolbarRow" Grid.Row="0" Background="{StaticResource SurfaceBand}">
+                    <!-- The band is 40: 32 controls with 4 above and below. The Fluent template gives its item panel
+                         a 0,1,2,2 margin, so the items carry 3 above and 2 below instead of 4 and 4. -->
                     <ToolBarTray x:Name="ToolTray" IsLocked="True" Background="Transparent">
-                        <ToolBar Background="Transparent">
-                            <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
-                                      DisplayMemberPath="Display"
-                                      ToolTip="Open-world district or interior (⌂); ❄ — has a winter variant"
-                                      SelectionChanged="AreaCombo_SelectionChanged" />
-                            <ToggleButton x:Name="WholeMapCheck" Width="30" Height="30" Margin="4" Padding="0"
+                        <ToolBar Background="Transparent" Padding="0">
+                            <ComboBox x:Name="AreaCombo" Width="200" Margin="12,3,0,2" TextSearch.TextPath="BaseName"
+                                      ToolTip="Open-world district or mission interior"
+                                      SelectionChanged="AreaCombo_SelectionChanged">
+                                <!-- Kind as a drawn glyph in front of the name, muted so the name leads. -->
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path x:Name="Kind" Width="14" Height="14" Stretch="Uniform"
+                                                  VerticalAlignment="Center" Margin="0,0,8,0" Fill="Transparent"
+                                                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.2"
+                                                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Data="{StaticResource IconDistrict}" />
+                                            <TextBlock Text="{Binding BaseName}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsInterior}" Value="True">
+                                                <Setter TargetName="Kind" Property="Data" Value="{StaticResource IconInterior}" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <ToggleButton x:Name="WholeMapCheck" Width="32" Height="32" Margin="4,3,0,2" Padding="0"
                                           HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                           FontFamily="Segoe MDL2 Assets" Content="&#xE826;" FontSize="16"
                                           ToolTip="Whole map — camera-driven district streaming"
                                           Checked="WholeMap_Changed" Unchecked="WholeMap_Changed" />
-                            <ToggleButton x:Name="WinterToggle" Width="30" Height="30" Margin="4" Padding="0"
+                            <ToggleButton x:Name="WinterToggle" Width="32" Height="32" Margin="4,3,0,2" Padding="0"
                                           HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                          Content="❄" FontSize="15"
                                           ToolTip="Winter (_z district variants + ground_zima)"
-                                          Checked="Winter_Changed" Unchecked="Winter_Changed" />
-                            <Separator Margin="2,6" />
+                                          Checked="Winter_Changed" Unchecked="Winter_Changed">
+                                <Path Width="16" Height="16" Stretch="Uniform" Fill="Transparent"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                      StrokeThickness="1.2" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconWinter}" />
+                            </ToggleButton>
+                            <!-- Between groups: 12 px with a hairline in it, where buttons of one group sit 4 apart. -->
+                            <Border Width="1" Height="16" Margin="6,0,5,0" Background="{StaticResource EdgeSoft}" />
 
                             <!-- Layers: everything that only changes what the viewport DRAWS lives behind this
                                  one button, named and switchable in a list. The area selector, Whole map and
@@ -141,21 +163,21 @@
                                  layers go: the toolbar no longer grows a button per layer, so it cannot run
                                  out of room again. -->
                             <Grid>
-                                <ToggleButton x:Name="LayersBtn" Width="30" Height="30" Margin="4" Padding="0"
+                                <ToggleButton x:Name="LayersBtn" Width="32" Height="32" Margin="0,3,4,2" Padding="0"
                                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                              ToolTip="Layers — what the viewport draws">
+                                              AutomationProperties.Name="Layers">
                                     <Path Width="16" Height="16" Stretch="Uniform" Fill="Transparent"
                                           Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
-                                          StrokeThickness="1.15" StrokeLineJoin="Round"
+                                          StrokeThickness="1.2" StrokeLineJoin="Round"
                                           Data="{StaticResource IconLayers}" />
                                 </ToggleButton>
                                 <!-- Opens on hover as well as on click — see HoverPopup, wired in the ctor. -->
                                 <Popup x:Name="LayersPopup" IsOpen="{Binding IsChecked, ElementName=LayersBtn}"
                                        Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
-                                       AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
+                                       AllowsTransparency="True" Closed="LayersPopup_Closed">
                                     <Border Background="{StaticResource PopupSurface}"
                                             BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
-                                            CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
+                                            CornerRadius="6" Padding="12,8" Margin="0,4,8,8" Width="264">
                                         <Border.Effect>
                                             <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2"
                                                               Opacity="0.5" />
@@ -167,11 +189,11 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
-                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,8,0" Fill="Transparent"
                                                       Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconZones}" />
-                                                <TextBlock Grid.Column="1" Text="Loading zones" Foreground="White"
+                                                <TextBlock Grid.Column="1" Text="Loading zones" Foreground="{StaticResource TextPrimary}"
                                                            FontSize="12" VerticalAlignment="Center" />
                                                 <ToggleButton Grid.Column="2" x:Name="ZonesToggle"
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -184,11 +206,11 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
-                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,8,0" Fill="Transparent"
                                                       Stroke="{x:Static v:PaletteInk.Amber}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconInstances}" />
-                                                <TextBlock Grid.Column="1" Text="Crash objects" Foreground="White"
+                                                <TextBlock Grid.Column="1" Text="Crash objects" Foreground="{StaticResource TextPrimary}"
                                                            FontSize="12" VerticalAlignment="Center" />
                                                 <ToggleButton Grid.Column="2" x:Name="CrashToggle"
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -201,11 +223,11 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
-                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,8,0" Fill="Transparent"
                                                       Stroke="{x:Static v:PaletteInk.Coral}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconCollision}" />
-                                                <TextBlock Grid.Column="1" Text="Collisions" Foreground="White"
+                                                <TextBlock Grid.Column="1" Text="Collisions" Foreground="{StaticResource TextPrimary}"
                                                            FontSize="12" VerticalAlignment="Center" />
                                                 <ToggleButton Grid.Column="2" x:Name="CollisionToggle"
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -221,12 +243,12 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
-                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,8,0" Fill="Transparent"
                                                       Stroke="{x:Static v:PaletteInk.Emerald}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                                       Data="{StaticResource IconNavigation}" />
-                                                <TextBlock Grid.Column="1" Text="AI navigation" Foreground="White"
+                                                <TextBlock Grid.Column="1" Text="AI navigation" Foreground="{StaticResource TextPrimary}"
                                                            FontSize="12" VerticalAlignment="Center" />
                                                 <ToggleButton Grid.Column="2" x:Name="AiNavToggle"
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
@@ -244,10 +266,10 @@
                         <Button x:Name="PlayBtn" Style="{StaticResource PlayButton}"
                                 ToolTip="Launch Mafia II" Click="Play_Click" />
                         <Button x:Name="MultiplayerBtn" Style="{StaticResource ToolSquareButton}"
-                                Content="&#xE774;" Margin="6,0,0,0"
+                                Content="&#xE774;" Margin="4,0,0,0"
                                 ToolTip="Launch Multiplayer" Click="Multiplayer_Click" />
                         <Button x:Name="BuildBtn" Style="{StaticResource ToolSquareButton}"
-                                Content="&#xE90F;" Margin="6,0,0,0"
+                                Content="&#xE90F;" Margin="4,0,0,0"
                                 ToolTip="Build" Click="Build_Click" />
                     </StackPanel>
 
@@ -324,14 +346,11 @@
                     <!-- Viewport tools + the gizmo overlays; shared with the resource editor. -->
                     <v:ViewportToolShelf x:Name="ToolShelf" />
 
-                    <!-- Blender edit-mode frame: an orange glow border over the whole viewport while a
-                         bridge session is active. Purely visual (hit-test transparent). -->
-                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2.5"
-                            IsHitTestVisible="False" Visibility="Collapsed">
-                        <Border.Effect>
-                            <DropShadowEffect Color="{StaticResource BlenderColor}" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
-                        </Border.Effect>
-                    </Border>
+                    <!-- Blender edit-mode frame: a solid orange border round the whole viewport while a bridge
+                         session is active. A hard edge, not a glow: the frame is a state to read, and a halo
+                         bleeds into the scene it surrounds. Purely visual (hit-test transparent). -->
+                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2"
+                            IsHitTestVisible="False" Visibility="Collapsed" />
 
                     <!-- Transform overlay (bottom-left): HOW MUCH the 3D gizmo just changed the active object
                          by — a distance for a move, degrees for a rotation, a factor for a scale. Not the
@@ -342,11 +361,11 @@
                          number keeps meaning the same thing however often it is retyped. It appears in code
                          ONLY after an actual gizmo edit (not on select); DataContext = the SelectionViewModel. -->
                     <Border x:Name="GizmoPanel" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                            Margin="12" Padding="10,8" Background="{StaticResource ScrimPanel}" CornerRadius="6"
+                            Margin="12" Padding="12,8" Background="{StaticResource ScrimPanel}" CornerRadius="6"
                             Visibility="Collapsed">
                         <StackPanel Width="330">
-                            <TextBlock x:Name="PanelCaption" Foreground="{StaticResource TextSecondary}" FontSize="10.5"
-                                       FontWeight="SemiBold" Margin="2,0,0,5" />
+                            <TextBlock x:Name="PanelCaption" Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                       FontWeight="SemiBold" Margin="2,0,0,4" />
                             <v:Vector3Box x:Name="PanelDelta" Compact="True" ShowActions="False" Decimals="3"
                                           X="{Binding DeltaX}" Y="{Binding DeltaY}" Z="{Binding DeltaZ}" />
                         </StackPanel>

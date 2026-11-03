@@ -9,7 +9,7 @@
     <UserControl.Resources>
         <Style x:Key="SwatchButton" TargetType="ToggleButton">
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Width" Value="30" />
+            <Setter Property="Width" Value="32" />
             <Setter Property="Height" Value="24" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -39,7 +39,7 @@
         </Grid.ColumnDefinitions>
 
         <TextBlock x:Name="LabelText" Grid.Column="0" Width="118" VerticalAlignment="Center"
-                   Foreground="{StaticResource GlyphIdle}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                   Foreground="{StaticResource GlyphIdle}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
 
         <ToggleButton x:Name="SwatchBtn" Grid.Column="1" Style="{StaticResource SwatchButton}"
                       Margin="0,0,8,0" ToolTip="Pick a colour" />
@@ -52,14 +52,14 @@
                IsOpen="{Binding IsChecked, ElementName=SwatchBtn, Mode=TwoWay}"
                StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
             <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource EdgeNeutral}"
-                    BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,10,10">
+                    BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,4,8,8">
                 <Border.Effect>
                     <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
                 </Border.Effect>
                 <StackPanel Width="212">
                     <!-- Saturation across, value down, over the chosen hue. -->
                     <Grid Height="140" Margin="0,0,0,8">
-                        <Border x:Name="SvArea" CornerRadius="3" ClipToBounds="True"
+                        <Border x:Name="SvArea" CornerRadius="4" ClipToBounds="True"
                                 MouseLeftButtonDown="Sv_MouseDown" MouseMove="Sv_MouseMove"
                                 MouseLeftButtonUp="Picker_MouseUp" Cursor="Cross">
                             <Grid>
@@ -92,8 +92,8 @@
                     </Grid>
 
                     <!-- Hue. -->
-                    <Grid Height="16" Margin="0,0,0,9">
-                        <Border x:Name="HueArea" CornerRadius="3" ClipToBounds="True"
+                    <Grid Height="16" Margin="0,0,0,8">
+                        <Border x:Name="HueArea" CornerRadius="4" ClipToBounds="True"
                                 MouseLeftButtonDown="Hue_MouseDown" MouseMove="Hue_MouseMove"
                                 MouseLeftButtonUp="Picker_MouseUp" Cursor="Cross">
                             <Border.Background>
@@ -118,15 +118,15 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Hex" Foreground="{StaticResource GlyphIdle}" FontSize="11.5"
+                        <TextBlock Grid.Column="0" Text="Hex" Foreground="{StaticResource GlyphIdle}" FontSize="12"
                                    VerticalAlignment="Center" Margin="0,0,8,0" />
                         <TextBox x:Name="HexBox" Grid.Column="1" Style="{StaticResource DarkBox}"
                                  VerticalContentAlignment="Center" MaxLength="7"
                                  KeyDown="Hex_KeyDown" LostFocus="Hex_LostFocus" />
                     </Grid>
 
-                    <TextBlock Text="Shown the way the viewport shows it; the numbers stay linear."
-                               Foreground="{StaticResource TextFaint}" FontSize="10.5" TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock Text="Shown the way the viewport shows it; the numbers stay linear"
+                               Foreground="{StaticResource TextMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </Border>
         </Popup>

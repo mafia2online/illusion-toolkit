@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -17,7 +18,7 @@ namespace Illusion.Views;
 /// </summary>
 internal static class HoverPopup
 {
-    private static readonly TimeSpan OpenDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan OpenDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan CloseDelay = TimeSpan.FromMilliseconds(350);
 
     /// <summary>
@@ -30,6 +31,10 @@ internal static class HoverPopup
         // that would also swallow the click landing on a switch inside it.
         popup.StaysOpen = true;
         var content = popup.Child as FrameworkElement;
+
+        // The list opens well inside the tooltip's own delay, so a tooltip on the button could only ever land
+        // on top of the list it was meant to describe. The list is the description.
+        ToolTipService.SetIsEnabled(button, false);
 
         // Where the pointer is, tracked from the enter/leave pair rather than read back from IsMouseOver: the
         // two halves (button, list) sit in different windows, and this way the state machine is one thing that
