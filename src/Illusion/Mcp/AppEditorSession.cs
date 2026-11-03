@@ -997,9 +997,10 @@ internal sealed class AppEditorSession : IEditorSession
     public string? SetTuning(int table, string field, string? band, string? element, string value, out TuningFieldInfo? result)
     {
         result = null;
-        if (ResourceWindow is not { } window || TuningArchive(out string? refusal) is not { } archive)
+        // A staged archive implies an open resource editor, so the second test only names the window.
+        if (TuningArchive(out string? refusal) is not { } archive || ResourceWindow is not { } window)
         {
-            return TuningArchive(out string? why) == null ? why : "the resource editor is not open";
+            return refusal ?? "the resource editor is not open";
         }
         if (Assets.EntityData.CarTuning.Read(archive) is not { } tuning) return $"{archive.Name} carries no tuning table";
         if (table < 1 || table > tuning.Tables.Count) return $"there is no table {table} — {tuning.Tables.Count} in all";
@@ -1040,7 +1041,7 @@ internal sealed class AppEditorSession : IEditorSession
                 parsed = Assets.EntityData.TuningEditing.TuningValue.Of(n);
                 break;
             case Assets.EntityData.TuningFieldKind.Flag when bool.TryParse(value, out bool flag) || value is "0" or "1":
-                parsed = Assets.EntityData.TuningEditing.TuningValue.Of(value is "1" || (bool.TryParse(value, out bool b2) && b2) ? 1L : 0L);
+                parsed = Assets.EntityData.TuningEditing.TuningValue.Of(flag || value is "1" ? 1L : 0L);
                 break;
             case Assets.EntityData.TuningFieldKind.Vector:
                 string[] parts = value.Split(',', StringSplitOptions.TrimEntries);
@@ -1260,7 +1261,7 @@ internal sealed class AppEditorSession : IEditorSession
         {
             return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
         }
-        plan = Assets.Sds.TriangleHider.Find(mesh, ((IFrameNode)adapter).WorldTransform, min, max,
+        plan = Assets.Sds.TriangleHider.Find(mesh, adapter.WorldTransform, min, max,
             string.IsNullOrWhiteSpace(material) ? null : material);
         return null;
     }
@@ -1278,7 +1279,7 @@ internal sealed class AppEditorSession : IEditorSession
             return $"'{node.Name}' is a {node.Kind} — only a mesh has triangles to hide";
         }
         levels = mesh.Geometry?.LOD?.Length ?? 0;
-        plan = Assets.Sds.TriangleHider.FindPicked(mesh, ((IFrameNode)adapter).WorldTransform, picked);
+        plan = Assets.Sds.TriangleHider.FindPicked(mesh, adapter.WorldTransform, picked);
         return null;
     }
 
@@ -1491,26 +1492,26 @@ internal sealed class AppEditorSession : IEditorSession
 
     // The city's load zones, read afresh from the working copy of city_univers on every call: they are a few
     // hundred small objects, and a tool that moves one must not answer from what stood there before.
-    private string? OpenLoadZones(string? copy, out Assets.World.LoadZones? zones)
+    private string? OpenLoadZones(string? copy, out LoadZones? zones)
     {
         zones = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         try
         {
-            IReadOnlyList<FileInfo> copies = Assets.World.LoadZones.Copies();
+            IReadOnlyList<FileInfo> copies = LoadZones.Copies();
             FileInfo? which = string.IsNullOrWhiteSpace(copy)
                 ? copies[0]
-                : copies.FirstOrDefault(c => string.Equals(Assets.World.LoadZones.CopyName(c), copy, StringComparison.OrdinalIgnoreCase));
+                : copies.FirstOrDefault(c => string.Equals(LoadZones.CopyName(c), copy, StringComparison.OrdinalIgnoreCase));
             if (which == null)
             {
-                return $"no copy of city_univers.sds named '{copy}' - there are: " + string.Join(", ", copies.Select(Assets.World.LoadZones.CopyName));
+                return $"no copy of city_univers.sds named '{copy}' - there are: " + string.Join(", ", copies.Select(LoadZones.CopyName));
             }
             // The districts' names: the open map editor has them already; without one the city folder is read.
             IReadOnlyCollection<string> districts = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } known
                 ? known
-                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                : [.. MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
                     .Areas.Select(a => a.BaseName)];
-            zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), districts, which);
+            zones = LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), districts, which);
             return null;
         }
         catch (Exception ex) when (ZoneWrites.IsFileTrouble(ex))
@@ -1529,15 +1530,15 @@ internal sealed class AppEditorSession : IEditorSession
         copies = [];
         if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
         if (!float.IsFinite(near) || near < 0) return "near is a distance in metres, 0 or more";
-        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
-        copies = [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)];
+        if (OpenLoadZones(copy, out LoadZones? all) is { } failed) return failed;
+        copies = [.. LoadZones.Copies().Select(LoadZones.CopyName)];
 
         var at = new Vector3(point[0], point[1], point[2]);
         zones = [.. all!.At(at, near).Select(z =>
         {
-            (Vector3 min, Vector3 max) = Assets.World.LoadZones.WorldBox(z.Zone);
+            (Vector3 min, Vector3 max) = LoadZones.WorldBox(z.Zone);
             return new LoadZoneInfo(z.Name, all.DistrictsOf(z.Name), z.Inside, z.OutsideBy, Xyz(min), Xyz(max),
-                Assets.World.LoadZones.LoadsOnArrival(z.Name), !Assets.World.LoadZones.IsShipped(z.Name));
+                LoadZones.LoadsOnArrival(z.Name), !LoadZones.IsShipped(z.Name));
         })];
         districts = all.DistrictsAt(at);
         return null;
@@ -1555,7 +1556,7 @@ internal sealed class AppEditorSession : IEditorSession
         float x0 = MathF.Min(from[0], to[0]), x1 = MathF.Max(from[0], to[0]);
         float y0 = MathF.Min(from[1], to[1]), y1 = MathF.Max(from[1], to[1]);
         if ((x1 - x0) / step > 200 || (y1 - y0) / step > 200) return "that is more than 200 steps a side - take a larger step or a smaller box";
-        if (OpenLoadZones(copy, out Assets.World.LoadZones? all) is { } failed) return failed;
+        if (OpenLoadZones(copy, out LoadZones? all) is { } failed) return failed;
 
         // Rows and columns are counted, and each stands at its own multiple of the step: adding the step to a
         // running float drifts, and with a step too small to change the float it never arrives.
@@ -1592,16 +1593,16 @@ internal sealed class AppEditorSession : IEditorSession
         {
             IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
                 ? names
-                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                : [.. MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
                     .Areas.Select(a => a.BaseName)];
-            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+            LoadZones zones = LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
                 forNewZones: true);
             var min = new Vector3(boxMin[0], boxMin[1], boxMin[2]);
             var max = new Vector3(boxMax[0], boxMax[1], boxMax[2]);
             // worked out in memory first: what the zone would be is the answer of a dry run, and of a write too
             if (zones.Create(name, like, min, max, districts[0], districts.Length > 1 ? districts[1] : null) is { } refused) return refused;
-            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(zones.Volumes[name]);
-            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            (Vector3 lo, Vector3 hi) = LoadZones.WorldBox(zones.Volumes[name]);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), true, 0f, Xyz(lo), Xyz(hi), LoadZones.LoadsOnArrival(name), Added: true);
             if (!apply) return null;
             if (Window?.Viewport is { } viewport)
             {
@@ -1626,20 +1627,20 @@ internal sealed class AppEditorSession : IEditorSession
         zone = null;
         if (EnsureEnvironment() is { } notReady) return notReady;
         if (string.IsNullOrWhiteSpace(name)) return "name is the zone to take out";
-        if (Assets.World.LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
+        if (LoadZones.IsShipped(name)) return $"{name} came with the game - only a zone that was added is taken out";
         var archive = new FileInfo(Assets.MafiaEnvironment.CityUniversSds);
         if (ZoneWrites.StructureBlocked(archive) is { } blocked) return blocked;
         try
         {
             IReadOnlyCollection<string> known = Window?.Viewport.Catalogs.DistrictNames is { Count: > 0 } names
                 ? names
-                : [.. Assets.World.MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
+                : [.. MapCatalog.Build(Assets.MafiaEnvironment.CityFolder, f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f))
                     .Areas.Select(a => a.BaseName)];
-            Assets.World.LoadZones zones = Assets.World.LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
+            LoadZones zones = LoadZones.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f), known, archive,
                 forNewZones: true);
             if (!zones.Volumes.TryGetValue(name, out Formats.Frames.ObjectTypes.FrameObjectArea? volume)) return $"no load zone named '{name}'";
-            (Vector3 lo, Vector3 hi) = Assets.World.LoadZones.WorldBox(volume);
-            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), false, 0f, Xyz(lo), Xyz(hi), Assets.World.LoadZones.LoadsOnArrival(name), Added: true);
+            (Vector3 lo, Vector3 hi) = LoadZones.WorldBox(volume);
+            zone = new LoadZoneInfo(name, zones.DistrictsOf(name), false, 0f, Xyz(lo), Xyz(hi), LoadZones.LoadsOnArrival(name), Added: true);
             if (zones.Delete(name) is { } refused) return refused;
             if (!apply) return null;
             if (Window?.Viewport is { } viewport)
@@ -1700,7 +1701,7 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
-    private static ShopPlaceInfo Told(Assets.World.ShopPlaces.PlaceInfo p) =>
+    private static ShopPlaceInfo Told(ShopPlaces.PlaceInfo p) =>
         new(p.Shop, p.Archive, p.Marker, p.At is { } at ? Xyz(at) : null, p.Turn, [p.MapX, p.MapY], p.LoadZone, p.UnloadZone, p.Added);
 
     public string? ShopPlaces(string? shop, out IReadOnlyList<ShopInfo> shops)
@@ -1710,8 +1711,8 @@ internal sealed class AppEditorSession : IEditorSession
         string? asked = string.IsNullOrWhiteSpace(shop) ? null : shop.Trim();
         try
         {
-            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
-            IReadOnlyList<Assets.World.ShopPlaces.ShopInfo> all = places.Shops(asked);
+            ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            IReadOnlyList<ShopPlaces.ShopInfo> all = places.Shops(asked);
             if (asked != null)
             {
                 all = [.. all.Where(s => string.Equals(s.Name, asked, StringComparison.OrdinalIgnoreCase) || string.Equals(s.Archive, asked, StringComparison.OrdinalIgnoreCase))];
@@ -1735,7 +1736,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (string.IsNullOrWhiteSpace(shop)) return "shop is the interior's name, as shop_places lists it";
         if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
         return ChangeShopPlaces(apply, "add the place", out place, out archives,
-            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? made) =>
+            (ShopPlaces places, out ShopPlaces.PlaceInfo? made) =>
                 places.Add(shop.Trim(), new Vector3(point[0], point[1], point[2]), turn, loadHalf, unloadHalf, halfHeight, out made));
     }
 
@@ -1746,7 +1747,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (EnsureEnvironment() is { } notReady) return notReady;
         if (string.IsNullOrWhiteSpace(marker)) return "marker is the place's marker, as shop_places lists it";
         return ChangeShopPlaces(apply, "take the place out", out place, out archives,
-            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? gone) => places.Remove(marker.Trim(), out gone));
+            (ShopPlaces places, out ShopPlaces.PlaceInfo? gone) => places.Remove(marker.Trim(), out gone));
     }
 
     public string? ShopCreate(string name, string like, float[] point, float turn, float loadHalf, float unloadHalf, float halfHeight, bool apply,
@@ -1761,7 +1762,7 @@ internal sealed class AppEditorSession : IEditorSession
         if (point is not { Length: 3 } || point.Any(v => !float.IsFinite(v))) return "point is [x, y, z], finite numbers";
         var told = new List<string>();
         string? refused = ChangeShopPlaces(apply, "make the interior", out place, out archives,
-            (Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? made) =>
+            (ShopPlaces places, out ShopPlaces.PlaceInfo? made) =>
                 places.Create(name.Trim(), like.Trim(), new Vector3(point[0], point[1], point[2]), turn, loadHalf, unloadHalf, halfHeight, out made),
             told);
         notes = told;
@@ -1776,9 +1777,9 @@ internal sealed class AppEditorSession : IEditorSession
         if (string.IsNullOrWhiteSpace(name)) return "name is the interior to take out, as shop_places lists it";
         try
         {
-            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
             if (ZoneWrites.StructureBlocked(places.CityArchive) is { } blocked) return blocked;
-            if (places.Delete(name.Trim(), out Assets.World.ShopPlaces.ShopInfo? gone) is { } refused) return refused;
+            if (places.Delete(name.Trim(), out ShopPlaces.ShopInfo? gone) is { } refused) return refused;
             shop = new ShopInfo(gone!.Name, gone.Archive, gone.ActorFile, gone.Entities, [.. gone.Places.Select(Told)]);
             archives = [places.CityArchive.FullName];
             if (!apply) return null;
@@ -1792,7 +1793,7 @@ internal sealed class AppEditorSession : IEditorSession
         }
     }
 
-    private delegate string? ShopPlaceChange(Assets.World.ShopPlaces places, out Assets.World.ShopPlaces.PlaceInfo? place);
+    private delegate string? ShopPlaceChange(ShopPlaces places, out ShopPlaces.PlaceInfo? place);
 
     // A place is two archives changed together. Neither may be open in an editor: that editor holds a scene of
     // its own and its next save would write it whole, over the marker or the volumes written here.
@@ -1803,9 +1804,9 @@ internal sealed class AppEditorSession : IEditorSession
         archives = [];
         try
         {
-            Assets.World.ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
+            ShopPlaces places = Assets.World.ShopPlaces.Open(f => Assets.Sds.SdsMeshLoader.EnsureExtracted(f));
             if (ZoneWrites.StructureBlocked(places.CityArchive) is { } blocked) return blocked;
-            if (change(places, out Assets.World.ShopPlaces.PlaceInfo? changed) is { } refused) return refused;
+            if (change(places, out ShopPlaces.PlaceInfo? changed) is { } refused) return refused;
             FileInfo shopArchive = places.ShopArchive!;
             bool isNew = places.ShopArchiveIsNew;
             if (!isNew && ZoneWrites.HeldByAnEditor(shopArchive) is { } held) return held;
@@ -1863,16 +1864,16 @@ internal sealed class AppEditorSession : IEditorSession
         if (EnsureEnvironment() is { } notReady) return notReady;
         List<string> names = string.IsNullOrWhiteSpace(copy) ? ["base"]
             : string.Equals(copy, "all", StringComparison.OrdinalIgnoreCase)
-                ? [.. Assets.World.LoadZones.Copies().Select(Assets.World.LoadZones.CopyName)]
+                ? [.. LoadZones.Copies().Select(LoadZones.CopyName)]
                 : [copy];
 
         // Everything is worked out, in memory, for every copy before any of them is written: a face that can
         // be moved in one copy and not in another must not leave the two telling the game different things.
-        var moved = new List<(Assets.World.LoadZones Zones, Assets.World.LoadZoneFaceMove Move, string Copy)>();
+        var moved = new List<(LoadZones Zones, LoadZoneFaceMove Move, string Copy)>();
         var absent = new List<string>();
         foreach (string name in names)
         {
-            if (OpenLoadZones(name, out Assets.World.LoadZones? all) is { } failed) return failed;
+            if (OpenLoadZones(name, out LoadZones? all) is { } failed) return failed;
             if (!all!.Volumes.ContainsKey(zone ?? ""))
             {
                 absent.Add(name);
@@ -1882,18 +1883,21 @@ internal sealed class AppEditorSession : IEditorSession
             // its own and writes THAT whole on its next save: its copy of the zone must be what the disk has
             // now, and is brought in step after the write (ZoneWrites).
             if (apply && ZoneWrites.Blocked(all, zone!) is { } blocked) return $"{name}: {blocked} (editor_save)";
-            if (all.MoveFace(zone!, face, to, out Assets.World.LoadZoneFaceMove? move) is { } refused) return $"{name}: {refused}";
+            if (all.MoveFace(zone!, face, to, out LoadZoneFaceMove? move) is { } refused) return $"{name}: {refused}";
             moved.Add((all, move!, name));
         }
         if (moved.Count == 0) return $"no load zone named '{zone}' in " + string.Join(", ", absent);
 
         // The base copy alone, with the map editor open: written through the editor's own zone editing, the way
         // its gizmo and its Loading zones window write - so the move is a step of the editor's undo history.
-        bool viaEditor = apply && moved.Count == 1 && Window?.Viewport is not null
-            && string.Equals(moved[0].Zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase);
-        if (viaEditor)
+        D3DImageHost? editor = apply && moved.Count == 1 && Window?.Viewport is { } open
+            && string.Equals(moved[0].Zones.Archive.FullName, new FileInfo(Assets.MafiaEnvironment.CityUniversSds).FullName, StringComparison.OrdinalIgnoreCase)
+            ? open
+            : null;
+        bool viaEditor = editor != null;
+        if (editor != null)
         {
-            if (Window!.Viewport.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
+            if (editor.ZoneEditing.MoveFace(zone!, face, to) is { } unmoved) return unmoved;
             // The step is on the MAP editor's history. Left pointing at the resource editor, the editor_undo
             // that follows took back whatever that one did last and called it done.
             _resourceTarget = false;
@@ -1904,7 +1908,7 @@ internal sealed class AppEditorSession : IEditorSession
         var written = new List<(string File, byte[] Before)>();
         if (apply && !viaEditor)
         {
-            foreach ((Assets.World.LoadZones all, _, string name) in moved)
+            foreach ((LoadZones all, _, string name) in moved)
             {
                 try
                 {
@@ -1924,7 +1928,7 @@ internal sealed class AppEditorSession : IEditorSession
                         + (stuck.Count > 0 ? ", EXCEPT that these could not be put back: " + string.Join(", ", stuck) : "");
                 }
             }
-            foreach ((Assets.World.LoadZones all, _, _) in moved) ZoneWrites.Landed(all, zone!);
+            foreach ((LoadZones all, _, _) in moved) ZoneWrites.Landed(all, zone!);
         }
 
         results = [.. moved.Select(m => new LoadZoneMoveInfo(m.Copy, m.Move.Zone, m.Move.Face, m.Move.From, m.Move.To, Xyz(m.Move.BoxMin),

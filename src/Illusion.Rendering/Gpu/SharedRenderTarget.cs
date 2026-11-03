@@ -39,16 +39,22 @@ public sealed unsafe class SharedRenderTarget : IDisposable
 
         void* shared = null;
 
-        // 1) D3D9 creates a shared RT texture (A8R8G8B8 == DXGI B8G8R8A8_UNORM).
+        // 1) D3D9 creates a shared RT texture (A8R8G8B8 == DXGI B8G8R8A8_UNORM). Into locals, then the
+        //    fields: Silk passes a `ref ComPtr` to the driver as an unpinned address, and a field's address
+        //    moves with this object when a collection runs mid-call (see GpuContext.CreateD3D11).
+        ComPtr<IDirect3DTexture9> texture9 = default;
         SilkMarshal.ThrowHResult(gpu.Device9.CreateTexture(
             (uint)width, (uint)height, 1,
             D3DUSAGE_RENDERTARGET,
             D3D9Format.A8R8G8B8,
             Pool.Default,
-            ref Texture9,
+            ref texture9,
             &shared));
+        Texture9 = texture9;
 
-        SilkMarshal.ThrowHResult(Texture9.GetSurfaceLevel(0, ref Surface9));
+        ComPtr<IDirect3DSurface9> surface9 = default;
+        SilkMarshal.ThrowHResult(Texture9.GetSurfaceLevel(0, ref surface9));
+        Surface9 = surface9;
 
         // 2) D3D11 opens the same memory via the shared handle.
         var iid = ID3D11Texture2D.Guid;

@@ -135,8 +135,17 @@ public sealed unsafe class GpuContext : IDisposable
         }
     }
 
+    // Every out-pointer below is a LOCAL, and only then copied into the field. Silk's `ref ComPtr<T>` overloads
+    // hand the driver `GetAddressOf()`, which is the ComPtr's raw address, unpinned: for a field that is an
+    // address inside this object on the managed heap. A garbage collection while the driver is busy creating
+    // the device (tens of milliseconds, with the editor's catalogs loading on other threads) moves the object,
+    // the driver writes the pointer into the space the object left, the call still returns S_OK, and the field
+    // stays null. The map editor then died on a NullReferenceException in CreateQuery — a white window and the
+    // end of the program. A local lives on the stack, which the collector never moves.
     private void CreateD3D11()
     {
+        ComPtr<ID3D11Device> device = default;
+        ComPtr<ID3D11DeviceContext> context = default;
         // BgraSupport is mandatory: D3DImage works with BGRA surfaces.
         SilkMarshal.ThrowHResult(D3D11.CreateDevice(
             default(ComPtr<IDXGIAdapter>),
@@ -146,14 +155,22 @@ public sealed unsafe class GpuContext : IDisposable
             (D3DFeatureLevel*)null,   // pFeatureLevels — let the driver pick on its own
             0,
             D3D11.SdkVersion,
-            ref Device11,
+            ref device,
             (D3DFeatureLevel*)null,   // we don't need the selected level
-            ref Context11));
+            ref context));
+        Device11 = device;
+        Context11 = context;
+        if (Device11.Handle == null || Context11.Handle == null)
+        {
+            throw new InvalidOperationException("Direct3D 11 reported success but returned no device.");
+        }
     }
 
     private void CreateD3D9()
     {
-        SilkMarshal.ThrowHResult(D3D9.Direct3DCreate9Ex(D3D9.SdkVersion, ref D3D9Ex));
+        ComPtr<IDirect3D9Ex> d3d9 = default;
+        SilkMarshal.ThrowHResult(D3D9.Direct3DCreate9Ex(D3D9.SdkVersion, ref d3d9));
+        D3D9Ex = d3d9;
 
         // The D3D9 device needs a focus window; use the desktop — there is no real window.
         nint focus = GetDesktopWindow();
@@ -172,6 +189,7 @@ public sealed unsafe class GpuContext : IDisposable
         const uint flags =
             D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED | D3DCREATE_FPU_PRESERVE;
 
+        ComPtr<IDirect3DDevice9Ex> device9 = default;
         SilkMarshal.ThrowHResult(D3D9Ex.CreateDeviceEx(
             0,
             Devtype.Hal,
@@ -179,7 +197,12 @@ public sealed unsafe class GpuContext : IDisposable
             flags,
             ref pp,
             (Displaymodeex*)null,
-            ref Device9));
+            ref device9));
+        Device9 = device9;
+        if (Device9.Handle == null)
+        {
+            throw new InvalidOperationException("Direct3D 9Ex reported success but returned no device.");
+        }
     }
 
     public void Dispose()
