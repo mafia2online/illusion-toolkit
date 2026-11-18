@@ -7,196 +7,198 @@
          Each row reuses the scene tree's node-kind glyph+color (Scene teal for proxy
          SCENES vs Mesh green for proxy MESHES) so the two read apart at a glance.
          All switches are OFF by default (no IsChecked). -->
-    <StackPanel Margin="12">
-        <!-- Collision first, and on THIS tab rather than behind the Layers button: it is the one
-             overlay a car is actually worked on with, and burying the answer to "where is this
-             car solid" behind a popup made it something you had to remember rather than see. -->
-        <TextBlock Text="Overlays" Style="{StaticResource Caption}" />
-        <Border Height="1" Background="{StaticResource EdgeFaint}" />
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12">
+            <!-- Collision first, and on THIS tab rather than behind the Layers button: it is the one
+                 overlay a car is actually worked on with, and burying the answer to "where is this
+                 car solid" behind a popup made it something you had to remember rather than see. -->
+            <TextBlock Text="Overlays" Style="{StaticResource Caption}" />
+            <Border Height="1" Background="{StaticResource EdgeFaint}" />
 
-        <Grid x:Name="PartShapesRow" Margin="0,8,0,24"
-              ToolTip="The physics a car is actually hit by — the mesh never is. Drawn for the whole car, not just the selected part.&#10;&#10;ORANGE — a placed physics shape with no surface named: the body, the doors, the bumpers.&#10;BLUE — glass. Every window is one of these, and it is glass by its type, not by a material.&#10;AMBER — a zone: the engine bay, the snow volumes.&#10;ANY OTHER COLOUR — a shape that names a physics surface, painted the way that surface is painted in the world's own collision.">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Vermilion}"
-                  StrokeThickness="1.2" StrokeLineJoin="Round"
-                  Data="{StaticResource IconCollision}" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Collision" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Coloured by what each volume is"
-                           Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          Checked="PartShapes_Changed" Unchecked="PartShapes_Changed" />
-        </Grid>
+            <Grid x:Name="PartShapesRow" Margin="0,8,0,24"
+                  ToolTip="The physics a car is actually hit by — the mesh never is. Drawn for the whole car, not just the selected part.&#10;&#10;ORANGE — a placed physics shape with no surface named: the body, the doors, the bumpers.&#10;BLUE — glass. Every window is one of these, and it is glass by its type, not by a material.&#10;AMBER — a zone: the engine bay, the snow volumes.&#10;ANY OTHER COLOUR — a shape that names a physics surface, painted the way that surface is painted in the world's own collision.">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Vermilion}"
+                      StrokeThickness="1.2" StrokeLineJoin="Round"
+                      Data="{StaticResource IconCollision}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Collision" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Coloured by what each volume is"
+                               Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              Checked="PartShapes_Changed" Unchecked="PartShapes_Changed" />
+            </Grid>
 
-        <TextBlock Text="Scene filters" Style="{StaticResource Caption}" />
-        <Border Height="1" Background="{StaticResource EdgeFaint}" />
+            <TextBlock Text="Scene filters" Style="{StaticResource Caption}" />
+            <Border Height="1" Background="{StaticResource EdgeFaint}" />
 
-        <!-- (a) proxy scenes — Scene glyph, cyan PaletteInk.Cyan -->
-        <Grid x:Name="ProxyScenesRow" Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="{StaticResource IconScene}" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Proxy scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Neighboring proxy districts" Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="ProxyScenesToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="Whole neighboring proxy districts (proxy_&lt;district&gt;, cityNN meshes)"
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (a) proxy scenes — Scene glyph, cyan PaletteInk.Cyan -->
+            <Grid x:Name="ProxyScenesRow" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="{StaticResource IconScene}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Proxy scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Neighboring proxy districts" Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="ProxyScenesToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="Whole neighboring proxy districts (proxy_&lt;district&gt;, cityNN meshes)"
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (b) proxy meshes (NEW) — Mesh glyph, mint PaletteInk.Mint -->
-        <Grid x:Name="ProxyMeshesRow" Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Mint}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="{StaticResource IconMesh}" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Proxy meshes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Embedded proxy_ in this scene" Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="ProxyMeshesToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="The embedded proxy_ mesh inside the current district's main scene"
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (b) proxy meshes (NEW) — Mesh glyph, mint PaletteInk.Mint -->
+            <Grid x:Name="ProxyMeshesRow" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Mint}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="{StaticResource IconMesh}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Proxy meshes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Embedded proxy_ in this scene" Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="ProxyMeshesToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="The embedded proxy_ mesh inside the current district's main scene"
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (c) snow scenes — the Winter switch's snowflake, denim PaletteInk.Denim -->
-        <Grid x:Name="SnowScenesRow" Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Denim}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="{StaticResource IconWinter}" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Snow scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Winter snow, follows the Winter switch" Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="Winter-only snow geometry (scene4XX). Auto-follows the winter selector — toggle to override."
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (c) snow scenes — the Winter switch's snowflake, denim PaletteInk.Denim -->
+            <Grid x:Name="SnowScenesRow" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Denim}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="{StaticResource IconWinter}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Snow scenes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Winter snow, follows the Winter switch" Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="Winter-only snow geometry (scene4XX). Auto-follows the winter selector — toggle to override."
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (e) skeletons — the bone glyph, magenta PaletteInk.Magenta. Not a city filter: a rig belongs to
-             a skinned model, and a car's bones are the only place its doors and axles exist. -->
-        <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Magenta}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="M3.2,8.8 A1.6,1.6 0 1 1 3.2,8.79 M8.8,3.2 A1.6,1.6 0 1 1 8.8,3.19 M4.4,7.6 L7.6,4.4" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Skeletons" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Bones of skinned models — a car's parts" Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="SkeletonToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="The rig of every skinned model on screen, drawn over the mesh: a segment from each bone to its parent and a tick at every joint. A car's doors, covers and axles are bones — the mesh itself is one solid body."
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (e) skeletons — the bone glyph, magenta PaletteInk.Magenta. Not a city filter: a rig belongs to
+                 a skinned model, and a car's bones are the only place its doors and axles exist. -->
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Magenta}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M3.2,8.8 A1.6,1.6 0 1 1 3.2,8.79 M8.8,3.2 A1.6,1.6 0 1 1 8.8,3.19 M4.4,7.6 L7.6,4.4" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Skeletons" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Bones of skinned models — a car's parts" Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="SkeletonToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="The rig of every skinned model on screen, drawn over the mesh: a segment from each bone to its parent and a tick at every joint. A car's doors, covers and axles are bones — the mesh itself is one solid body."
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (f) helper nodes — a box-with-axes glyph, steel PaletteInk.Steel. Dummies, points and volumes:
-             the nodes that place something without being anything to look at. -->
-        <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Steel}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="M1,3.4 L6,0.8 L11,3.4 L11,8.6 L6,11.2 L1,8.6 Z M6,5.6 L6,11.2 M1,3.4 L6,5.6 L11,3.4" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Helpers" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock x:Name="HelpersSubtitle" Text="Dummies, points and volumes"
-                           Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="HelpersToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="Dummy volumes as their own bounding box and points as axes that show which way they face — glyphs keep a readable size on screen however small or far away the node is. Unnamed placeholders parked at the origin are left out (a car carries seventeen)."
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (f) helper nodes — a box-with-axes glyph, steel PaletteInk.Steel. Dummies, points and volumes:
+                 the nodes that place something without being anything to look at. -->
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Steel}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M1,3.4 L6,0.8 L11,3.4 L11,8.6 L6,11.2 L1,8.6 Z M6,5.6 L6,11.2 M1,3.4 L6,5.6 L11,3.4" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Helpers" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock x:Name="HelpersSubtitle" Text="Dummies, points and volumes"
+                               Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="HelpersToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="Dummy volumes as their own bounding box and points as axes that show which way they face — glyphs keep a readable size on screen however small or far away the node is. Unnamed placeholders parked at the origin are left out (a car carries seventeen)."
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (g) hit boxes — a ringed sphere, sky PaletteInk.Sky. Drawn as spheres and not as
-             boxes on purpose: the box on disk is turned and the turn is not decoded, so a sphere
-             about its centre is the only shape that can be shown without inventing one. -->
-        <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Sky}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="M6,0.8 A5.2,5.2 0 1 1 5.99,0.8 Z M6,0.8 A2.2,5.2 0 1 1 5.99,0.8 Z M0.8,6 A5.2,2.2 0 1 1 11.2,6" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Hit boxes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock x:Name="HitBoxSubtitle" Text="What a bullet has to be inside to count"
-                           Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="HitBoxToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="One box per piece of a skinned mesh. A shot is only tested against a piece's triangles if it passes that piece's box first — proven in game: zero them and the whole car stops registering bullets. Drawn as spheres because the box on disk is turned and the turn is not decoded; the sphere is the region the box certainly covers. Geometry outside every sphere cannot be shot."
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
+            <!-- (g) hit boxes — a ringed sphere, sky PaletteInk.Sky. Drawn as spheres and not as
+                 boxes on purpose: the box on disk is turned and the turn is not decoded, so a sphere
+                 about its centre is the only shape that can be shown without inventing one. -->
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Sky}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M6,0.8 A5.2,5.2 0 1 1 5.99,0.8 Z M6,0.8 A2.2,5.2 0 1 1 5.99,0.8 Z M0.8,6 A5.2,2.2 0 1 1 11.2,6" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Hit boxes" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock x:Name="HitBoxSubtitle" Text="What a bullet has to be inside to count"
+                               Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="HitBoxToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="One box per piece of a skinned mesh. A shot is only tested against a piece's triangles if it passes that piece's box first — proven in game: zero them and the whole car stops registering bullets. Drawn as spheres because the box on disk is turned and the turn is not decoded; the sphere is the region the box certainly covers. Geometry outside every sphere cannot be shot."
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
 
-        <!-- (d) actor markers — diamond glyph, orange PaletteInk.Orange -->
-        <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
-                  Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Orange}" StrokeThickness="1.2"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  Data="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Actors" Foreground="{StaticResource TextPrimary}" FontSize="12" />
-                <TextBlock Text="Sounds, lights, triggers — things with no mesh" Foreground="{StaticResource TextMuted}"
-                           FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <ToggleButton Grid.Column="2" x:Name="ActorsToggle"
-                          Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                          ToolTip="Glyphs where the .act pack places actors that draw nothing themselves — colour per category (sound, light, particles, script, cutscene, item, trigger)."
-                          Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
-        </Grid>
-    </StackPanel>
+            <!-- (d) actor markers — diamond glyph, orange PaletteInk.Orange -->
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Path Grid.Column="0" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                      Margin="0,0,8,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Orange}" StrokeThickness="1.2"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Actors" Foreground="{StaticResource TextPrimary}" FontSize="12" />
+                    <TextBlock Text="Sounds, lights, triggers — things with no mesh" Foreground="{StaticResource TextMuted}"
+                               FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ToggleButton Grid.Column="2" x:Name="ActorsToggle"
+                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                              ToolTip="Glyphs where the .act pack places actors that draw nothing themselves — colour per category (sound, light, particles, script, cutscene, item, trigger)."
+                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>
