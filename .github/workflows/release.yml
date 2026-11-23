@@ -99,6 +99,14 @@ jobs:
           $junk = Get-ChildItem $root -Recurse -File -Include *.pdb, *.xml, *.md, *.txt
           if ($junk) { throw "Not release payload: $(($junk.Name | Sort-Object -Unique) -join ', ')" }
 
+          # Every framework must ask for a .0 patch: a pinned patch (10.0.15) locks out every user whose
+          # runtime is a patch behind, since the host never rolls a patch backward.
+          $config = Get-Content (Join-Path $root 'Illusion.runtimeconfig.json') -Raw | ConvertFrom-Json
+          $frameworks = @($config.runtimeOptions.frameworks) + @($config.runtimeOptions.framework) | Where-Object { $_ }
+          if (-not $frameworks) { throw 'Illusion.runtimeconfig.json names no framework.' }
+          $pinned = $frameworks | Where-Object { $_.version -notmatch '^\d+\.\d+\.0$' }
+          if ($pinned) { throw "Runtime patch is pinned: $(($pinned | ForEach-Object { "$($_.name) $($_.version)" }) -join ', ')" }
+
       # The checksum is published as its own asset rather than quoted in the notes: the in-app updater
       # downloads it beside the archive and refuses to install anything that does not match (see
       # UpdateDownloader). The sha256sum layout — "<hash>  <file>" — is what it reads, and what

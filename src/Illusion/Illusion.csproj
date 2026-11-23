@@ -8,6 +8,11 @@
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <!-- WPF0001: ThemeMode (the Fluent theme selector) is marked as an experimental API. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- A RID-specific publish (`-r win-x64`, as the release does) defaults this to true, which stamps the
+         SDK's own runtime patch (e.g. 10.0.15) into Illusion.runtimeconfig.json. Patches only roll forward,
+         so every machine with an older 10.0.x refused to start with "install .NET 10.0.15". False writes
+         10.0.0 and the app runs on whatever 10.x the user has. -->
+    <TargetLatestRuntimePatch>false</TargetLatestRuntimePatch>
   </PropertyGroup>
 
   <ItemGroup>
